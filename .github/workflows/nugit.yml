@@ -27,7 +27,8 @@ jobs:
       - name: Render PR view
         id: render
         run: |
-          BASE="origin/${{ github.base_ref }}"
+          # The exact base commit of the PR — robust regardless of remote refs.
+          BASE="${{ github.event.pull_request.base.sha }}"
           # Deterministic, LLM-free, no datastore. Markdown -> job summary.
           ./nugit pr-render -base "$BASE" -head HEAD -format markdown | tee pr-view.md >> "$GITHUB_STEP_SUMMARY"
           # Re-run as the gate (exit non-zero on a `fail` finding).
@@ -35,6 +36,7 @@ jobs:
 
       - name: Post sticky comment
         if: always()
+        continue-on-error: true   # a comment-API hiccup must not fail the gate
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
