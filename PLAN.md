@@ -15,7 +15,8 @@ See [ADR-0004](.nugit/decisions/0004-thin-keystone-first.md) for the rationale.
 |---|---|---|---|
 | **S0 — Spike** | ✅ done | Prove the file→component mapping + significance heuristic on nugit's own Go code (`internal/goimports`, `internal/mapping`, `internal/significance`). | The C4↔code check resolves real imports to components and flags an undeclared edge. |
 | **K1 — Thin keystone** | ✅ done | `nugit pr-render`: four deltas (C4 / code / knowledge / plan) + cross-artifact consistency + significance gating, rendered as markdown / check-run / JSON. No index, no content-addressing, no embeddings, no merge driver. | [SPEC-001](.nugit/specs/SPEC-001-thin-keystone.md) AC1–AC4 pass; `go test ./...` green; runs on nugit's own repo. |
-| **K2 — Harden** | ▶ current | Package tests, a GitHub Action wrapper, the deterministic cost budget (ADR-0006), prose-narrative opt-in. | CI posts a check-run on a real PR; render stays < 1s and LLM-free by default. |
+| **K2 — Harden** | ✅ done | Package tests, GitHub Action wrapper (proven on PR #1), deterministic cost budget (ADR-0006). | CI posted a check-run on a real PR; render stays < 1s and LLM-free. |
+| **A1 — Adopt anywhere** | ✅ done | `nugit init`: scaffold `.nugit/` + reverse-engineer a first-pass C4 model from the Go import graph; `config.yml` wired (warn-until-ratified `c4.mode`). | `init` on a brownfield repo yields a model that renders green; flipping to `enforce` gates. |
 | **I1 — One fitness backend** | ⏳ conditional | Generate a `go-arch-lint` config from `workspace.dsl` and validate. | **Trigger:** a second language enters the repo, OR the import-graph check needs richer rules than `go/parser` gives. |
 | **I2 — Index + retrieval** | ⏳ conditional | SQLite FTS over `.nugit/`, then `context(path)`. | **Trigger:** grep/scan over `.nugit/` becomes too slow for retrieval. |
 | **I3 — Content-addressing + merge driver** | ⏳ conditional | Content hashes (as integrity, not keys — ADR-0001), the union merge driver. | **Trigger:** concurrent knowledge writes actually conflict in practice. |
@@ -44,5 +45,6 @@ breaking re-hash — they are cheap to decide today and unfixable later.
   §10/§11 contradiction the review found.)
 - An eval harness (labeled fixture corpus, precision/recall for retrieval and the
   significance classifier) — add when I2 lands, gate retrieval quality on it.
-- A brownfield bootstrap (`nugit c4 init-model` + warn-until-ratified baseline)
-  for adopting an existing large repo — needed before external adoption.
+- ~~A brownfield bootstrap for adopting an existing repo~~ — **done** (A1:
+  `nugit init` + warn-until-ratified `c4.mode`). Cross-language model bootstrap
+  still waits on I1.

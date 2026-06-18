@@ -36,6 +36,10 @@ rather than present:
 ```sh
 go build -o nugit ./cmd/nugit
 
+# adopt nugit in any Go repo: scaffold .nugit/ and bootstrap a C4 model from
+# the real import graph (so the first render is green, not a wall of failures)
+./nugit init                       # warn mode by default; -mode enforce when ratified
+
 # render the PR view for the current branch vs a base
 ./nugit pr-render -C . -base main -head HEAD                # markdown (default)
 ./nugit pr-render -base main -head HEAD -format check-run   # GitHub Checks JSON
