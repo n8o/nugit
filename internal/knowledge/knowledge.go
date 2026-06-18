@@ -153,8 +153,11 @@ func ParseEdge(s string) model.Edge {
 	return model.Edge{Target: s, Raw: s}
 }
 
-// RejectedSection extracts the "Rejected" rationale from a decision body — the
-// anti-hallucination field. It matches a markdown heading or bold lead-in.
+// RejectedSection extracts the "Rejected" rationale from a decision/lesson body —
+// the anti-hallucination field. It supports two forms:
+//
+//	## Rejected            (a heading; body runs until the next heading)
+//	**Rejected:** text…    (a bold lead-in; runs until a blank line / next lead-in)
 func RejectedSection(body string) string {
 	lines := strings.Split(body, "\n")
 	for i, line := range lines {
@@ -165,6 +168,21 @@ func RejectedSection(body string) string {
 		if !isHeading && !isBold {
 			continue
 		}
+		if isBold {
+			var parts []string
+			if inline := boldInline(t); inline != "" {
+				parts = append(parts, inline)
+			}
+			for _, l := range lines[i+1:] {
+				lt := strings.TrimSpace(l)
+				if lt == "" || strings.HasPrefix(lt, "#") || strings.HasPrefix(lt, "**") {
+					break // blank line, next heading, or next bold lead-in ends it
+				}
+				parts = append(parts, lt)
+			}
+			return strings.TrimSpace(strings.Join(parts, " "))
+		}
+		// heading form: collect until the next heading
 		var sb strings.Builder
 		for _, l := range lines[i+1:] {
 			if strings.HasPrefix(strings.TrimSpace(l), "#") {
@@ -173,14 +191,19 @@ func RejectedSection(body string) string {
 			sb.WriteString(l)
 			sb.WriteString("\n")
 		}
-		out := strings.TrimSpace(sb.String())
-		if out == "" {
-			// bold lead-in with inline text on the same line
-			if isBold {
-				return strings.TrimSpace(t[len("**rejected"):])
-			}
-		}
-		return out
+		return strings.TrimSpace(sb.String())
+	}
+	return ""
+}
+
+// boldInline returns the text after a "**Rejected:**" / "**Rejected**" lead-in.
+func boldInline(t string) string {
+	if !strings.HasPrefix(t, "**") {
+		return ""
+	}
+	if close := strings.Index(t[2:], "**"); close >= 0 {
+		rest := strings.TrimSpace(t[2+close+2:])
+		return strings.TrimSpace(strings.TrimPrefix(rest, ":"))
 	}
 	return ""
 }
