@@ -135,12 +135,26 @@ func codeSection(d model.CodeDelta) string {
 		if c == "" {
 			label = "(unmapped — no C4 component owns these paths)"
 		}
-		fmt.Fprintf(&b, "\n**%s**\n", label)
-		for _, f := range d.ByComp[c] {
+		files := d.ByComp[c]
+		add, del := 0, 0
+		for _, f := range files {
+			add += f.Added
+			del += f.Deleted
+		}
+		fmt.Fprintf(&b, "\n**%s** — %s, +%d/-%d\n", label, plural(len(files), "file"), add, del)
+		for _, f := range files {
 			fmt.Fprintf(&b, "- `%s` %s (+%d/-%d)\n", f.Path, statusWord(f.Status), f.Added, f.Deleted)
 		}
 	}
 	return b.String()
+}
+
+// plural renders "1 file" / "3 files".
+func plural(n int, noun string) string {
+	if n == 1 {
+		return fmt.Sprintf("1 %s", noun)
+	}
+	return fmt.Sprintf("%d %ss", n, noun)
 }
 
 func knowledgeSection(d model.KnowledgeDelta) string {
