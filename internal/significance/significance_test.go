@@ -19,22 +19,22 @@ func TestClassify(t *testing.T) {
 	}
 	noKnow := model.KnowledgeDelta{}
 
-	if got := Classify(c4Changed, oneSmall, noKnow, false).Tier; got != model.TierArchitectural {
+	if got := Classify(c4Changed, oneSmall, noKnow, false, Options{}).Tier; got != model.TierArchitectural {
 		t.Errorf("model change → %s, want architectural", got)
 	}
-	if got := Classify(empty, oneSmall, noKnow, true).Tier; got != model.TierArchitectural {
+	if got := Classify(empty, oneSmall, noKnow, true, Options{}).Tier; got != model.TierArchitectural {
 		t.Errorf("undeclared cross edge → %s, want architectural", got)
 	}
-	if got := Classify(empty, twoComp, noKnow, false).Tier; got != model.TierFeature {
+	if got := Classify(empty, twoComp, noKnow, false, Options{}).Tier; got != model.TierFeature {
 		t.Errorf("multi-component → %s, want feature", got)
 	}
-	if got := Classify(empty, oneSmall, noKnow, false).Tier; got != model.TierTrivial {
+	if got := Classify(empty, oneSmall, noKnow, false, Options{}).Tier; got != model.TierTrivial {
 		t.Errorf("small single-component → %s, want trivial", got)
 	}
 }
 
 func TestReasonsAlwaysPresent(t *testing.T) {
-	s := Classify(model.C4Delta{}, model.CodeDelta{Files: []model.FileChange{{Component: "a"}}}, model.KnowledgeDelta{}, false)
+	s := Classify(model.C4Delta{}, model.CodeDelta{Files: []model.FileChange{{Component: "a"}}}, model.KnowledgeDelta{}, false, Options{})
 	if len(s.Reasons) == 0 {
 		t.Error("classifier must always explain itself")
 	}

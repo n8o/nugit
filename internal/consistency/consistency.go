@@ -35,6 +35,9 @@ type Input struct {
 	Commits    []model.Commit
 	// Architectural is the significance verdict (drives decision-coverage).
 	Architectural bool
+	// C4Warn downgrades the c4<->code check from fail to warn (warn-until-ratified
+	// adoption mode; set from config c4.mode).
+	C4Warn bool
 }
 
 // C4CodeFindings runs the C4<->code check plus model-health checks. The
@@ -150,6 +153,10 @@ func checkC4Code(in Input) []model.Finding {
 	}
 	type edge struct{ src, dst string }
 	seen := map[edge]bool{}
+	sev := model.SevFail
+	if in.C4Warn {
+		sev = model.SevWarn
+	}
 	var fs []model.Finding
 	for _, fc := range in.Code.Files {
 		if fc.Status == "D" || fc.Component == "" {
@@ -175,7 +182,7 @@ func checkC4Code(in Input) []model.Finding {
 			if !in.HeadModel.HasRelationship(e.src, e.dst) {
 				fs = append(fs, model.Finding{
 					Check:    "c4<->code",
-					Severity: model.SevFail,
+					Severity: sev,
 					Title:    fmt.Sprintf("undeclared dependency %s → %s", e.src, e.dst),
 					Detail: fmt.Sprintf("code in %s now imports %s but workspace.dsl has no `%s -> %s` relationship; "+
 						"add the relationship to the model or remove the import (introduced via %s)",

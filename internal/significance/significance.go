@@ -9,18 +9,36 @@ import (
 	"github.com/n8o/nugit/internal/model"
 )
 
-// Thresholds for the trivial tier. Tunable later via config.yml.
+// Default thresholds for the trivial tier (overridable via config.yml).
 const (
 	trivialMaxFiles = 2
 	trivialMaxChurn = 20
 )
+
+// Options carries the (config-driven) trivial-tier thresholds. Zero values fall
+// back to the defaults.
+type Options struct {
+	TrivialMaxFiles int
+	TrivialMaxChurn int
+}
+
+func (o Options) withDefaults() Options {
+	if o.TrivialMaxFiles <= 0 {
+		o.TrivialMaxFiles = trivialMaxFiles
+	}
+	if o.TrivialMaxChurn <= 0 {
+		o.TrivialMaxChurn = trivialMaxChurn
+	}
+	return o
+}
 
 // Classify returns the significance tier and the reasons behind it.
 //
 // undeclaredCrossEdge is true when the C4<->code check found a new
 // cross-component dependency the model does not declare — a strong
 // architectural signal computed before this call to avoid a dependency cycle.
-func Classify(c4 model.C4Delta, code model.CodeDelta, know model.KnowledgeDelta, undeclaredCrossEdge bool) model.Significance {
+func Classify(c4 model.C4Delta, code model.CodeDelta, know model.KnowledgeDelta, undeclaredCrossEdge bool, opt Options) model.Significance {
+	opt = opt.withDefaults()
 	var reasons []string
 
 	// --- architectural signals ---
@@ -51,7 +69,7 @@ func Classify(c4 model.C4Delta, code model.CodeDelta, know model.KnowledgeDelta,
 
 	// --- trivial vs feature by size ---
 	churn := code.TotalAdd + code.TotalDel
-	if len(code.Files) <= trivialMaxFiles && churn <= trivialMaxChurn {
+	if len(code.Files) <= opt.TrivialMaxFiles && churn <= opt.TrivialMaxChurn {
 		reasons = append(reasons, fmt.Sprintf("small change: %d file(s), %d lines", len(code.Files), churn))
 		return model.Significance{Tier: model.TierTrivial, Reasons: reasons}
 	}

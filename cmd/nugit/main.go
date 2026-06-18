@@ -12,13 +12,21 @@ import (
 	"github.com/n8o/nugit/internal/engine"
 	"github.com/n8o/nugit/internal/model"
 	"github.com/n8o/nugit/internal/render"
+	"github.com/n8o/nugit/internal/scaffold"
 )
 
 const usage = `nugit — git-native PR view (thin keystone)
 
 usage:
+  nugit init [flags]          scaffold .nugit/ and bootstrap a C4 model from the import graph
   nugit pr-render [flags]      compute & render the unified PR view
   nugit version
+
+init flags:
+  -C dir         repo directory (default ".")
+  -mode m        c4 enforcement written to config: warn (default) | enforce
+  -no-model      scaffold only; write a template workspace.dsl instead of bootstrapping
+  -force         overwrite existing .nugit files
 
 pr-render flags:
   -C dir         repo directory (default ".")
@@ -34,6 +42,8 @@ func main() {
 		os.Exit(2)
 	}
 	switch os.Args[1] {
+	case "init":
+		os.Exit(cmdInit(os.Args[2:]))
 	case "pr-render":
 		os.Exit(cmdPRRender(os.Args[2:]))
 	case "version":
@@ -44,6 +54,43 @@ func main() {
 		fmt.Fprintf(os.Stderr, "unknown command %q\n\n%s", os.Args[1], usage)
 		os.Exit(2)
 	}
+}
+
+func cmdInit(args []string) int {
+	fs := flag.NewFlagSet("init", flag.ExitOnError)
+	dir := fs.String("C", ".", "repo directory")
+	mode := fs.String("mode", "warn", "c4 enforcement mode: warn|enforce")
+	noModel := fs.Bool("no-model", false, "scaffold only; don't bootstrap a model")
+	force := fs.Bool("force", false, "overwrite existing .nugit files")
+	_ = fs.Parse(args)
+
+	res, err := scaffold.Run(scaffold.Options{
+		RepoDir: *dir, Force: *force, NoModel: *noModel, Mode: *mode,
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "nugit init: %v\n", err)
+		return 1
+	}
+
+	for _, f := range res.Created {
+		fmt.Printf("  created  %s\n", f)
+	}
+	for _, f := range res.Skipped {
+		fmt.Printf("  skipped  %s (exists; -force to overwrite)\n", f)
+	}
+	fmt.Println()
+	switch {
+	case res.ModelEmpty:
+		fmt.Println("No Go packages found — wrote a template workspace.dsl. Define your components and paths globs by hand.")
+	case res.Components > 0:
+		fmt.Printf("Bootstrapped a C4 model: %d component(s), %d dependency edge(s), in %s mode.\n",
+			res.Components, res.Edges, res.Mode)
+		fmt.Println("Next: review .nugit/architecture/workspace.dsl, then run `nugit pr-render`.")
+		if res.Mode == "warn" {
+			fmt.Println("When the model is ratified, set c4.mode to `enforce` in .nugit/config.yml.")
+		}
+	}
+	return 0
 }
 
 func cmdPRRender(args []string) int {

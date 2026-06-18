@@ -44,6 +44,15 @@ workspace "nugit" "Git-native typed knowledge & unified PR view — self-model (
             engine = component "Engine" "Orchestrates the pr-render pipeline" "Go" {
                 properties { paths "internal/engine/**" }
             }
+            config = component "Config" "Reads .nugit/config.yml" "Go" {
+                properties { paths "internal/config/**" }
+            }
+            bootstrap = component "Bootstrap" "Reverse-engineers a C4 model from the import graph" "Go" {
+                properties { paths "internal/bootstrap/**" }
+            }
+            scaffold = component "Scaffold" "nugit init: writes the .nugit/ tree" "Go" {
+                properties { paths "internal/scaffold/**" }
+            }
             cli = component "CLI" "nugit command entrypoint" "Go" {
                 properties { paths "cmd/nugit/**" }
             }
@@ -79,10 +88,16 @@ workspace "nugit" "Git-native typed knowledge & unified PR view — self-model (
             engine -> mapping "builds mapper"
             engine -> significance "classifies"
             engine -> trailers "parses commits"
+            engine -> config "loads config"
+
+            bootstrap -> goimports "reads import graph"
+
+            scaffold -> bootstrap "generates the model"
 
             cli -> model_ "uses types"
             cli -> engine "builds report"
             cli -> render "emits output"
+            cli -> scaffold "runs init"
         }
     }
 

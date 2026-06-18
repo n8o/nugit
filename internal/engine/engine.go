@@ -3,6 +3,7 @@
 package engine
 
 import (
+	"github.com/n8o/nugit/internal/config"
 	"github.com/n8o/nugit/internal/consistency"
 	"github.com/n8o/nugit/internal/delta"
 	"github.com/n8o/nugit/internal/gitutil"
@@ -25,6 +26,10 @@ type Options struct {
 // BuildReport computes the four deltas, the significance verdict, and the
 // cross-artifact findings for the range (mergeBase(base,head), head].
 func BuildReport(opt Options) (model.Report, error) {
+	cfg := config.Load(opt.RepoDir)
+	if opt.DSLPath == "" {
+		opt.DSLPath = cfg.C4.DSL
+	}
 	if opt.DSLPath == "" {
 		opt.DSLPath = delta.DefaultDSLPath
 	}
@@ -80,12 +85,16 @@ func BuildReport(opt Options) (model.Report, error) {
 		Knowledge:  knowDelta,
 		AllObjects: allObjs,
 		Commits:    commits,
+		C4Warn:     cfg.C4Warn(),
 	}
 
 	// Order matters: C4<->code first (independent), then significance (uses it),
 	// then the checks that depend on the architectural verdict.
 	c4Findings := consistency.C4CodeFindings(in)
-	sig := significance.Classify(c4Delta, codeDelta, knowDelta, len(c4Findings) > 0)
+	sig := significance.Classify(c4Delta, codeDelta, knowDelta, len(c4Findings) > 0, significance.Options{
+		TrivialMaxFiles: cfg.Significance.TrivialMaxFiles,
+		TrivialMaxChurn: cfg.Significance.TrivialMaxChurn,
+	})
 	in.Architectural = sig.Tier == model.TierArchitectural
 	other := consistency.OtherFindings(in)
 	findings := consistency.Sort(append(c4Findings, other...))
