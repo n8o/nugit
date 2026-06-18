@@ -68,6 +68,7 @@ workspace "nugit" "Git-native typed knowledge & unified PR view — self-model (
             consistency -> goimports "reads import graph"
             consistency -> knowledge "edge traversal"
             consistency -> mapping "resolves components"
+            consistency -> trailers "validates capture hygiene"
 
             engine -> model_ "uses types"
             engine -> consistency "runs checks"
