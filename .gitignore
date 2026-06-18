@@ -1,0 +1,17 @@
+# nugit
+/nugit
+/dist/
+
+# rebuildable index + per-agent ephemeral memory (canonical state is git text)
+**/.nugit/.cache/
+.nugit-local/
+
+# Go
+*.test
+*.out
+/tmp/
+
+# editor / OS
+.DS_Store
+.idea/
+.vscode/
