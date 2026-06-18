@@ -3,7 +3,7 @@ package delta
 import (
 	"os"
 
-	"github.com/burrowfarm/nugit/internal/model"
+	"github.com/n8o/nugit/internal/model"
 	"gopkg.in/yaml.v3"
 )
 

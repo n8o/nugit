@@ -3,7 +3,7 @@ package c4
 import (
 	"sort"
 
-	"github.com/burrowfarm/nugit/internal/model"
+	"github.com/n8o/nugit/internal/model"
 )
 
 // Diff computes the structural delta between two parsed models (base -> head).

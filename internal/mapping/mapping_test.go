@@ -3,7 +3,7 @@ package mapping
 import (
 	"testing"
 
-	"github.com/burrowfarm/nugit/internal/model"
+	"github.com/n8o/nugit/internal/model"
 )
 
 func mk() *Mapper {

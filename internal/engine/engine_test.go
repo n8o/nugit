@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/burrowfarm/nugit/internal/model"
+	"github.com/n8o/nugit/internal/model"
 )
 
 func git(t *testing.T, dir string, args ...string) string {

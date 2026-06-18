@@ -12,12 +12,12 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/burrowfarm/nugit/internal/gitutil"
-	"github.com/burrowfarm/nugit/internal/goimports"
-	"github.com/burrowfarm/nugit/internal/knowledge"
-	"github.com/burrowfarm/nugit/internal/mapping"
-	"github.com/burrowfarm/nugit/internal/model"
-	"github.com/burrowfarm/nugit/internal/trailers"
+	"github.com/n8o/nugit/internal/gitutil"
+	"github.com/n8o/nugit/internal/goimports"
+	"github.com/n8o/nugit/internal/knowledge"
+	"github.com/n8o/nugit/internal/mapping"
+	"github.com/n8o/nugit/internal/model"
+	"github.com/n8o/nugit/internal/trailers"
 )
 
 // Input bundles everything the checks need (all already computed).

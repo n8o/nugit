@@ -6,7 +6,7 @@ package significance
 import (
 	"fmt"
 
-	"github.com/burrowfarm/nugit/internal/model"
+	"github.com/n8o/nugit/internal/model"
 )
 
 // Thresholds for the trivial tier. Tunable later via config.yml.

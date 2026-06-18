@@ -82,5 +82,14 @@ knowledge objects under [`.nugit/decisions/`](.nugit/decisions/). Start with
 first) and [ADR-0002](.nugit/decisions/0002-file-to-component-binding.md) (the
 file→component primitive).
 
-> Module path is a placeholder (`github.com/burrowfarm/nugit`); change it in
-> `go.mod` + imports when the real remote is set.
+## Install
+
+```sh
+go install github.com/n8o/nugit/cmd/nugit@latest
+```
+
+## Status & license
+
+Early — the thin keystone is built, tested, and dogfooded on this repo. The
+deferred stages (fitness-function backend, retrieval index, content-addressing)
+are conditional; see [PLAN.md](PLAN.md). Licensed under [MIT](LICENSE).

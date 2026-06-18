@@ -3,7 +3,7 @@ package knowledge
 import (
 	"testing"
 
-	"github.com/burrowfarm/nugit/internal/model"
+	"github.com/n8o/nugit/internal/model"
 )
 
 const decision = `---

@@ -9,9 +9,9 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/burrowfarm/nugit/internal/engine"
-	"github.com/burrowfarm/nugit/internal/model"
-	"github.com/burrowfarm/nugit/internal/render"
+	"github.com/n8o/nugit/internal/engine"
+	"github.com/n8o/nugit/internal/model"
+	"github.com/n8o/nugit/internal/render"
 )
 
 const usage = `nugit — git-native PR view (thin keystone)

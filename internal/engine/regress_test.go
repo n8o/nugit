@@ -3,7 +3,7 @@ package engine
 import (
 	"testing"
 
-	"github.com/burrowfarm/nugit/internal/model"
+	"github.com/n8o/nugit/internal/model"
 )
 
 // Regression: a cross-component import from a _test.go file must NOT be flagged

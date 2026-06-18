@@ -8,11 +8,11 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/burrowfarm/nugit/internal/c4"
-	"github.com/burrowfarm/nugit/internal/gitutil"
-	"github.com/burrowfarm/nugit/internal/knowledge"
-	"github.com/burrowfarm/nugit/internal/mapping"
-	"github.com/burrowfarm/nugit/internal/model"
+	"github.com/n8o/nugit/internal/c4"
+	"github.com/n8o/nugit/internal/gitutil"
+	"github.com/n8o/nugit/internal/knowledge"
+	"github.com/n8o/nugit/internal/mapping"
+	"github.com/n8o/nugit/internal/model"
 )
 
 // DefaultDSLPath is the canonical location of the C4 model.

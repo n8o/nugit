@@ -16,7 +16,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/burrowfarm/nugit/internal/model"
+	"github.com/n8o/nugit/internal/model"
 )
 
 // trailerLine matches "key: value" where key is a lowercase token. Conventional

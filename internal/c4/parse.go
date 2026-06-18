@@ -11,7 +11,7 @@ package c4
 import (
 	"strings"
 
-	"github.com/burrowfarm/nugit/internal/model"
+	"github.com/n8o/nugit/internal/model"
 )
 
 // Parse parses workspace.dsl source into a Model. It is tolerant: unknown

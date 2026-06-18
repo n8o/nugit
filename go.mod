@@ -1,4 +1,4 @@
-module github.com/burrowfarm/nugit
+module github.com/n8o/nugit
 
 go 1.25.5
 
