@@ -16,6 +16,7 @@ import (
 	"github.com/burrowfarm/nugit/internal/knowledge"
 	"github.com/burrowfarm/nugit/internal/mapping"
 	"github.com/burrowfarm/nugit/internal/model"
+	"github.com/burrowfarm/nugit/internal/trailers"
 )
 
 // Input bundles everything the checks need (all already computed).
@@ -46,7 +47,26 @@ func OtherFindings(in Input) []model.Finding {
 	fs = append(fs, checkStaleKnowledge(in)...)
 	fs = append(fs, checkDecisionCoverage(in)...)
 	fs = append(fs, checkSpecLinkage(in)...)
+	fs = append(fs, checkCaptureHygiene(in)...)
 	return Sort(fs)
+}
+
+// checkCaptureHygiene surfaces commits whose trailer block is missing a mandatory
+// field (§6.1). Informational — capture is opt-in, so this nudges rather than
+// blocks (ADR-0005: trailers are a signal, not the durable store).
+func checkCaptureHygiene(in Input) []model.Finding {
+	var fs []model.Finding
+	for _, c := range in.Commits {
+		for _, w := range trailers.Validate(c.Trailer) {
+			fs = append(fs, model.Finding{
+				Check:    "capture-hygiene",
+				Severity: model.SevInfo,
+				Title:    fmt.Sprintf("commit %s: %s", short(c.SHA), w),
+				Detail:   "a trailer block is present but missing a mandatory field; add it or drop the block",
+			})
+		}
+	}
+	return fs
 }
 
 // Check runs all checks and returns findings sorted for stable output. It is a
@@ -55,6 +75,7 @@ func Check(in Input) []model.Finding {
 	fs := append(checkC4Code(in), checkStaleKnowledge(in)...)
 	fs = append(fs, checkDecisionCoverage(in)...)
 	fs = append(fs, checkSpecLinkage(in)...)
+	fs = append(fs, checkCaptureHygiene(in)...)
 	return Sort(fs)
 }
 
