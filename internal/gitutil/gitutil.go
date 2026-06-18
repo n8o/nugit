@@ -38,61 +38,96 @@ func (r Repo) MergeBase(base, head string) string {
 	return strings.TrimSpace(out)
 }
 
-// ShowFile returns the contents of path at ref. A missing path yields ("", nil)
-// so callers can treat "added" and "removed" symmetrically.
+// ShowFile returns the contents of path at ref. A genuinely-absent path yields
+// ("", nil) so callers treat "added" and "removed" symmetrically — but any OTHER
+// error (e.g. a bad ref) is returned, never masked as an empty file.
 func (r Repo) ShowFile(ref, path string) (string, error) {
 	out, err := r.git("show", ref+":"+path)
 	if err != nil {
-		// git exits non-zero when the path does not exist at that ref.
-		if strings.Contains(err.Error(), "does not exist") || strings.Contains(err.Error(), "exists on disk, but not") || strings.Contains(err.Error(), "fatal: path") {
+		msg := err.Error()
+		if strings.Contains(msg, "does not exist in") || strings.Contains(msg, "exists on disk, but not in") {
 			return "", nil
 		}
-		// Treat any "not in" / unknown-path error as absent rather than fatal.
-		return "", nil
+		return "", err
 	}
 	return out, nil
 }
 
-// NameStatus returns the per-file change status between base and head.
+// splitNUL splits NUL-delimited git output, dropping the trailing empty token.
+func splitNUL(s string) []string {
+	parts := strings.Split(s, "\x00")
+	if n := len(parts); n > 0 && parts[n-1] == "" {
+		parts = parts[:n-1]
+	}
+	return parts
+}
+
+// NameStatus returns the per-file change status between base and head. It uses
+// -z (NUL-delimited, unquoted) so paths with spaces/non-ASCII and renames parse
+// unambiguously; core.quotepath=false keeps non-ASCII bytes raw.
 func (r Repo) NameStatus(base, head string) ([]model.FileChange, error) {
-	out, err := r.git("diff", "--name-status", "-M", base, head)
+	out, err := r.git("-c", "core.quotepath=false", "diff", "--name-status", "-z", "-M", base, head)
 	if err != nil {
 		return nil, err
 	}
+	toks := splitNUL(out)
 	var changes []model.FileChange
-	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
-		if line == "" {
+	for i := 0; i < len(toks); {
+		status := toks[i]
+		i++
+		if status == "" {
 			continue
 		}
-		fields := strings.Split(line, "\t")
-		if len(fields) < 2 {
-			continue
+		var path string
+		if status[0] == 'R' || status[0] == 'C' { // rename/copy: old, new
+			if i+1 >= len(toks) {
+				break
+			}
+			path = toks[i+1] // new path
+			i += 2
+		} else {
+			if i >= len(toks) {
+				break
+			}
+			path = toks[i]
+			i++
 		}
-		status := fields[0]
-		path := fields[len(fields)-1] // for renames, the new path is last
 		changes = append(changes, model.FileChange{Path: path, Status: status[:1]})
 	}
 	return changes, nil
 }
 
-// Numstat fills in added/deleted line counts keyed by path.
+// Numstat fills in added/deleted line counts keyed by path (the new path for
+// renames, matching NameStatus). Uses -z so the tab-delimited counts and the
+// path never collide on spaces.
 func (r Repo) Numstat(base, head string) (map[string][2]int, error) {
-	out, err := r.git("diff", "--numstat", "-M", base, head)
+	out, err := r.git("-c", "core.quotepath=false", "diff", "--numstat", "-z", "-M", base, head)
 	if err != nil {
 		return nil, err
 	}
 	counts := map[string][2]int{}
-	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
-		if line == "" {
+	toks := splitNUL(out)
+	for i := 0; i < len(toks); {
+		rec := toks[i]
+		i++
+		if rec == "" {
 			continue
 		}
-		fields := strings.Fields(line)
+		// rec = "add\tdel\t<path?>"; path is empty for renames.
+		fields := strings.SplitN(rec, "\t", 3)
 		if len(fields) < 3 {
 			continue
 		}
 		add, _ := strconv.Atoi(fields[0]) // "-" (binary) parses to 0
 		del, _ := strconv.Atoi(fields[1])
-		path := fields[len(fields)-1]
+		path := fields[2]
+		if path == "" { // rename: next two tokens are old, new
+			if i+1 >= len(toks) {
+				break
+			}
+			path = toks[i+1] // new path
+			i += 2
+		}
 		counts[path] = [2]int{add, del}
 	}
 	return counts, nil

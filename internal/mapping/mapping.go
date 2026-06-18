@@ -23,18 +23,31 @@ type rule struct {
 	spec int
 }
 
+// InvalidPattern names a component glob that failed validation.
+type InvalidPattern struct {
+	Comp    string
+	Pattern string
+}
+
 // Mapper resolves paths to components.
 type Mapper struct {
-	rules []rule
+	rules   []rule
+	invalid []InvalidPattern
 }
 
 // New builds a Mapper from a parsed model. Rules are pre-sorted by descending
-// specificity so Resolve can return the first match deterministically.
+// specificity so Resolve can return the first match deterministically. Globs
+// that fail validation are dropped and recorded in InvalidPatterns().
 func New(m model.Model) *Mapper {
 	var rules []rule
+	var invalid []InvalidPattern
 	for _, c := range m.Components {
 		for _, g := range c.Paths {
-			rules = append(rules, rule{comp: c.ID, pattern: g, spec: literalPrefixLen(g)})
+			if doublestar.ValidatePattern(g) {
+				rules = append(rules, rule{comp: c.ID, pattern: g, spec: literalPrefixLen(g)})
+			} else {
+				invalid = append(invalid, InvalidPattern{Comp: c.ID, Pattern: g})
+			}
 		}
 	}
 	sort.SliceStable(rules, func(i, j int) bool {
@@ -46,7 +59,20 @@ func New(m model.Model) *Mapper {
 		}
 		return rules[i].comp < rules[j].comp
 	})
-	return &Mapper{rules: rules}
+	return &Mapper{rules: rules, invalid: invalid}
+}
+
+// InvalidPatterns returns component globs that failed validation (and therefore
+// match nothing). Sorted for deterministic output.
+func (mp *Mapper) InvalidPatterns() []InvalidPattern {
+	out := append([]InvalidPattern(nil), mp.invalid...)
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Comp != out[j].Comp {
+			return out[i].Comp < out[j].Comp
+		}
+		return out[i].Pattern < out[j].Pattern
+	})
+	return out
 }
 
 // Resolve returns the owning component id for path, or "" if no glob matches.
@@ -60,14 +86,35 @@ func (mp *Mapper) Resolve(path string) string {
 	return ""
 }
 
-// ResolveDir returns the component that owns an imported package directory, by
-// probing a synthetic source file inside it against the path globs.
+// ResolveDir returns the component that owns an imported package directory. It
+// probes a synthetic source file (for `dir/**` globs), then the bare dir, then
+// falls back to matching the directory portion of a single-file glob.
 func (mp *Mapper) ResolveDir(dir string) string {
 	dir = strings.TrimPrefix(dir, "./")
 	if c := mp.Resolve(dir + "/__pkg__.go"); c != "" {
 		return c
 	}
-	return mp.Resolve(dir)
+	if c := mp.Resolve(dir); c != "" {
+		return c
+	}
+	// fallback: a component bound by an exact-file glob like "a/a.go" owns dir
+	// "a" — match the literal directory portion of each rule (most-specific first).
+	for _, r := range mp.rules {
+		if patternDir(r.pattern) == dir {
+			return r.comp
+		}
+	}
+	return ""
+}
+
+// patternDir returns the literal directory portion of a glob (up to the last
+// slash before the first wildcard).
+func patternDir(g string) string {
+	lit := g[:literalPrefixLen(g)]
+	if i := strings.LastIndexByte(lit, '/'); i >= 0 {
+		return lit[:i]
+	}
+	return ""
 }
 
 // Empty reports whether the model declared no path bindings at all (in which

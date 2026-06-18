@@ -8,6 +8,7 @@ package consistency
 
 import (
 	"fmt"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -23,6 +24,7 @@ import (
 type Input struct {
 	Repo       gitutil.Repo
 	RepoDir    string
+	Head       string // ref whose source the import graph is read from
 	Module     string
 	HeadModel  model.Model
 	Mapper     *mapping.Mapper
@@ -35,10 +37,46 @@ type Input struct {
 	Architectural bool
 }
 
-// C4CodeFindings runs only the C4<->code check. The orchestrator calls this
-// first because its result feeds the significance verdict, which in turn gates
-// decision-coverage — running it separately avoids a dependency cycle.
-func C4CodeFindings(in Input) []model.Finding { return Sort(checkC4Code(in)) }
+// C4CodeFindings runs the C4<->code check plus model-health checks. The
+// orchestrator calls this first because the C4<->code result feeds the
+// significance verdict, which in turn gates decision-coverage — running it
+// separately avoids a dependency cycle.
+func C4CodeFindings(in Input) []model.Finding {
+	return Sort(append(checkC4Code(in), checkModelHealth(in)...))
+}
+
+// checkModelHealth surfaces authoring errors in workspace.dsl that would
+// otherwise fail silently: duplicate component ids (last-wins collapse) and
+// invalid path globs (which never match anything).
+func checkModelHealth(in Input) []model.Finding {
+	var fs []model.Finding
+	counts := map[string]int{}
+	for _, c := range in.HeadModel.Components {
+		counts[c.ID]++
+	}
+	ids := make([]string, 0, len(counts))
+	for id := range counts {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	for _, id := range ids {
+		if counts[id] > 1 {
+			fs = append(fs, model.Finding{
+				Check: "model-health", Severity: model.SevWarn,
+				Title:  fmt.Sprintf("duplicate component id %q (%d declarations)", id, counts[id]),
+				Detail: "workspace.dsl declares this id more than once; only the last binding is used — rename or merge them",
+			})
+		}
+	}
+	for _, bad := range in.Mapper.InvalidPatterns() {
+		fs = append(fs, model.Finding{
+			Check: "model-health", Severity: model.SevWarn,
+			Title:  fmt.Sprintf("component %q has an invalid path glob %q", bad.Comp, bad.Pattern),
+			Detail: "this glob is syntactically invalid and matches no files, so the component owns nothing",
+		})
+	}
+	return fs
+}
 
 // OtherFindings runs the checks that depend on the significance verdict (set via
 // in.Architectural) or are independent of the C4<->code result.
@@ -117,7 +155,13 @@ func checkC4Code(in Input) []model.Finding {
 		if fc.Status == "D" || fc.Component == "" {
 			continue
 		}
-		dirs, _ := goimports.InternalDirs(in.RepoDir, in.Module, fc.Path)
+		// Read the file at the reviewed ref (not the working tree) so the import
+		// graph matches base..head; skip _test.go and build-excluded files.
+		src, _ := in.Repo.ShowFile(in.Head, fc.Path)
+		dirs, included := goimports.Analyze(in.Module, fc.Path, src)
+		if !included {
+			continue
+		}
 		for _, dir := range dirs {
 			dst := in.Mapper.ResolveDir(dir)
 			if dst == "" || dst == fc.Component {
@@ -162,14 +206,19 @@ func checkStaleKnowledge(in Input) []model.Finding {
 		}
 	}
 	reported := map[string]bool{}
-	touchedComps := map[string]bool{}
+	touchedSet := map[string]bool{}
 	for _, fc := range in.Code.Files {
 		if fc.Component != "" {
-			touchedComps[fc.Component] = true
+			touchedSet[fc.Component] = true
 		}
 	}
+	touchedComps := make([]string, 0, len(touchedSet))
+	for c := range touchedSet {
+		touchedComps = append(touchedComps, c)
+	}
+	sort.Strings(touchedComps) // deterministic: first component (sorted) wins the Title
 	var fs []model.Finding
-	for comp := range touchedComps {
+	for _, comp := range touchedComps {
 		for _, o := range governing[comp] {
 			if touchedKnowledge[o.ID] || reported[o.ID] {
 				continue
@@ -275,12 +324,21 @@ func checkSpecLinkage(in Input) []model.Finding {
 
 func specIDFromPath(p string) string {
 	base := p[strings.LastIndexByte(p, '/')+1:]
+	base = strings.TrimSuffix(base, filepath.Ext(base)) // drop ".md"
 	if !strings.HasPrefix(strings.ToUpper(base), "SPEC-") {
 		return ""
 	}
 	parts := strings.SplitN(base, "-", 3)
 	if len(parts) >= 2 {
-		return "SPEC-" + parts[1]
+		// keep only the leading alphanumeric run of the id segment
+		num := parts[1]
+		for i, r := range num {
+			if !(r >= '0' && r <= '9' || r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z') {
+				num = num[:i]
+				break
+			}
+		}
+		return "SPEC-" + num
 	}
 	return ""
 }

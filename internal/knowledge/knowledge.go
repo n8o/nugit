@@ -71,6 +71,7 @@ func ParseObject(relPath, content string) (*model.KnowledgeObject, bool) {
 	}
 	obj := &model.KnowledgeObject{FrontMatter: front, Path: relPath, Body: body}
 	obj.EffectiveStatus = front.Status
+	obj.Rejected = RejectedSection(body)
 	return obj, true
 }
 

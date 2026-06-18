@@ -35,8 +35,10 @@ func Diff(base, head model.Model, rawDiff string) model.C4Delta {
 	baseRel := indexRels(base)
 	headRel := indexRels(head)
 	for k, r := range headRel {
-		if _, ok := baseRel[k]; !ok {
+		if br, ok := baseRel[k]; !ok {
 			d.AddedRels = append(d.AddedRels, r)
+		} else if br.Desc != r.Desc {
+			d.ChangedRels = append(d.ChangedRels, model.RelationshipChange{Before: br, After: r})
 		}
 	}
 	for k, r := range baseRel {
@@ -52,6 +54,13 @@ func Diff(base, head model.Model, rawDiff string) model.C4Delta {
 	})
 	sortRels(d.AddedRels)
 	sortRels(d.RemovedRels)
+	sort.Slice(d.ChangedRels, func(i, j int) bool {
+		a, b := d.ChangedRels[i].After, d.ChangedRels[j].After
+		if a.Src != b.Src {
+			return a.Src < b.Src
+		}
+		return a.Dst < b.Dst
+	})
 	return d
 }
 

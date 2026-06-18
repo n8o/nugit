@@ -59,11 +59,19 @@ func BuildReport(opt Options) (model.Report, error) {
 	if err != nil {
 		return model.Report{}, err
 	}
-	module, _ := goimports.ModulePath(opt.RepoDir)
+	// Module path from go.mod at head (fall back to the working tree).
+	module := ""
+	if src, err := repo.ShowFile(opt.Head, "go.mod"); err == nil && src != "" {
+		module = goimports.ParseModulePath(src)
+	}
+	if module == "" {
+		module, _ = goimports.ModulePath(opt.RepoDir)
+	}
 
 	in := consistency.Input{
 		Repo:       repo,
 		RepoDir:    opt.RepoDir,
+		Head:       opt.Head,
 		Module:     module,
 		HeadModel:  headModel,
 		Mapper:     mp,

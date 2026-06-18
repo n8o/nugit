@@ -55,6 +55,13 @@ func cmdPRRender(args []string) int {
 	failOn := fs.String("fail-on", "fail", "exit non-zero at severity: fail|warn|none")
 	_ = fs.Parse(args)
 
+	switch *failOn {
+	case "fail", "warn", "none":
+	default:
+		fmt.Fprintf(os.Stderr, "nugit: unknown -fail-on %q (want fail|warn|none)\n", *failOn)
+		return 2
+	}
+
 	rep, err := engine.BuildReport(engine.Options{RepoDir: *dir, Base: *base, Head: *head})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "nugit: %v\n", err)

@@ -53,6 +53,8 @@ func narrative(rep model.Report) string {
 	switch {
 	case !rep.C4.Empty():
 		parts = append(parts, fmt.Sprintf("This PR **changes the architecture** (%s)", c4Summary(rep.C4)))
+	case rep.Significance.Tier == model.TierArchitectural:
+		parts = append(parts, "This PR is **architecturally significant** (a cross-component dependency changed)")
 	case rep.Significance.Tier == model.TierTrivial:
 		parts = append(parts, "This is a **trivial** change")
 	default:
@@ -86,7 +88,7 @@ func consistencySection(fs []model.Finding) string {
 		return b.String()
 	}
 	for _, f := range fs {
-		fmt.Fprintf(&b, "- %s **%s** `%s` — %s\n  %s\n", sevIcon(f.Severity), f.Severity, f.Check, f.Title, f.Detail)
+		fmt.Fprintf(&b, "- %s **%s** `%s` — %s\n  %s\n", sevIcon(f.Severity), f.Severity, f.Check, esc(f.Title), esc(f.Detail))
 	}
 	return b.String()
 }
@@ -110,6 +112,10 @@ func c4Section(d model.C4Delta) string {
 	}
 	for _, r := range d.RemovedRels {
 		fmt.Fprintf(&b, "- ➖ relationship `%s → %s`%s\n", r.Src, r.Dst, descSuffix(r.Desc))
+	}
+	for _, rc := range d.ChangedRels {
+		fmt.Fprintf(&b, "- ✏️ relationship `%s → %s` description: %q → %q\n",
+			rc.After.Src, rc.After.Dst, rc.Before.Desc, rc.After.Desc)
 	}
 	return b.String()
 }
@@ -148,9 +154,9 @@ func knowledgeSection(d model.KnowledgeDelta) string {
 			continue
 		}
 		o := kc.Object
-		fmt.Fprintf(&b, "- %s **%s** `%s` (%s, %s)\n", statusWord(kc.Status), o.Type, o.ID, o.Scope, effectiveStatus(o))
-		if rej := firstRejected(o); rej != "" {
-			fmt.Fprintf(&b, "  - 🚫 rejected: %s\n", oneLine(rej))
+		fmt.Fprintf(&b, "- %s **%s** `%s` (%s, %s)\n", statusWord(kc.Status), o.Type, idOr(o), o.Scope, effectiveStatus(o))
+		if o.Rejected != "" {
+			fmt.Fprintf(&b, "  - 🚫 rejected: %s\n", esc(oneLine(o.Rejected)))
 		}
 	}
 	return b.String()
@@ -310,24 +316,17 @@ func effectiveStatus(o *model.KnowledgeObject) string {
 	if o.EffectiveStatus != "" {
 		return string(o.EffectiveStatus)
 	}
-	return string(o.Status)
+	if o.Status != "" {
+		return string(o.Status)
+	}
+	return "unknown"
 }
 
-func firstRejected(o *model.KnowledgeObject) string {
-	// inline import avoided: rejected extraction lives in knowledge pkg, but to
-	// keep render dependency-light we re-scan the body for a Rejected heading.
-	lines := strings.Split(o.Body, "\n")
-	for i, l := range lines {
-		low := strings.ToLower(strings.TrimSpace(l))
-		if (strings.HasPrefix(low, "#") && strings.Contains(low, "rejected")) || strings.HasPrefix(low, "**rejected") {
-			for _, n := range lines[i+1:] {
-				if strings.TrimSpace(n) != "" {
-					return strings.TrimSpace(n)
-				}
-			}
-		}
+func idOr(o *model.KnowledgeObject) string {
+	if o.ID != "" {
+		return o.ID
 	}
-	return ""
+	return o.Path
 }
 
 func oneLine(s string) string {
@@ -335,5 +334,14 @@ func oneLine(s string) string {
 	if len(s) > 200 {
 		return s[:200] + "…"
 	}
+	return s
+}
+
+// esc neutralizes HTML-significant tokens in author-controlled text so a
+// knowledge body or finding detail cannot break the <details> layout.
+func esc(s string) string {
+	s = strings.ReplaceAll(s, "&", "&amp;")
+	s = strings.ReplaceAll(s, "<", "&lt;")
+	s = strings.ReplaceAll(s, ">", "&gt;")
 	return s
 }

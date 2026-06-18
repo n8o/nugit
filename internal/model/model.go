@@ -79,6 +79,10 @@ type KnowledgeObject struct {
 	// EffectiveStatus is computed at load time from the supersedes graph; it
 	// overrides FrontMatter.Status when a newer record supersedes this one.
 	EffectiveStatus Status
+	// Rejected is the extracted "Rejected" rationale (decisions/lessons), the
+	// anti-hallucination field. Computed once at parse time so the renderer never
+	// re-implements the extraction.
+	Rejected string
 }
 
 // Edge is a parsed typed cross-reference from a relates_to entry, e.g.
@@ -173,13 +177,22 @@ type C4Delta struct {
 	ChangedComponents []ComponentChange
 	AddedRels         []Relationship
 	RemovedRels       []Relationship
+	ChangedRels       []RelationshipChange
 	// RawDiff is the unified text diff of the DSL file (may be empty).
 	RawDiff string
 }
 
 func (d C4Delta) Empty() bool {
 	return len(d.AddedComponents) == 0 && len(d.RemovedComponents) == 0 &&
-		len(d.ChangedComponents) == 0 && len(d.AddedRels) == 0 && len(d.RemovedRels) == 0
+		len(d.ChangedComponents) == 0 && len(d.AddedRels) == 0 &&
+		len(d.RemovedRels) == 0 && len(d.ChangedRels) == 0
+}
+
+// RelationshipChange records an edge whose metadata (description) changed while
+// its endpoints stayed the same.
+type RelationshipChange struct {
+	Before Relationship
+	After  Relationship
 }
 
 // ComponentChange records a non-structural change to a component (e.g. paths/tech).

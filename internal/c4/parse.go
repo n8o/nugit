@@ -146,6 +146,16 @@ func (p *parser) parse() model.Model {
 		}
 		switch t.kind {
 		case tWord:
+			// The views/configuration blocks contain their own arrows and element
+			// references (dynamic views, `include a->b` filters) that must NOT be
+			// recorded as model relationships/components — skip the whole subtree.
+			if t.val == "views" || t.val == "configuration" || t.val == "styles" {
+				if nt, ok := p.peek(); ok && nt.kind == tLBrace {
+					p.next()
+					p.skipBlockBody()
+				}
+				continue
+			}
 			// Two interesting shapes start with a word:
 			//   IDENT = component "Name" ...      (element declaration)
 			//   IDENT -> IDENT ["desc"]           (relationship)
@@ -154,9 +164,9 @@ func (p *parser) parse() model.Model {
 			} else if nt, ok := p.peek(); ok && nt.kind == tArrow {
 				p.next() // consume arrow
 				p.parseRelationship(t.val)
-			} else if t.val == "workspace" || t.val == "model" || t.val == "views" {
-				// Containers we descend into implicitly by just continuing.
 			}
+			// `workspace` / `model` / `softwareSystem` headers: fall through and
+			// descend into their blocks via the main loop.
 		case tArrow:
 			// stray arrow; ignore
 		}
@@ -192,6 +202,9 @@ func (p *parser) parseAssignment(id string) {
 	}
 	if len(strs) > 2 {
 		comp.Tech = strs[2]
+	}
+	if len(strs) > 3 { // positional 4th arg is a comma-separated tag list
+		comp.Tags = append(comp.Tags, splitCommaList(strs[3])...)
 	}
 	// optional block with technology/tags/properties
 	if t, ok := p.peek(); ok && t.kind == tLBrace {
@@ -273,8 +286,8 @@ func (p *parser) parseProperties(comp *model.Component) {
 
 func (p *parser) parseRelationship(src string) {
 	dst, ok := p.next()
-	if !ok || dst.kind != tWord {
-		return
+	if !ok || (dst.kind != tWord && dst.kind != tStr) {
+		return // destination must be an identifier or an inline string target
 	}
 	rel := model.Relationship{Src: src, Dst: dst.val}
 	if d, ok := p.peek(); ok && d.kind == tStr {
