@@ -1,0 +1,73 @@
+name: "nugit PR view"
+description: "Compute and post the nugit unified PR view — C4 architecture delta, knowledge delta, and cross-artifact consistency checks — as a sticky PR comment + check gate."
+branding:
+  icon: "git-pull-request"
+  color: "purple"
+
+inputs:
+  base:
+    description: "Base ref to diff from."
+    default: "${{ github.event.pull_request.base.sha }}"
+  head:
+    description: "Head ref to diff to."
+    default: "${{ github.sha }}"
+  working-directory:
+    description: "The nugit root (where .nugit/ lives), relative to the repo."
+    default: "."
+  fail-on:
+    description: "Fail the job when findings reach this severity: fail | warn | none."
+    default: "fail"
+  comment:
+    description: "Post/update a sticky PR comment (requires a token with pull-requests: write)."
+    default: "true"
+  github-token:
+    description: "Token for the sticky PR comment."
+    default: "${{ github.token }}"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: "stable"
+
+    - name: Build nugit
+      shell: bash
+      run: go build -o "$RUNNER_TEMP/nugit" "${{ github.action_path }}/cmd/nugit"
+
+    - name: Render PR view and report
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        PR_NUMBER: ${{ github.event.pull_request.number }}
+      run: |
+        set -o pipefail
+        out="$RUNNER_TEMP/nugit.md"
+        set +e
+        "$RUNNER_TEMP/nugit" pr-render \
+          -C "${{ inputs.working-directory }}" \
+          -base "${{ inputs.base }}" \
+          -head "${{ inputs.head }}" \
+          -fail-on "${{ inputs.fail-on }}" \
+          -format markdown | tee "$out"
+        code=${PIPESTATUS[0]}
+        set -e
+
+        # Always surface in the Actions run summary (no token needed).
+        cat "$out" >> "$GITHUB_STEP_SUMMARY"
+
+        # Sticky PR comment (find-by-marker, update or create).
+        marker="<!-- nugit-pr-view -->"
+        if [ "${{ inputs.comment }}" = "true" ] && [ -n "${PR_NUMBER:-}" ]; then
+          body="$marker"$'\n'"$(cat "$out")"
+          existing=$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" \
+            --jq "map(select(.body | startswith(\"$marker\"))) | .[0].id // empty" 2>/dev/null || true)
+          if [ -n "$existing" ]; then
+            gh api -X PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$existing" -f body="$body" >/dev/null || true
+          else
+            gh api -X POST "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" -f body="$body" >/dev/null || true
+          fi
+        fi
+
+        exit "$code"

@@ -5,49 +5,93 @@
 > knowledge is changing, where this sits in the plan, and **why** — computed from
 > typed artifacts that live in the same git history as the code.
 
-This repository is the **thin keystone**: the one feature with clear ROI shipped
-first, on the cheapest substrate, per the re-shaped plan ([PLAN.md](PLAN.md)).
+All five roadmap phases are shipped and adversarially reviewed ([ROADMAP.md](ROADMAP.md)):
+any-codebase adoption, **four-language** architecture enforcement, the `context()`
+retrieval half of the thesis, the self-filling capture lifecycle, and presentation.
 
 ## What works today
 
-`nugit pr-render` computes, deterministically and with no external datastore:
+**The unified PR view** (`nugit pr-render`) computes, deterministically and with no
+external datastore:
 
 1. **C4 delta** — structural diff of `.nugit/architecture/workspace.dsl`.
 2. **Code delta** — `git diff` grouped by C4 component via `properties { paths }`.
 3. **Knowledge delta** — added/changed/superseded decisions, specs, lessons, with
    each decision's `Rejected` rationale.
-4. **Plan position** — from `.nugit/plan.yml` (a stand-in until Beads lands).
+4. **Plan position** — live from a **Beads** store (`.beads/*.jsonl`), degrading to
+   `.nugit/plan.yml`.
 
-…then runs **cross-artifact consistency checks** that make the view *verify*
-rather than present:
+…then runs **cross-artifact consistency checks** that make the view *verify* rather
+than present:
 
-- **c4↔code** (`fail`) — code introduced an import edge between two components that
-  the model does not declare. *Computed from the real import graph via `go/parser`.*
+- **c4↔code / cmake↔code / python↔code / ts↔code** (`fail`) — code introduced a
+  cross-component dependency the model doesn't declare. Real dependency graphs:
+  Go (`go/parser`), C++ (CMake `target_link_libraries`), Python (imports),
+  TypeScript (dependency-cruiser).
 - **stale-knowledge** (`warn`) — a PR touches code governed by a
   `superseded`/`invalidated` object without updating it.
 - **decision-coverage** (`warn`) — an architectural change with no ADR or
   `decision:` trailer.
-- **spec-linkage** (`warn`) — a commit claims a spec that does not exist in-tree.
+- **spec-linkage** / **capture-hygiene** (`warn`) — a commit claims a missing spec,
+  or a trailer block is missing a mandatory field.
 
-…and gates disclosure by **significance** (trivial / feature / architectural).
+…and gates disclosure by **significance** (trivial / feature / architectural). Run
+`nugit explain <check>` for any finding's rationale + remediation.
+
+**Agent memory** — `nugit context -path <file>` returns a scoped, typed,
+budget-bounded knowledge bundle (architecture slice + in-scope decisions/spec/lessons
++ glossary + ephemeral notes); `nugit mcp` serves it as an MCP tool so Claude Code
+can call it.
+
+**The store fills itself** — `nugit init` installs a commit-msg hook that validates
+trailer blocks; `nugit remember` jots ephemeral working memory; `nugit distill`
+promotes deliberate `decision:`/recurring `learned:` trailers into durable ADRs/lessons.
 
 ## Quickstart
 
 ```sh
 go build -o nugit ./cmd/nugit
 
-# adopt nugit in any Go repo: scaffold .nugit/ and bootstrap a C4 model from
-# the real import graph (so the first render is green, not a wall of failures)
+# adopt in ANY repo: scaffold .nugit/ and bootstrap a C4 model from the real
+# dependency graph (Go import graph / CMake / Python / TS — auto-detected), so the
+# first render is green, not a wall of failures. Installs a commit-msg hook too.
 ./nugit init                       # warn mode by default; -mode enforce when ratified
+./nugit init -layout cmake         # force a backend: cmake | python | ts | container | flat
 
 # render the PR view for the current branch vs a base
 ./nugit pr-render -C . -base main -head HEAD                # markdown (default)
 ./nugit pr-render -base main -head HEAD -format check-run   # GitHub Checks JSON
 ./nugit pr-render -base main -head HEAD -format json        # structured deltas for agents
+
+# agent memory
+./nugit context -path internal/foo/bar.go -task "add caching"   # scoped knowledge bundle
+./nugit mcp                                                      # MCP stdio server
+
+# capture + presentation
+./nugit remember -text "watch out for X" -scope foo             # ephemeral working memory
+./nugit distill -base main -head HEAD                           # promote trailers → ADRs/lessons
+./nugit c4 render | ./nugit c4 gen-rules                        # Mermaid / go-arch-lint config
+./nugit explain c4'<->'code                                     # finding rationale
 ```
 
 Exit code is non-zero when a finding reaches `-fail-on` severity (default `fail`),
 so it drops straight into CI.
+
+### In CI (composite Action)
+
+```yaml
+# .github/workflows/nugit.yml
+on: { pull_request: { types: [opened, synchronize, reopened] } }
+permissions: { contents: read, pull-requests: write }
+jobs:
+  pr-view:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: n8o/nugit@v1          # builds nugit, renders, sticky PR comment + gate
+        with: { fail-on: fail }
+```
 
 ## nugit models itself
 

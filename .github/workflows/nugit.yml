@@ -7,7 +7,6 @@ on:
 permissions:
   contents: read
   pull-requests: write   # to post the sticky comment
-  checks: write
 
 jobs:
   pr-view:
@@ -17,37 +16,9 @@ jobs:
         with:
           fetch-depth: 0          # need base..head history
 
-      - uses: actions/setup-go@v5
+      # Dogfood nugit's own composite action (action.yml at the repo root).
+      - uses: ./
         with:
-          go-version: '1.25'
-
-      - name: Build nugit
-        run: go build -o nugit ./cmd/nugit
-
-      - name: Render PR view
-        id: render
-        run: |
-          # The exact base commit of the PR — robust regardless of remote refs.
-          BASE="${{ github.event.pull_request.base.sha }}"
-          # Deterministic, LLM-free, no datastore. Markdown -> job summary.
-          ./nugit pr-render -base "$BASE" -head HEAD -format markdown | tee pr-view.md >> "$GITHUB_STEP_SUMMARY"
-          # Re-run as the gate (exit non-zero on a `fail` finding).
-          ./nugit pr-render -base "$BASE" -head HEAD -format markdown -fail-on fail >/dev/null
-
-      - name: Post sticky comment
-        if: always()
-        continue-on-error: true   # a comment-API hiccup must not fail the gate
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          # Upsert a single sticky comment keyed by a hidden marker.
-          marker='<!-- nugit-pr-view -->'
-          body="$marker"$'\n'"$(cat pr-view.md)"
-          id=$(gh pr view "${{ github.event.pull_request.number }}" --json comments \
-                 --jq ".comments[] | select(.body | startswith(\"$marker\")) | .url" | tail -1)
-          if [ -n "$id" ]; then
-            gh pr comment "${{ github.event.pull_request.number }}" --edit-last --body "$body" || \
-            gh pr comment "${{ github.event.pull_request.number }}" --body "$body"
-          else
-            gh pr comment "${{ github.event.pull_request.number }}" --body "$body"
-          fi
+          base: ${{ github.event.pull_request.base.sha }}
+          head: ${{ github.sha }}
+          fail-on: fail
