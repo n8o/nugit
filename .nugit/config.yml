@@ -7,9 +7,8 @@ schema_version: 1
 
 c4:
   dsl: .nugit/architecture/workspace.dsl
-  # Files matching no component glob are reported as "(unmapped)" rather than
-  # silently dropped — see consistency check output.
-  orphan_policy: warn
+  # mode: enforce | warn  (enforce = undeclared dependencies fail the check)
+  mode: enforce
 
 significance:
   # Heuristic thresholds (§13.6 "start heuristic; escalate only if noisy").

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/n8o/nugit/internal/config"
 	"github.com/n8o/nugit/internal/engine"
 	"github.com/n8o/nugit/internal/model"
 	"github.com/n8o/nugit/internal/render"
@@ -80,15 +81,20 @@ func cmdInit(args []string) int {
 	}
 	fmt.Println()
 	switch {
+	case *noModel:
+		fmt.Println("Scaffolded .nugit/ with a template workspace.dsl. Define your components + paths globs, then run `nugit pr-render`.")
 	case res.ModelEmpty:
 		fmt.Println("No Go packages found — wrote a template workspace.dsl. Define your components and paths globs by hand.")
-	case res.Components > 0:
+	case res.WroteModel:
 		fmt.Printf("Bootstrapped a C4 model: %d component(s), %d dependency edge(s), in %s mode.\n",
 			res.Components, res.Edges, res.Mode)
 		fmt.Println("Next: review .nugit/architecture/workspace.dsl, then run `nugit pr-render`.")
 		if res.Mode == "warn" {
 			fmt.Println("When the model is ratified, set c4.mode to `enforce` in .nugit/config.yml.")
 		}
+	case res.Components > 0:
+		fmt.Printf("A workspace.dsl already exists (left unchanged); discovered %d component(s), %d edge(s). Use -force to regenerate.\n",
+			res.Components, res.Edges)
 	}
 	return 0
 }
@@ -99,8 +105,17 @@ func cmdPRRender(args []string) int {
 	base := fs.String("base", "HEAD~1", "base ref / target branch")
 	head := fs.String("head", "HEAD", "head ref")
 	format := fs.String("format", "markdown", "output format: markdown|check-run|json")
-	failOn := fs.String("fail-on", "fail", "exit non-zero at severity: fail|warn|none")
+	failOn := fs.String("fail-on", "", "exit non-zero at severity: fail|warn|none (default from config.yml, else fail)")
 	_ = fs.Parse(args)
+
+	// An unset -fail-on takes its default from config.yml (pr_render.fail_on).
+	if *failOn == "" {
+		if cfg, err := config.Load(*dir); err == nil {
+			*failOn = cfg.PRRender.FailOn
+		} else {
+			*failOn = "fail"
+		}
+	}
 
 	switch *failOn {
 	case "fail", "warn", "none":

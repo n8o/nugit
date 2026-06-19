@@ -16,6 +16,8 @@ import (
 	"strings"
 
 	"github.com/n8o/nugit/internal/goimports"
+	"github.com/n8o/nugit/internal/mapping"
+	"github.com/n8o/nugit/internal/model"
 )
 
 // Component is a discovered package directory that becomes a C4 component.
@@ -94,17 +96,26 @@ func Discover(repoDir string) (Graph, error) {
 
 	idOf := assignIDs(dirs)
 	g := Graph{Module: module}
+	mcomps := make([]model.Component, 0, len(dirs))
 	for _, d := range dirs {
-		g.Components = append(g.Components, Component{ID: idOf[d], Name: lastSeg(d), Dir: d})
+		id := idOf[d]
+		g.Components = append(g.Components, Component{ID: id, Name: lastSeg(d), Dir: d})
+		mcomps = append(mcomps, model.Component{ID: id, Paths: []string{globFor(d)}})
 	}
 
+	// Attribute edges with the SAME glob resolution the c4<->code check uses
+	// (mapping.ResolveDir over the generated globs), so the generated model and
+	// the check agree by construction — never an exact-dir-vs-glob mismatch.
+	mp := mapping.New(model.Model{Components: mcomps})
 	edgeSet := map[[2]string]bool{}
 	for _, d := range dirs {
+		src := idOf[d]
 		for imp := range importsOf[d] {
-			if !hasPkg[imp] || imp == d {
-				continue // imported dir isn't a discovered component, or self-import
+			dst := mp.ResolveDir(imp)
+			if dst == "" || dst == src {
+				continue
 			}
-			edgeSet[[2]string{idOf[d], idOf[imp]}] = true
+			edgeSet[[2]string{src, dst}] = true
 		}
 	}
 	for e := range edgeSet {
@@ -154,19 +165,32 @@ func globFor(dir string) string {
 // unambiguous, else the sanitized full path, with a numeric suffix as a last
 // resort. Deterministic given sorted input.
 func assignIDs(dirs []string) map[string]string {
+	out := map[string]string{}
+	used := map[string]bool{}
+	// The repo-root package gets a stable, readable id first (not "_").
+	for _, d := range dirs {
+		if d == "." {
+			out["."] = "root"
+			used["root"] = true
+		}
+	}
 	count := map[string]int{}
 	cand := map[string]string{}
 	for _, d := range dirs {
+		if d == "." {
+			continue
+		}
 		c := sanitize(lastSeg(d))
 		cand[d] = c
 		count[c]++
 	}
-	out := map[string]string{}
-	used := map[string]bool{}
 	for _, d := range dirs {
+		if d == "." {
+			continue
+		}
 		id := cand[d]
 		if id == "" || count[id] > 1 || used[id] {
-			id = sanitize(slashToUnderscore(d))
+			id = sanitize(slashToUnderscore(d)) // disambiguate with the full path
 		}
 		base := id
 		for n := 2; used[id]; n++ {

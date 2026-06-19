@@ -17,32 +17,58 @@ func TestDefault(t *testing.T) {
 }
 
 func TestLoadMissing(t *testing.T) {
-	c := Load(t.TempDir()) // no .nugit/config.yml
+	c, err := Load(t.TempDir()) // no .nugit/config.yml
+	if err != nil {
+		t.Fatalf("missing config should not error: %v", err)
+	}
 	if c.C4.Mode != "enforce" || c.C4.DSL == "" {
 		t.Errorf("missing config should yield defaults: %+v", c.C4)
 	}
 }
 
 func TestLoadOverlay(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, ".nugit"), 0o755); err != nil {
+	c, err := LoadBytes([]byte("schema_version: 1\nc4:\n  mode: warn\nsignificance:\n  trivial_max_files: 5\n"))
+	if err != nil {
 		t.Fatal(err)
 	}
-	yml := "schema_version: 1\nc4:\n  mode: warn\nsignificance:\n  trivial_max_files: 5\n"
-	if err := os.WriteFile(filepath.Join(dir, ".nugit", "config.yml"), []byte(yml), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	c := Load(dir)
 	if !c.C4Warn() {
 		t.Errorf("mode warn should set C4Warn; got %+v", c.C4)
 	}
 	if c.Significance.TrivialMaxFiles != 5 {
 		t.Errorf("overlay threshold = %d, want 5", c.Significance.TrivialMaxFiles)
 	}
-	if c.Significance.TrivialMaxChurn != 20 {
-		t.Errorf("unset threshold should keep default 20, got %d", c.Significance.TrivialMaxChurn)
+	if c.Significance.TrivialMaxChurn != 20 || c.C4.DSL == "" {
+		t.Errorf("unset keys should keep defaults: %+v", c)
 	}
-	if c.C4.DSL == "" {
-		t.Error("unset dsl should keep default")
+}
+
+func TestModeNormalizationAndValidation(t *testing.T) {
+	// case/whitespace tolerated
+	if c, _ := LoadBytes([]byte("c4:\n  mode: '  WARN  '\n")); !c.C4Warn() {
+		t.Error("'  WARN  ' should normalize to warn")
+	}
+	// unknown value falls back to enforce (fail closed), not silently warn
+	if c, _ := LoadBytes([]byte("c4:\n  mode: bogus\n")); c.C4.Mode != "enforce" {
+		t.Errorf("unknown mode should fall back to enforce, got %q", c.C4.Mode)
+	}
+}
+
+func TestMalformedSurfacesError(t *testing.T) {
+	if _, err := LoadBytes([]byte("c4: : : not yaml\n  - broken")); err == nil {
+		t.Error("malformed config.yml must surface an error, not silently default")
+	}
+}
+
+func TestLoadReadsFile(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".nugit"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".nugit", "config.yml"), []byte("c4:\n  mode: warn\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	c, err := Load(dir)
+	if err != nil || !c.C4Warn() {
+		t.Errorf("Load should read the file and parse warn; got %+v err=%v", c.C4, err)
 	}
 }

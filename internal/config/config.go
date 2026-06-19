@@ -5,8 +5,10 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -15,9 +17,8 @@ import (
 type Config struct {
 	SchemaVersion int `yaml:"schema_version"`
 	C4            struct {
-		DSL          string `yaml:"dsl"`
-		Mode         string `yaml:"mode"` // enforce | warn
-		OrphanPolicy string `yaml:"orphan_policy"`
+		DSL  string `yaml:"dsl"`
+		Mode string `yaml:"mode"` // enforce | warn
 	} `yaml:"c4"`
 	Significance struct {
 		TrivialMaxFiles int `yaml:"trivial_max_files"`
@@ -29,7 +30,8 @@ type Config struct {
 }
 
 // Default returns the built-in defaults used when config.yml is absent or a key
-// is omitted.
+// is omitted. A missing config defaults to enforce (strict) — `nugit init`
+// explicitly writes warn for the adoption ramp.
 func Default() Config {
 	var c Config
 	c.SchemaVersion = 1
@@ -41,22 +43,37 @@ func Default() Config {
 	return c
 }
 
-// Load reads .nugit/config.yml from repoDir, overlaying any present keys onto
-// the defaults. A missing or unreadable file yields the defaults (never an
-// error — config is optional).
-func Load(repoDir string) Config {
-	c := Default()
+// Load reads .nugit/config.yml from repoDir. A missing file yields the defaults
+// with no error; a malformed file yields an error (never a silent fallback that
+// flips enforcement mode).
+func Load(repoDir string) (Config, error) {
 	b, err := os.ReadFile(filepath.Join(repoDir, ".nugit", "config.yml"))
 	if err != nil {
-		return c
+		if os.IsNotExist(err) {
+			return Default(), nil
+		}
+		return Default(), fmt.Errorf("reading config.yml: %w", err)
 	}
-	_ = yaml.Unmarshal(b, &c) // present keys overlay; malformed file falls back to defaults so far
-	// Re-assert defaults for any field left empty/zero by an explicit blank.
+	return LoadBytes(b)
+}
+
+// LoadBytes parses config from raw bytes (e.g. read at a git ref). Empty input
+// yields the defaults; a parse error is surfaced rather than masked.
+func LoadBytes(b []byte) (Config, error) {
+	c := Default()
+	if len(b) == 0 {
+		return c, nil
+	}
+	if err := yaml.Unmarshal(b, &c); err != nil {
+		return Default(), fmt.Errorf("invalid config.yml: %w", err)
+	}
+	// Normalize + re-assert defaults for omitted/blank fields.
+	c.C4.Mode = strings.ToLower(strings.TrimSpace(c.C4.Mode))
+	if c.C4.Mode != "warn" && c.C4.Mode != "enforce" {
+		c.C4.Mode = "enforce" // unknown value: fail closed (strict)
+	}
 	if c.C4.DSL == "" {
 		c.C4.DSL = ".nugit/architecture/workspace.dsl"
-	}
-	if c.C4.Mode == "" {
-		c.C4.Mode = "enforce"
 	}
 	if c.Significance.TrivialMaxFiles <= 0 {
 		c.Significance.TrivialMaxFiles = 2
@@ -67,7 +84,7 @@ func Load(repoDir string) Config {
 	if c.PRRender.FailOn == "" {
 		c.PRRender.FailOn = "fail"
 	}
-	return c
+	return c, nil
 }
 
 // C4Warn reports whether the c4<->code check should warn (adoption) rather than

@@ -28,6 +28,7 @@ type Result struct {
 	Edges      int
 	Mode       string
 	ModelEmpty bool // no Go packages found; wrote a template
+	WroteModel bool // a bootstrapped (non-template) workspace.dsl was written
 }
 
 // Run scaffolds .nugit/ under opt.RepoDir.
@@ -41,27 +42,30 @@ func Run(opt Options) (Result, error) {
 	res := Result{Mode: opt.Mode}
 	nugitDir := filepath.Join(opt.RepoDir, ".nugit")
 
-	if st, err := os.Stat(nugitDir); err == nil && st.IsDir() && !opt.Force {
-		// .nugit exists: top up missing files but never overwrite (idempotent).
-		// Continue with writeIfAbsent semantics rather than erroring, so re-running
-		// init on a partially-set-up repo is safe.
-	}
-
+	// Re-running on an existing .nugit is safe: writeFile tops up missing files
+	// but never overwrites unless Force is set, so init is idempotent.
 	for _, d := range []string{"architecture", "decisions", "specs", "lessons"} {
 		if err := os.MkdirAll(filepath.Join(nugitDir, d), 0o755); err != nil {
 			return res, err
 		}
 	}
-	for _, d := range []string{"decisions", "specs", "lessons"} {
-		writeFile(&res, filepath.Join(nugitDir, d, ".gitkeep"), "", opt.Force)
+
+	var ferr error
+	put := func(path, content string) {
+		if ferr == nil {
+			ferr = writeFile(&res, path, content, opt.Force)
+		}
 	}
-	writeFile(&res, filepath.Join(nugitDir, "config.yml"), configYML(opt.Mode), opt.Force)
-	writeFile(&res, filepath.Join(nugitDir, "glossary.md"), glossaryMD(), opt.Force)
+	for _, d := range []string{"decisions", "specs", "lessons"} {
+		put(filepath.Join(nugitDir, d, ".gitkeep"), "")
+	}
+	put(filepath.Join(nugitDir, "config.yml"), configYML(opt.Mode))
+	put(filepath.Join(nugitDir, "glossary.md"), glossaryMD())
 
 	dslPath := filepath.Join(nugitDir, "architecture", "workspace.dsl")
 	name := repoName(opt.RepoDir)
 	if opt.NoModel {
-		writeFile(&res, dslPath, templateDSL(name), opt.Force)
+		put(dslPath, templateDSL(name))
 	} else {
 		g, err := bootstrap.Discover(opt.RepoDir)
 		if err != nil {
@@ -70,50 +74,77 @@ func Run(opt Options) (Result, error) {
 		res.Components, res.Edges = len(g.Components), len(g.Edges)
 		if len(g.Components) == 0 {
 			res.ModelEmpty = true
-			writeFile(&res, dslPath, templateDSL(name), opt.Force)
+			put(dslPath, templateDSL(name))
 		} else {
-			writeFile(&res, dslPath, bootstrap.GenerateDSL(g, name), opt.Force)
+			put(dslPath, bootstrap.GenerateDSL(g, name))
 		}
 	}
+	if ferr != nil {
+		return res, ferr
+	}
+	res.WroteModel = !opt.NoModel && !res.ModelEmpty && contains(res.Created, dslPath)
 
-	ensureGitignore(&res, opt.RepoDir)
+	if err := ensureGitignore(&res, opt.RepoDir); err != nil {
+		return res, err
+	}
 	return res, nil
 }
 
-// writeFile writes path unless it exists and !force (then records a skip).
-func writeFile(res *Result, path, content string, force bool) {
-	rel := path
+// writeFile writes path unless it exists and !force (then records a skip). It
+// returns an error on write failure so a partial init is never reported as
+// success (which would render falsely green on an absent model).
+func writeFile(res *Result, path, content string, force bool) error {
 	if _, err := os.Stat(path); err == nil && !force {
-		res.Skipped = append(res.Skipped, rel)
-		return
+		res.Skipped = append(res.Skipped, path)
+		return nil
 	}
-	if err := os.WriteFile(path, []byte(content), 0o644); err == nil {
-		res.Created = append(res.Created, rel)
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		return fmt.Errorf("writing %s: %w", path, err)
 	}
+	res.Created = append(res.Created, path)
+	return nil
 }
 
-// ensureGitignore appends the nugit ignore lines if absent.
-func ensureGitignore(res *Result, repoDir string) {
+// ensureGitignore appends the nugit ignore lines if absent, matching WHOLE lines
+// (not substrings, which could false-positive on a comment or a longer path).
+func ensureGitignore(res *Result, repoDir string) error {
 	path := filepath.Join(repoDir, ".gitignore")
-	want := []string{"**/.nugit/.cache/", ".nugit-local/"}
-	existing, _ := os.ReadFile(path)
+	existing, err := os.ReadFile(path)
+	if err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("reading %s: %w", path, err)
+	}
 	text := string(existing)
+	have := map[string]bool{}
+	for _, l := range strings.Split(text, "\n") {
+		have[strings.TrimSpace(l)] = true
+	}
 	var add []string
-	for _, line := range want {
-		if !strings.Contains(text, line) {
+	for _, line := range []string{"**/.nugit/.cache/", ".nugit-local/"} {
+		if !have[line] {
 			add = append(add, line)
 		}
 	}
 	if len(add) == 0 {
-		return
+		return nil
 	}
 	if text != "" && !strings.HasSuffix(text, "\n") {
 		text += "\n"
 	}
 	text += "\n# nugit (rebuildable index + per-agent ephemeral memory)\n" + strings.Join(add, "\n") + "\n"
-	if err := os.WriteFile(path, []byte(text), 0o644); err == nil {
-		res.Created = append(res.Created, path)
+	if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
+		return fmt.Errorf("writing %s: %w", path, err)
 	}
+	res.Created = append(res.Created, path)
+	return nil
+}
+
+func contains(ss []string, s string) bool {
+	for _, x := range ss {
+		if x == s {
+			return true
+		}
+	}
+	return false
 }
 
 func repoName(repoDir string) string {

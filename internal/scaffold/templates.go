@@ -14,7 +14,6 @@ c4:
   #   enforce — undeclared dependencies fail the check-run (ratified)
   # Start in warn while you refine the auto-generated model, then flip to enforce.
   mode: %s
-  orphan_policy: warn
 
 significance:
   trivial_max_files: 2

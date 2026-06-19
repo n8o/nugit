@@ -62,10 +62,15 @@ func Analyze(modulePath, relPath, src string) (dirs []string, included bool) {
 	seen := map[string]bool{}
 	for _, imp := range f.Imports {
 		p := strings.Trim(imp.Path.Value, `"`)
-		if !strings.HasPrefix(p, prefix) {
-			continue
+		var dir string
+		switch {
+		case p == modulePath:
+			dir = "." // the repo-root package
+		case strings.HasPrefix(p, prefix):
+			dir = strings.TrimPrefix(p, prefix) // module-relative dir == repo-relative dir
+		default:
+			continue // stdlib or third-party: not a local component
 		}
-		dir := strings.TrimPrefix(p, prefix) // module-relative dir == repo-relative dir
 		if !seen[dir] {
 			seen[dir] = true
 			dirs = append(dirs, dir)

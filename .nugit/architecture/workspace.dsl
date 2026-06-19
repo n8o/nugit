@@ -91,6 +91,8 @@ workspace "nugit" "Git-native typed knowledge & unified PR view — self-model (
             engine -> config "loads config"
 
             bootstrap -> goimports "reads import graph"
+            bootstrap -> mapping "resolves edges like the check does"
+            bootstrap -> model_ "uses types"
 
             scaffold -> bootstrap "generates the model"
 
@@ -98,6 +100,7 @@ workspace "nugit" "Git-native typed knowledge & unified PR view — self-model (
             cli -> engine "builds report"
             cli -> render "emits output"
             cli -> scaffold "runs init"
+            cli -> config "reads fail-on default"
         }
     }
 

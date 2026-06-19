@@ -3,6 +3,8 @@
 package engine
 
 import (
+	"fmt"
+
 	"github.com/n8o/nugit/internal/config"
 	"github.com/n8o/nugit/internal/consistency"
 	"github.com/n8o/nugit/internal/delta"
@@ -26,15 +28,22 @@ type Options struct {
 // BuildReport computes the four deltas, the significance verdict, and the
 // cross-artifact findings for the range (mergeBase(base,head), head].
 func BuildReport(opt Options) (model.Report, error) {
-	cfg := config.Load(opt.RepoDir)
+	repo := gitutil.Repo{Dir: opt.RepoDir}
+	base := repo.MergeBase(opt.Base, opt.Head)
+
+	// Read config at the reviewed ref (like the DSL and import graph), so the
+	// verdict never depends on uncommitted working-tree state.
+	cfgSrc, _ := repo.ShowFile(opt.Head, ".nugit/config.yml")
+	cfg, err := config.LoadBytes([]byte(cfgSrc))
+	if err != nil {
+		return model.Report{}, fmt.Errorf("parsing .nugit/config.yml at %s: %w", opt.Head, err)
+	}
 	if opt.DSLPath == "" {
 		opt.DSLPath = cfg.C4.DSL
 	}
 	if opt.DSLPath == "" {
 		opt.DSLPath = delta.DefaultDSLPath
 	}
-	repo := gitutil.Repo{Dir: opt.RepoDir}
-	base := repo.MergeBase(opt.Base, opt.Head)
 
 	c4Delta, _, headModel, err := delta.C4(repo, base, opt.Head, opt.DSLPath)
 	if err != nil {
@@ -91,7 +100,18 @@ func BuildReport(opt Options) (model.Report, error) {
 	// Order matters: C4<->code first (independent), then significance (uses it),
 	// then the checks that depend on the architectural verdict.
 	c4Findings := consistency.C4CodeFindings(in)
-	sig := significance.Classify(c4Delta, codeDelta, knowDelta, len(c4Findings) > 0, significance.Options{
+	// The architectural signal is a genuine undeclared cross-component edge ONLY —
+	// not model-health warnings, and not undeclared edges while in warn (adoption)
+	// mode, so adoption doesn't spuriously trip the decision-coverage nag.
+	hasUndeclaredEdge := false
+	for _, f := range c4Findings {
+		if f.Check == "c4<->code" {
+			hasUndeclaredEdge = true
+			break
+		}
+	}
+	archSignal := hasUndeclaredEdge && !cfg.C4Warn()
+	sig := significance.Classify(c4Delta, codeDelta, knowDelta, archSignal, significance.Options{
 		TrivialMaxFiles: cfg.Significance.TrivialMaxFiles,
 		TrivialMaxChurn: cfg.Significance.TrivialMaxChurn,
 	})
