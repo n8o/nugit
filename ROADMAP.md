@@ -5,14 +5,13 @@
 | Phase | What | State |
 |---|---|---|
 | **P1** Any-repo + monorepo | git-root coordinates + structural bootstrap | ✅ shipped + reviewed |
-| **P2** Multi-language | CMake C++ analyzer + auto-detect + enforcement check | ✅ shipped + reviewed |
+| **P2** Multi-language | Go + C++ (CMake) + **Python** + **TypeScript** analyzers + enforcement | ✅ shipped + reviewed |
 | **P3** Retrieval | `context()` composer + `nugit context` + MCP server | ✅ shipped + reviewed |
-| **P4** Capture lifecycle | commit-msg hook + `nugit distill` | ✅ shipped |
-| **P5** Presentation | `c4 render` (Mermaid) + `nugit explain` | ✅ shipped |
+| **P4** Capture lifecycle | commit-msg hook + `nugit distill` | ✅ shipped + reviewed |
+| **P5** Presentation | `c4 render` (Mermaid) + `nugit explain` | ✅ shipped + reviewed |
 
 **Deferred-with-trigger** (ADR-0004): the FTS/vector index, content-addressing +
-merge driver, `nugit compact`, the LLM prose narrative, a live Beads adapter, and
-TS/Python analyzer backends (the pluggable interface lands them behind CMake/Go).
+merge driver, `nugit compact`, the LLM prose narrative, and a live Beads adapter.
 `.nugit-local/` ephemeral memory is the remaining P4 sub-feature.
 
 The original framing follows.
