@@ -56,6 +56,14 @@ func (b Bundle) Markdown() string {
 		w.WriteString("\n")
 	}
 
+	if len(b.WorkingMemory) > 0 {
+		w.WriteString("**Working memory** _(ephemeral, .nugit-local)_\n")
+		for _, m := range b.WorkingMemory {
+			fmt.Fprintf(&w, "- %s\n", m)
+		}
+		w.WriteString("\n")
+	}
+
 	fmt.Fprintf(&w, "_~%d/%d tokens", b.EstimatedTokens, b.BudgetTokens)
 	if b.Truncated {
 		fmt.Fprintf(&w, " · truncated, dropped: %s", strings.Join(b.Dropped, "; "))

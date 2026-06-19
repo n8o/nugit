@@ -13,6 +13,7 @@ import (
 	"github.com/n8o/nugit/internal/c4"
 	"github.com/n8o/nugit/internal/config"
 	"github.com/n8o/nugit/internal/knowledge"
+	"github.com/n8o/nugit/internal/localmem"
 	"github.com/n8o/nugit/internal/mapping"
 	"github.com/n8o/nugit/internal/model"
 )
@@ -57,6 +58,7 @@ type Bundle struct {
 	Spec            *Item    `json:"spec,omitempty"`
 	Lessons         []Item   `json:"lessons"`
 	Glossary        []string `json:"glossary"`
+	WorkingMemory   []string `json:"working_memory,omitempty"` // ephemeral .nugit-local notes
 	Truncated       bool     `json:"truncated"`
 	Dropped         []string `json:"dropped,omitempty"` // "type id (reason)" — never a silent cut
 	EstimatedTokens int      `json:"estimated_tokens"`
@@ -177,8 +179,41 @@ func Context(opt Options) (Bundle, error) {
 	glossary = dedup(glossary)
 
 	b.Decisions, b.Spec, b.Lessons, b.Glossary = decisions, spec, lessons, glossary
+	b.WorkingMemory = workingMemory(opt.RepoDir, comp, kw)
 	truncate(&b, budget)
 	return b, nil
+}
+
+// workingMemory pulls recent ephemeral .nugit-local notes relevant to the
+// component (or global) and, when a task is given, the keywords.
+func workingMemory(repoDir, comp string, kw map[string]bool) []string {
+	var out []string
+	for _, e := range localmem.Recent(repoDir, 20) {
+		if e.Scope != "" && e.Scope != comp && e.Scope != "global" {
+			continue
+		}
+		if len(kw) > 0 && !hasKeyword(e, kw) {
+			continue
+		}
+		out = append(out, e.Kind+": "+e.Text)
+		if len(out) >= 5 {
+			break
+		}
+	}
+	return out
+}
+
+func hasKeyword(e localmem.Entry, kw map[string]bool) bool {
+	hay := strings.ToLower(e.Text)
+	for _, k := range e.Keywords {
+		hay += " " + strings.ToLower(k)
+	}
+	for w := range kw {
+		if strings.Contains(hay, w) {
+			return true
+		}
+	}
+	return false
 }
 
 // truncate enforces the token budget by type priority (c4 > spec > decisions >
@@ -223,5 +258,18 @@ func truncate(b *Bundle, budget int) {
 		}
 	}
 	b.Glossary = g
+	// working memory is lowest priority (ephemeral scratch) — dropped first
+	var wm []string
+	for _, t := range b.WorkingMemory {
+		tk := tokensOf(t)
+		if used+tk <= budget {
+			used += tk
+			wm = append(wm, t)
+		} else {
+			b.Truncated = true
+			b.Dropped = append(b.Dropped, "working-memory note (over budget)")
+		}
+	}
+	b.WorkingMemory = wm
 	b.EstimatedTokens = used
 }

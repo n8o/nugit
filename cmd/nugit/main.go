@@ -16,6 +16,7 @@ import (
 	"github.com/n8o/nugit/internal/consistency"
 	"github.com/n8o/nugit/internal/distill"
 	"github.com/n8o/nugit/internal/engine"
+	"github.com/n8o/nugit/internal/localmem"
 	"github.com/n8o/nugit/internal/mcp"
 	"github.com/n8o/nugit/internal/model"
 	"github.com/n8o/nugit/internal/render"
@@ -72,6 +73,8 @@ func main() {
 		os.Exit(cmdContext(os.Args[2:]))
 	case "mcp":
 		os.Exit(cmdMCP(os.Args[2:]))
+	case "remember":
+		os.Exit(cmdRemember(os.Args[2:]))
 	case "hook":
 		os.Exit(cmdHook(os.Args[2:]))
 	case "distill":
@@ -239,6 +242,41 @@ func cmdDistill(args []string) int {
 	} else {
 		fmt.Printf("\nPromoted %d decision(s), %d lesson(s). Review and commit them with the PR.\n", len(res.Decisions), len(res.Lessons))
 	}
+	return 0
+}
+
+// cmdRemember writes (or lists) ephemeral working-memory notes in .nugit-local/.
+func cmdRemember(args []string) int {
+	fs := flag.NewFlagSet("remember", flag.ExitOnError)
+	dir := fs.String("C", ".", "repo directory")
+	text := fs.String("text", "", "the note to remember (required unless -list)")
+	kind := fs.String("kind", "note", "note | lesson | decision")
+	scope := fs.String("scope", "", "component scope")
+	kw := fs.String("keywords", "", "comma-separated keywords")
+	list := fs.Bool("list", false, "list recent entries instead of writing")
+	n := fs.Int("n", 20, "how many to list")
+	_ = fs.Parse(args)
+	if *list {
+		for _, e := range localmem.Recent(*dir, *n) {
+			fmt.Printf("  [%s] %s: %s\n", e.Time, e.Kind, e.Text)
+		}
+		return 0
+	}
+	if strings.TrimSpace(*text) == "" {
+		fmt.Fprintln(os.Stderr, "nugit remember: -text is required (or -list)")
+		return 2
+	}
+	var kws []string
+	for _, k := range strings.Split(*kw, ",") {
+		if k = strings.TrimSpace(k); k != "" {
+			kws = append(kws, k)
+		}
+	}
+	if err := localmem.Append(*dir, localmem.Entry{Kind: *kind, Text: *text, Scope: *scope, Keywords: kws}); err != nil {
+		fmt.Fprintf(os.Stderr, "nugit remember: %v\n", err)
+		return 1
+	}
+	fmt.Println("Remembered (ephemeral, .nugit-local/ — gitignored). Promote durable items via a commit trailer + `nugit distill`.")
 	return 0
 }
 

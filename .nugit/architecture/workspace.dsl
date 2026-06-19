@@ -38,6 +38,9 @@ workspace "nugit" "Git-native typed knowledge & unified PR view — self-model (
             knowledge = component "Knowledge reader" "Reads .nugit/** objects + supersede graph" "Go" {
                 properties { paths "internal/knowledge/**" }
             }
+            localmem = component "Working memory" "Ephemeral .nugit-local per-agent notes" "Go" {
+                properties { paths "internal/localmem/**" }
+            }
             delta = component "Delta engine" "Computes the four deterministic deltas" "Go" {
                 properties { paths "internal/delta/**" }
             }
@@ -97,6 +100,8 @@ workspace "nugit" "Git-native typed knowledge & unified PR view — self-model (
             delta -> mapping "groups by component"
             delta -> beads "reads the plan graph"
 
+            beads -> model_ "uses types"
+
             consistency -> model_ "uses types"
             consistency -> gitutil "reads refs"
             consistency -> goimports "reads import graph"
@@ -142,6 +147,7 @@ workspace "nugit" "Git-native typed knowledge & unified PR view — self-model (
             retrieval -> knowledge "loads objects"
             retrieval -> mapping "resolves the component"
             retrieval -> model_ "uses types"
+            retrieval -> localmem "pulls ephemeral notes"
 
             mcp -> retrieval "serves context()"
 
@@ -153,6 +159,7 @@ workspace "nugit" "Git-native typed knowledge & unified PR view — self-model (
             cli -> retrieval "context command"
             cli -> mcp "mcp command"
             cli -> distill "distill command"
+            cli -> localmem "remember command"
             cli -> trailers "commit-msg hook validation"
             cli -> c4 "c4 render command"
             cli -> consistency "explain command"
