@@ -53,6 +53,9 @@ workspace "nugit" "Git-native typed knowledge & unified PR view — self-model (
             scaffold = component "Scaffold" "nugit init: writes the .nugit/ tree" "Go" {
                 properties { paths "internal/scaffold/**" }
             }
+            eval = component "Eval" "Labeled corpus measuring heuristic accuracy" "Go" {
+                properties { paths "internal/eval/**" }
+            }
             cli = component "CLI" "nugit command entrypoint" "Go" {
                 properties { paths "cmd/nugit/**" }
             }
@@ -95,6 +98,9 @@ workspace "nugit" "Git-native typed knowledge & unified PR view — self-model (
             bootstrap -> model_ "uses types"
 
             scaffold -> bootstrap "generates the model"
+
+            eval -> engine "runs the corpus"
+            eval -> model_ "uses types"
 
             cli -> model_ "uses types"
             cli -> engine "builds report"

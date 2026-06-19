@@ -43,8 +43,10 @@ breaking re-hash — they are cheap to decide today and unfixable later.
 - Greenfield vs extend compound-agent: building **greenfield** with nugit-native
   fallbacks; a compound-agent adapter is additive later. (Resolves the §13.2 ↔
   §10/§11 contradiction the review found.)
-- An eval harness (labeled fixture corpus, precision/recall for retrieval and the
-  significance classifier) — add when I2 lands, gate retrieval quality on it.
+- ~~An eval harness for the significance classifier + consistency checks~~ —
+  **done** (`internal/eval`: a 12-case labeled corpus gating significance
+  accuracy + check precision/recall; run `go test ./internal/eval -v`). Retrieval
+  precision/recall still waits on I2.
 - ~~A brownfield bootstrap for adopting an existing repo~~ — **done** (A1:
   `nugit init` + warn-until-ratified `c4.mode`). Cross-language model bootstrap
   still waits on I1.
