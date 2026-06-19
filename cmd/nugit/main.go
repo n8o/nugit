@@ -11,7 +11,9 @@ import (
 	"os"
 	"strings"
 
+	"github.com/n8o/nugit/internal/c4"
 	"github.com/n8o/nugit/internal/config"
+	"github.com/n8o/nugit/internal/consistency"
 	"github.com/n8o/nugit/internal/distill"
 	"github.com/n8o/nugit/internal/engine"
 	"github.com/n8o/nugit/internal/mcp"
@@ -29,6 +31,8 @@ usage:
   nugit context [flags]       scoped, typed knowledge bundle for a path (for agents)
   nugit mcp [flags]           run the MCP stdio server (exposes context() to agents)
   nugit distill [flags]       promote commit-trailer decisions/lessons to durable knowledge
+  nugit c4 render [flags]      render the C4 model as Mermaid
+  nugit explain [check]       rationale + remediation for a consistency check
   nugit pr-render [flags]      compute & render the unified PR view
   nugit version
 
@@ -72,6 +76,10 @@ func main() {
 		os.Exit(cmdHook(os.Args[2:]))
 	case "distill":
 		os.Exit(cmdDistill(os.Args[2:]))
+	case "c4":
+		os.Exit(cmdC4(os.Args[2:]))
+	case "explain":
+		os.Exit(cmdExplain(os.Args[2:]))
 	case "pr-render":
 		os.Exit(cmdPRRender(os.Args[2:]))
 	case "version":
@@ -159,6 +167,55 @@ func cmdInit(args []string) int {
 // cmdHook implements git hook entrypoints. `nugit hook commit-msg <file>`
 // validates the trailer block per config capture.commit_msg (warn|block|off).
 // cmdDistill promotes commit-trailer decisions/lessons into durable .nugit/ objects.
+// cmdC4 renders the C4 model. `nugit c4 render -format mermaid`.
+func cmdC4(args []string) int {
+	if len(args) < 1 || args[0] != "render" {
+		fmt.Fprintln(os.Stderr, "nugit c4: usage: nugit c4 render [-C dir] [-format mermaid]")
+		return 2
+	}
+	fs := flag.NewFlagSet("c4 render", flag.ExitOnError)
+	dir := fs.String("C", ".", "repo directory")
+	format := fs.String("format", "mermaid", "output: mermaid")
+	_ = fs.Parse(args[1:])
+	cfg, _ := config.Load(*dir)
+	dslPath := cfg.C4.DSL
+	if dslPath == "" {
+		dslPath = ".nugit/architecture/workspace.dsl"
+	}
+	src, err := os.ReadFile(*dir + "/" + dslPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "nugit c4 render: %v\n", err)
+		return 1
+	}
+	m := c4.Parse(string(src))
+	switch *format {
+	case "mermaid":
+		fmt.Print(c4.Mermaid(m))
+	default:
+		fmt.Fprintf(os.Stderr, "nugit c4 render: unknown format %q\n", *format)
+		return 2
+	}
+	return 0
+}
+
+// cmdExplain prints the rationale + remediation for a consistency check.
+func cmdExplain(args []string) int {
+	if len(args) == 0 {
+		fmt.Println("consistency checks (nugit explain <check>):")
+		for _, c := range consistency.AllChecks() {
+			fmt.Printf("  %s\n", c)
+		}
+		return 0
+	}
+	s, ok := consistency.Explain(args[0])
+	if !ok {
+		fmt.Fprintf(os.Stderr, "nugit explain: unknown check %q (try `nugit explain`)\n", args[0])
+		return 2
+	}
+	fmt.Printf("%s\n\n%s\n", args[0], s)
+	return 0
+}
+
 func cmdDistill(args []string) int {
 	fs := flag.NewFlagSet("distill", flag.ExitOnError)
 	dir := fs.String("C", ".", "repo directory")

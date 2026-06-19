@@ -140,6 +140,8 @@ workspace "nugit" "Git-native typed knowledge & unified PR view — self-model (
             cli -> mcp "mcp command"
             cli -> distill "distill command"
             cli -> trailers "commit-msg hook validation"
+            cli -> c4 "c4 render command"
+            cli -> consistency "explain command"
         }
     }
 
