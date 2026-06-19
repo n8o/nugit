@@ -1,6 +1,30 @@
 package localmem
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
+
+// A single oversized note must not wipe the whole store (bufio.Scanner ErrTooLong).
+func TestRecentSurvivesOversizedLine(t *testing.T) {
+	dir := t.TempDir()
+	if err := Append(dir, Entry{Text: "first"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := Append(dir, Entry{Text: strings.Repeat("x", 5*1024*1024)}); err != nil { // > old 4MB cap
+		t.Fatal(err)
+	}
+	if err := Append(dir, Entry{Text: "third"}); err != nil {
+		t.Fatal(err)
+	}
+	got := Recent(dir, 10)
+	if len(got) != 3 {
+		t.Fatalf("oversized line dropped entries: got %d, want 3", len(got))
+	}
+	if got[0].Text != "third" {
+		t.Errorf("newest-first broken after big line: %q", got[0].Text)
+	}
+}
 
 func TestAppendAndRecentNewestFirst(t *testing.T) {
 	dir := t.TempDir()

@@ -184,18 +184,27 @@ func knowledgeSection(d model.KnowledgeDelta) string {
 }
 
 func planSection(p model.PlanPosition) string {
+	// Plan labels can carry attacker/author-controlled issue titles — sanitize so a
+	// newline or Markdown metachar can't forge bullets in the trusted plan section.
+	clean := func(ss []string) string {
+		out := make([]string, len(ss))
+		for i, s := range ss {
+			out[i] = esc(oneLine(s))
+		}
+		return strings.Join(out, ", ")
+	}
 	var b strings.Builder
 	if len(p.Completed) > 0 {
-		fmt.Fprintf(&b, "- ✅ done: %s\n", strings.Join(p.Completed, ", "))
+		fmt.Fprintf(&b, "- ✅ done: %s\n", clean(p.Completed))
 	}
 	if p.Current != "" {
-		fmt.Fprintf(&b, "- ▶️ current: %s\n", p.Current)
+		fmt.Fprintf(&b, "- ▶️ current: %s\n", esc(oneLine(p.Current)))
 	}
 	if len(p.Remaining) > 0 {
-		fmt.Fprintf(&b, "- ⏳ remaining: %s\n", strings.Join(p.Remaining, ", "))
+		fmt.Fprintf(&b, "- ⏳ remaining: %s\n", clean(p.Remaining))
 	}
 	if p.Note != "" {
-		fmt.Fprintf(&b, "- _%s_\n", p.Note)
+		fmt.Fprintf(&b, "- _%s_\n", esc(oneLine(p.Note)))
 	}
 	return b.String()
 }

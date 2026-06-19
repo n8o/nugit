@@ -14,18 +14,32 @@ import (
 // team a second, independent enforcement of the same model in CI — deterministic
 // and derived, never hand-maintained.
 func GenArchLint(m model.Model) string {
-	comps := append([]model.Component(nil), m.Components...)
-	sort.Slice(comps, func(i, j int) bool { return comps[i].ID < comps[j].ID })
-
-	// component id -> sorted allowed targets
-	allow := map[string][]string{}
-	for _, c := range comps {
-		allow[c.ID] = nil
-	}
-	for _, r := range m.Relationships {
-		if _, ok := allow[r.Src]; ok {
-			allow[r.Src] = append(allow[r.Src], r.Dst)
+	// Merge components by id (a duplicate id would otherwise emit a duplicate YAML
+	// key); union their path globs.
+	byID := map[string]*model.Component{}
+	var ids []string
+	for i := range m.Components {
+		c := m.Components[i]
+		if ex, ok := byID[c.ID]; ok {
+			ex.Paths = append(ex.Paths, c.Paths...)
+		} else {
+			cp := c
+			byID[cp.ID] = &cp
+			ids = append(ids, cp.ID)
 		}
+	}
+	sort.Strings(ids)
+
+	// id -> allowed targets (only edges whose BOTH ends are real components).
+	allow := map[string][]string{}
+	for _, r := range m.Relationships {
+		if _, okS := byID[r.Src]; !okS {
+			continue
+		}
+		if _, okD := byID[r.Dst]; !okD {
+			continue // never emit a mayDependOn to a non-existent component
+		}
+		allow[r.Src] = append(allow[r.Src], r.Dst)
 	}
 
 	var b strings.Builder
@@ -35,37 +49,44 @@ func GenArchLint(m model.Model) string {
 	b.WriteString("allow:\n  depOnAnyVendor: true\n\n")
 
 	b.WriteString("components:\n")
-	for _, c := range comps {
-		fmt.Fprintf(&b, "  %s:\n", c.ID)
-		paths := append([]string(nil), c.Paths...)
-		sort.Strings(paths)
+	for _, id := range ids {
+		paths := dedupSorted(byID[id].Paths)
+		fmt.Fprintf(&b, "  %s:\n", yamlStr(id))
 		switch len(paths) {
 		case 0:
 			b.WriteString("    in: \"\"\n")
 		case 1:
-			fmt.Fprintf(&b, "    in: %s\n", paths[0])
+			fmt.Fprintf(&b, "    in: %s\n", yamlStr(paths[0]))
 		default:
 			b.WriteString("    in:\n")
 			for _, p := range paths {
-				fmt.Fprintf(&b, "      - %s\n", p)
+				fmt.Fprintf(&b, "      - %s\n", yamlStr(p))
 			}
 		}
 	}
 
 	b.WriteString("\ndeps:\n")
-	for _, c := range comps {
-		fmt.Fprintf(&b, "  %s:\n", c.ID)
-		targets := dedupSorted(allow[c.ID])
+	for _, id := range ids {
+		fmt.Fprintf(&b, "  %s:\n", yamlStr(id))
+		targets := dedupSorted(allow[id])
 		if len(targets) == 0 {
 			b.WriteString("    mayDependOn: []\n")
 			continue
 		}
 		b.WriteString("    mayDependOn:\n")
 		for _, t := range targets {
-			fmt.Fprintf(&b, "      - %s\n", t)
+			fmt.Fprintf(&b, "      - %s\n", yamlStr(t))
 		}
 	}
 	return b.String()
+}
+
+// yamlStr emits a double-quoted YAML scalar so a value/key that looks like a bool,
+// number, null, or contains ":" / YAML-special chars is never silently retyped or
+// breaks the document.
+func yamlStr(s string) string {
+	r := strings.NewReplacer(`\`, `\\`, `"`, `\"`, "\n", `\n`, "\t", `\t`, "\r", `\r`)
+	return `"` + r.Replace(s) + `"`
 }
 
 func dedupSorted(in []string) []string {

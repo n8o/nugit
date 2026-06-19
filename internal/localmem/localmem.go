@@ -59,16 +59,19 @@ func Recent(repoDir string, max int) []Entry {
 	}
 	defer f.Close()
 	var all []Entry
-	sc := bufio.NewScanner(f)
-	sc.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
-	for sc.Scan() {
-		line := strings.TrimSpace(sc.Text())
-		if line == "" {
-			continue
+	// bufio.Reader (not Scanner) so an oversized note line can't trip ErrTooLong
+	// and silently drop every entry after it.
+	rd := bufio.NewReader(f)
+	for {
+		line, err := rd.ReadString('\n')
+		if t := strings.TrimSpace(line); t != "" {
+			var e Entry
+			if json.Unmarshal([]byte(t), &e) == nil && e.Text != "" {
+				all = append(all, e)
+			}
 		}
-		var e Entry
-		if json.Unmarshal([]byte(line), &e) == nil && e.Text != "" {
-			all = append(all, e)
+		if err != nil {
+			break // io.EOF or read error: stop, but keep what parsed
 		}
 	}
 	// newest first

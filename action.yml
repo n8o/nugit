@@ -34,22 +34,31 @@ runs:
 
     - name: Build nugit
       shell: bash
-      run: go build -o "$RUNNER_TEMP/nugit" "${{ github.action_path }}/cmd/nugit"
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+      run: go build -o "$RUNNER_TEMP/nugit" "$ACTION_PATH/cmd/nugit"
 
+    # Every input is passed through env (NEVER interpolated into the script body)
+    # so an attacker-influenced value can't inject shell — GitHub's required pattern.
     - name: Render PR view and report
       shell: bash
       env:
         GH_TOKEN: ${{ inputs.github-token }}
         PR_NUMBER: ${{ github.event.pull_request.number }}
+        INPUT_BASE: ${{ inputs.base }}
+        INPUT_HEAD: ${{ inputs.head }}
+        INPUT_WORKDIR: ${{ inputs.working-directory }}
+        INPUT_FAILON: ${{ inputs.fail-on }}
+        INPUT_COMMENT: ${{ inputs.comment }}
       run: |
         set -o pipefail
         out="$RUNNER_TEMP/nugit.md"
         set +e
         "$RUNNER_TEMP/nugit" pr-render \
-          -C "${{ inputs.working-directory }}" \
-          -base "${{ inputs.base }}" \
-          -head "${{ inputs.head }}" \
-          -fail-on "${{ inputs.fail-on }}" \
+          -C "$INPUT_WORKDIR" \
+          -base "$INPUT_BASE" \
+          -head "$INPUT_HEAD" \
+          -fail-on "$INPUT_FAILON" \
           -format markdown | tee "$out"
         code=${PIPESTATUS[0]}
         set -e
@@ -59,7 +68,7 @@ runs:
 
         # Sticky PR comment (find-by-marker, update or create).
         marker="<!-- nugit-pr-view -->"
-        if [ "${{ inputs.comment }}" = "true" ] && [ -n "${PR_NUMBER:-}" ]; then
+        if [ "$INPUT_COMMENT" = "true" ] && [ -n "${PR_NUMBER:-}" ]; then
           body="$marker"$'\n'"$(cat "$out")"
           existing=$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" \
             --jq "map(select(.body | startswith(\"$marker\"))) | .[0].id // empty" 2>/dev/null || true)

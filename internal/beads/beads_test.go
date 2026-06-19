@@ -2,9 +2,12 @@ package beads
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/n8o/nugit/internal/gitutil"
 )
 
 func TestParseJSONLAndCompute(t *testing.T) {
@@ -37,23 +40,67 @@ func TestParseJSONLAndCompute(t *testing.T) {
 	}
 }
 
-func TestDetectAndPlanPosition(t *testing.T) {
+func gitRun(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, out)
+	}
+}
+
+// PlanPosition reads the store at the reviewed REF, never the working tree.
+func TestPlanPositionAtRef(t *testing.T) {
 	dir := t.TempDir()
-	if Detect(dir) {
-		t.Error("no .beads dir should not detect")
+	gitRun(t, dir, "init", "-q")
+	repo := gitutil.Repo{Dir: dir}
+
+	// no store committed -> degrade (ok=false)
+	os.WriteFile(filepath.Join(dir, "f"), []byte("x"), 0o644)
+	gitRun(t, dir, "add", "-A")
+	gitRun(t, dir, "commit", "-q", "-m", "base")
+	if _, ok := PlanPosition(repo, "HEAD", ""); ok {
+		t.Error("no committed store -> ok=false")
 	}
-	if _, ok := PlanPosition(dir); ok {
-		t.Error("no store -> ok=false (degrade to plan.yml)")
-	}
-	bd := filepath.Join(dir, ".beads")
-	os.MkdirAll(bd, 0o755)
-	os.WriteFile(filepath.Join(bd, "issues.jsonl"),
+
+	// commit a store
+	os.MkdirAll(filepath.Join(dir, ".beads"), 0o755)
+	os.WriteFile(filepath.Join(dir, ".beads", "issues.jsonl"),
 		[]byte(`{"id":"bd-1","title":"E","issue_type":"epic","status":"open"}`+"\n"), 0o644)
-	if !Detect(dir) {
-		t.Error("a .beads/*.jsonl should detect")
-	}
-	pos, ok := PlanPosition(dir)
+	gitRun(t, dir, "add", "-A")
+	gitRun(t, dir, "commit", "-q", "-m", "add beads")
+
+	pos, ok := PlanPosition(repo, "HEAD", "")
 	if !ok || !pos.Present || len(pos.Remaining) != 1 {
-		t.Errorf("expected one remaining epic, got ok=%v pos=%+v", ok, pos)
+		t.Fatalf("expected one remaining epic at HEAD, got ok=%v pos=%+v", ok, pos)
+	}
+
+	// an UNCOMMITTED working-tree edit must NOT change the result read at HEAD
+	os.WriteFile(filepath.Join(dir, ".beads", "issues.jsonl"),
+		[]byte(`{"id":"bd-1","title":"E","issue_type":"epic","status":"closed"}`+"\n"), 0o644)
+	pos2, _ := PlanPosition(repo, "HEAD", "")
+	if len(pos2.Completed) != 0 || len(pos2.Remaining) != 1 {
+		t.Errorf("working-tree edit leaked into the ref read: %+v", pos2)
+	}
+}
+
+func TestDedupByIDLastWins(t *testing.T) {
+	issues := []Issue{
+		{ID: "bd-1", Title: "old", Status: "open", Type: "epic"},
+		{ID: "bd-1", Title: "new", Status: "closed", Type: "epic"},
+	}
+	pos := compute(dedupByID(issues))
+	if len(pos.Completed) != 1 || len(pos.Remaining) != 0 {
+		t.Errorf("duplicate id not collapsed last-wins: %+v", pos)
+	}
+}
+
+func TestNumericIDAndTrim(t *testing.T) {
+	is := ParseJSONL([]byte(`{"id":42,"title":"x","issue_type":" Epic ","status":" Closed "}`))
+	if len(is) != 1 || is[0].ID != "42" {
+		t.Fatalf("numeric id not coerced: %+v", is)
+	}
+	if is[0].Type != "epic" || is[0].Status != "closed" {
+		t.Errorf("type/status not trimmed+lowered: %+v", is[0])
 	}
 }

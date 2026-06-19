@@ -204,12 +204,10 @@ func workingMemory(repoDir, comp string, kw map[string]bool) []string {
 }
 
 func hasKeyword(e localmem.Entry, kw map[string]bool) bool {
-	hay := strings.ToLower(e.Text)
-	for _, k := range e.Keywords {
-		hay += " " + strings.ToLower(k)
-	}
-	for w := range kw {
-		if strings.Contains(hay, w) {
+	// Whole-token match (same tokenization as keywords()), not substring — so "go"
+	// doesn't spuriously match "algorithm".
+	for tok := range keywords(e.Text + " " + strings.Join(e.Keywords, " ")) {
+		if kw[tok] {
 			return true
 		}
 	}

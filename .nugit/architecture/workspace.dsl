@@ -104,6 +104,7 @@ workspace "nugit" "Git-native typed knowledge & unified PR view — self-model (
             delta -> beads "reads the plan graph"
 
             beads -> model_ "uses types"
+            beads -> gitutil "reads the store at the reviewed ref"
 
             consistency -> model_ "uses types"
             consistency -> gitutil "reads refs"

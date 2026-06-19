@@ -11,38 +11,69 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
+	"sort"
 	"strings"
 
+	"github.com/n8o/nugit/internal/gitutil"
 	"github.com/n8o/nugit/internal/model"
 )
 
-// Detect reports whether repoDir has a Beads store (a .beads/ dir with JSONL).
-func Detect(repoDir string) bool {
-	ms, _ := filepath.Glob(filepath.Join(repoDir, ".beads", "*.jsonl"))
-	return len(ms) > 0
-}
-
-// PlanPosition derives the plan delta from the Beads store. The bool is false
-// when there is no usable store (so the caller degrades to plan.yml).
-func PlanPosition(repoDir string) (model.PlanPosition, bool) {
-	ms, _ := filepath.Glob(filepath.Join(repoDir, ".beads", "*.jsonl"))
-	if len(ms) == 0 {
+// PlanPosition derives the plan delta from the Beads store committed at ref
+// (under prefix, the nugit root). Read at the reviewed ref — like every other
+// delta — so the report is a pure function of (base, head), never the working
+// tree. The bool is false when there is no usable store (caller degrades to
+// plan.yml).
+func PlanPosition(repo gitutil.Repo, ref, prefix string) (model.PlanPosition, bool) {
+	paths, err := repo.ListTree(ref)
+	if err != nil {
 		return model.PlanPosition{}, false
 	}
+	want := prefix + ".beads/"
+	found := false
+	var files []string
+	for _, p := range paths {
+		if strings.HasPrefix(p, want) && strings.HasSuffix(p, ".jsonl") {
+			files = append(files, p)
+			found = true
+		}
+	}
+	if !found {
+		return model.PlanPosition{}, false
+	}
+	sort.Strings(files) // stable order across runs
 	var issues []Issue
-	for _, m := range ms {
-		b, err := os.ReadFile(m)
-		if err != nil {
+	for _, p := range files {
+		src, e := repo.ShowFile(ref, p)
+		if e != nil {
 			continue
 		}
-		issues = append(issues, ParseJSONL(b)...)
+		issues = append(issues, ParseJSONL([]byte(src))...)
 	}
+	issues = dedupByID(issues)
 	if len(issues) == 0 {
 		return model.PlanPosition{}, false
 	}
 	return compute(issues), true
+}
+
+// dedupByID collapses duplicate ids (Beads JSONL is a sync log; last write wins),
+// preserving first-seen order for the surviving set.
+func dedupByID(in []Issue) []Issue {
+	idx := map[string]int{}
+	var out []Issue
+	for _, it := range in {
+		if it.ID == "" {
+			out = append(out, it) // untitled-but-keyless already filtered in ParseJSONL
+			continue
+		}
+		if i, ok := idx[it.ID]; ok {
+			out[i] = it // last write wins
+			continue
+		}
+		idx[it.ID] = len(out)
+		out = append(out, it)
+	}
+	return out
 }
 
 // Issue is the subset of a Beads issue nugit reads.
@@ -69,8 +100,8 @@ func ParseJSONL(b []byte) []Issue {
 		it := Issue{
 			ID:     getStr(m, "id", "key"),
 			Title:  getStr(m, "title", "summary", "name"),
-			Status: strings.ToLower(getStr(m, "status", "state")),
-			Type:   strings.ToLower(getStr(m, "issue_type", "type", "kind")),
+			Status: norm(getStr(m, "status", "state")),
+			Type:   norm(getStr(m, "issue_type", "type", "kind")),
 		}
 		if it.ID == "" && it.Title == "" {
 			continue
@@ -111,10 +142,14 @@ func compute(issues []Issue) model.PlanPosition {
 		}
 	}
 	unit := "issue"
+	hidden := ""
 	if epicsOnly {
 		unit = "epic"
+		if n := len(issues) - len(scope); n > 0 {
+			hidden = fmt.Sprintf(", %d non-epic issue(s) not shown", n)
+		}
 	}
-	note := fmt.Sprintf("via Beads — %d %s(s): %d done, %d remaining (forecast)", len(scope), unit, len(done), len(remaining))
+	note := fmt.Sprintf("via Beads — %d %s(s): %d done, %d remaining%s (forecast)", len(scope), unit, len(done), len(remaining), hidden)
 	return model.PlanPosition{
 		Present:   true,
 		Completed: done,
@@ -150,12 +185,23 @@ func isActive(s string) bool {
 	return false
 }
 
+func norm(s string) string { return strings.ToLower(strings.TrimSpace(s)) }
+
 func getStr(m map[string]any, keys ...string) string {
 	for _, k := range keys {
-		if v, ok := m[k]; ok {
-			if s, ok := v.(string); ok && s != "" {
-				return s
+		v, ok := m[k]
+		if !ok || v == nil {
+			continue
+		}
+		switch t := v.(type) {
+		case string:
+			if t != "" {
+				return t
 			}
+		case float64: // JSON numbers (e.g. a numeric id) decode to float64
+			return strings.TrimSuffix(fmt.Sprintf("%v", t), ".0")
+		case bool:
+			return fmt.Sprintf("%v", t)
 		}
 	}
 	return ""

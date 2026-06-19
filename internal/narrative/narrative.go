@@ -37,7 +37,9 @@ func Generate(rep model.Report, repoDir string, enabled bool, modelName string) 
 		modelName = defaultModel
 	}
 	prompt := buildPrompt(rep)
-	h := hashStr(modelName + "\n" + prompt)
+	// Key on the ref pair too: the cache dir is shared across all refs, so without
+	// this PR A's summary could be served for PR B that shares commit subjects.
+	h := hashStr(modelName + "\n" + rep.BaseRef + ".." + rep.HeadRef + "\n" + prompt)
 	if cached, ok := readCache(repoDir, h); ok {
 		return cached
 	}
@@ -65,6 +67,26 @@ func buildPrompt(rep model.Report) string {
 		for _, fd := range rep.Findings {
 			fmt.Fprintf(&f, "- [%s] %s: %s\n", fd.Severity, fd.Check, fd.Title)
 		}
+	}
+	// The architecture delta is the most important fact to summarize — and it makes
+	// the prompt (and thus the cache key) distinguish materially different PRs.
+	c4 := rep.C4
+	if n := len(c4.AddedComponents) + len(c4.RemovedComponents) + len(c4.ChangedComponents) +
+		len(c4.AddedRels) + len(c4.RemovedRels) + len(c4.ChangedRels); n > 0 {
+		f.WriteString("Architecture (C4) delta:\n")
+		for _, c := range c4.AddedComponents {
+			fmt.Fprintf(&f, "- + component %s\n", c.ID)
+		}
+		for _, c := range c4.RemovedComponents {
+			fmt.Fprintf(&f, "- - component %s\n", c.ID)
+		}
+		for _, r := range c4.AddedRels {
+			fmt.Fprintf(&f, "- + relationship %s -> %s\n", r.Src, r.Dst)
+		}
+		for _, r := range c4.RemovedRels {
+			fmt.Fprintf(&f, "- - relationship %s -> %s\n", r.Src, r.Dst)
+		}
+		fmt.Fprintf(&f, "  (%d component change(s) total)\n", len(c4.ChangedComponents)+len(c4.ChangedRels))
 	}
 	if len(rep.Knowledge.Changes) > 0 {
 		fmt.Fprintf(&f, "Knowledge objects changed: %d\n", len(rep.Knowledge.Changes))

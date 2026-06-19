@@ -68,7 +68,7 @@ func BuildReport(opt Options) (model.Report, error) {
 	if err != nil {
 		return model.Report{}, err
 	}
-	plan := delta.Plan(opt.RepoDir)
+	plan := delta.Plan(repo, opt.Head, prefix)
 
 	commits, err := repo.Log(base, opt.Head)
 	if err != nil {
