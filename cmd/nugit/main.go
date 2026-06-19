@@ -172,13 +172,15 @@ func cmdInit(args []string) int {
 // cmdDistill promotes commit-trailer decisions/lessons into durable .nugit/ objects.
 // cmdC4 renders the C4 model. `nugit c4 render -format mermaid`.
 func cmdC4(args []string) int {
-	if len(args) < 1 || args[0] != "render" {
-		fmt.Fprintln(os.Stderr, "nugit c4: usage: nugit c4 render [-C dir] [-format mermaid]")
+	if len(args) < 1 || (args[0] != "render" && args[0] != "gen-rules") {
+		fmt.Fprintln(os.Stderr, "nugit c4: usage: nugit c4 (render|gen-rules) [-C dir] [flags]")
 		return 2
 	}
-	fs := flag.NewFlagSet("c4 render", flag.ExitOnError)
+	sub := args[0]
+	fs := flag.NewFlagSet("c4 "+sub, flag.ExitOnError)
 	dir := fs.String("C", ".", "repo directory")
-	format := fs.String("format", "mermaid", "output: mermaid")
+	format := fs.String("format", "mermaid", "render output: mermaid")
+	out := fs.String("o", "", "gen-rules: write to this file instead of stdout")
 	_ = fs.Parse(args[1:])
 	cfg, _ := config.Load(*dir)
 	dslPath := cfg.C4.DSL
@@ -187,10 +189,23 @@ func cmdC4(args []string) int {
 	}
 	src, err := os.ReadFile(*dir + "/" + dslPath)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "nugit c4 render: %v\n", err)
+		fmt.Fprintf(os.Stderr, "nugit c4 %s: %v\n", sub, err)
 		return 1
 	}
 	m := c4.Parse(string(src))
+	if sub == "gen-rules" {
+		cfgYML := c4.GenArchLint(m)
+		if *out != "" {
+			if err := os.WriteFile(*out, []byte(cfgYML), 0o644); err != nil {
+				fmt.Fprintf(os.Stderr, "nugit c4 gen-rules: %v\n", err)
+				return 1
+			}
+			fmt.Printf("Wrote go-arch-lint config to %s (%d components).\n", *out, len(m.Components))
+			return 0
+		}
+		fmt.Print(cfgYML)
+		return 0
+	}
 	switch *format {
 	case "mermaid":
 		fmt.Print(c4.Mermaid(m))
