@@ -1,18 +1,21 @@
 # nugit — roadmap to "truly feature-complete"
 
-## Status: all five phases shipped ✅
+## Status: feature-complete against the plan ✅
+
+Every item in the "Definition of truly feature-complete" below is shipped:
 
 | Phase | What | State |
 |---|---|---|
 | **P1** Any-repo + monorepo | git-root coordinates + structural bootstrap | ✅ shipped + reviewed |
-| **P2** Multi-language | Go + C++ (CMake) + **Python** + **TypeScript** analyzers + enforcement | ✅ shipped + reviewed |
+| **P2** Multi-language | Go + C++ (CMake) + **Python** + **TypeScript** + `c4 gen-rules` | ✅ shipped + reviewed |
 | **P3** Retrieval | `context()` composer + `nugit context` + MCP server | ✅ shipped + reviewed |
-| **P4** Capture lifecycle | commit-msg hook + `nugit distill` | ✅ shipped + reviewed |
-| **P5** Presentation | `c4 render` (Mermaid) + `nugit explain` | ✅ shipped + reviewed |
+| **P4** Capture lifecycle | commit-msg hook + **`.nugit-local` + `remember`** + `distill` | ✅ shipped + reviewed |
+| **P5** Presentation | `c4 render` + `explain` + **Beads** + **opt-in LLM narrative** + **composite Action** | ✅ shipped + reviewed |
 
-**Deferred-with-trigger** (ADR-0004): the FTS/vector index, content-addressing +
-merge driver, `nugit compact`, the LLM prose narrative, and a live Beads adapter.
-`.nugit-local/` ephemeral memory is the remaining P4 sub-feature.
+**Genuinely deferred-with-trigger** (ADR-0004 — build only when the trigger fires,
+never silently cancelled): the FTS/vector retrieval index (today: keyword + scope,
+in-memory), content-addressing + git merge driver (N/A under ADR-0001's human keys),
+`nugit compact` (erasure/GC), and multi-root orchestration. None block adoption.
 
 The original framing follows.
 
