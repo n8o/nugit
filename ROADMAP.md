@@ -12,8 +12,8 @@ feasibility research). Five epics, ~**4–6 weeks**, dependency-ordered.
 
 1. **Adopts on any codebase** — polyglot + monorepo (a module/subtree nested inside
    a larger git repo) works; the language-neutral PR view runs everywhere.
-2. **Architecture enforcement for Go + TypeScript + Python** (C++ is a deliberate
-   exception — see Honest constraints).
+2. **Architecture enforcement for Go + TypeScript + Python + C++** — C++ via
+   CMake's dependency graph (`target_link_libraries`), not the language.
 3. **`context(path)` retrieval** — a deterministic, scoped, bounded knowledge bundle
    exposed as an MCP tool (the "agents forget across sessions" half of the thesis).
 4. **The store fills itself** — commit-msg hook + ephemeral working memory + a
@@ -23,13 +23,29 @@ feasibility research). Five epics, ~**4–6 weeks**, dependency-ordered.
 6. Deferred items stay deferred *with named triggers* (not silently cancelled);
    `go test ./...` green throughout.
 
+## C++: enforced via CMake, not the language
+
+The language-level objection (C++ has no module system; `#include` graphs are a
+preprocessor mess) is real — but **CMake is the dependency system**, and it's
+queryable. `target_link_libraries(foo PRIVATE bar)` is an explicit "component foo
+depends on bar" edge at exactly C4-component altitude. Two routes, both real:
+
+- **Static `target_link_libraries` parse** — zero configure, zero build env.
+  Proven on JBS: **122 components, 204 edges** (`nmos_node`, `st2110_common`,
+  `media_transport` as the core libs). Approximate (misses variable/conditional/
+  function-defined edges).
+- **CMake File API** (you're on cmake 4.2) — exact targets + sources + link deps
+  from a *configured* build dir. Accurate; resolves the edges static parse can't
+  (JBS has 1,816 `target_link_libraries` calls). Cost: needs a configured build
+  tree (a project that already builds in CI has one — reuse it, no fresh configure).
+
+Honest residual: it's **target/module-level** (not catching a rogue `#include`
+*inside* an already-linked dependency — which is the right altitude for C4 anyway);
+the accurate path needs a build dir; and **non-CMake C++** (raw Make/Bazel) would
+fall back to the static parse or warn-only.
+
 ## Honest constraints (what we will NOT build, and why)
 
-- **C++ architecture enforcement is cut.** Import-graph analysis for C++ is a
-  research problem (preprocessor `#include`s, no module system). JBS's C++ gets the
-  **structural model + full language-neutral PR view**, plus an *opt-in, warn-only*
-  `#include` approximation that **never gates CI** — never hard enforcement like
-  Go/TS/Python. This is the main thing to accept up front, since JBS is C++-heavy.
 - **LLM narrative** is descoped to last and opt-in (the deterministic line already
   conveys the facts).
 - **Index / merge-driver / `nugit compact` / multi-root orchestration** stay
@@ -53,13 +69,19 @@ emitting components + globs with **no edges**, so any repo gets the full PR view
 
 ### P2 — Multi-language enforcement  ·  `I1-MULTILANG` (+ `c4 gen-rules`)  ·  ~L/XL
 Refactor `goimports` behind one **`Analyzer` interface** (changed-file → internal
-dep dirs) consumed by both `consistency` and `bootstrap`; add **TypeScript/JS**
-(dependency-cruiser, MIT — emits resolved-path JSON that drops straight into
-`mapping.ResolveDir`) and **Python** (stdlib-AST walk, no install needed) backends.
+dep dirs) consumed by both `consistency` and `bootstrap`; add backends:
+- **TypeScript/JS** — dependency-cruiser (MIT; emits resolved-path JSON that drops
+  straight into `mapping.ResolveDir`).
+- **Python** — stdlib-AST walk (no install needed).
+- **C++ — CMake** — static `target_link_libraries` parse (zero-config, proven on
+  JBS) with the File API as the accurate upgrade when a configured build dir is
+  present. Components = CMake targets, edges = link deps.
+
 Add `nugit c4 gen-rules` (model → go-arch-lint config) as the generator half.
-- **Gate:** a TS and a Python fixture each bootstrap green, then an undeclared
-  cross-component import is flagged; a missing analyzer binary emits one *info*
-  finding (never a silent pass); all backends resolve via the same `ResolveDir`.
+- **Gate:** TS, Python, and a CMake C++ fixture each bootstrap green, then an
+  undeclared cross-component dependency is flagged; a missing analyzer binary (or
+  no CMake build dir) emits one *info* finding (never a silent pass); all backends
+  resolve via the same `ResolveDir`.
 
 ### P3 — Retrieval `context(path)` + MCP  ·  `R1`  ·  ~L  ·  **2nd half of the thesis**
 The `§8.2` composer: scoped (package→root inheritance, nearer-scope wins), typed,
@@ -97,7 +119,8 @@ MONO-1 ─▶ I1-MULTILANG ─▶ R1 ─▶ CAPTURE-LIFECYCLE
 
 - **MONO-1 is the unblock and the foundation** — it makes paths consistent, which
   everything downstream (multi-lang ResolveDir, retrieval scoping) depends on.
-- C++ enforcement, full index/vector store, merge driver, multi-root: **cut/deferred.**
+- Full index/vector store, merge driver, `nugit compact`, multi-root orchestration:
+  **deferred-with-trigger** (ADR-0004).
 
 ## Biggest risks
 
@@ -109,9 +132,12 @@ MONO-1 ─▶ I1-MULTILANG ─▶ R1 ─▶ CAPTURE-LIFECYCLE
 
 ## Open decisions for you
 
-1. **C++:** accept "structural model + warn-only `#include` approximation, no hard
-   enforcement" as the C++ story? (It's the realistic ceiling.)
+1. **C++ default:** zero-config static `target_link_libraries` parse (works today,
+   ~204 edges on JBS), or the File API when a build dir is present (accurate,
+   resolves all 1,816 link calls) falling back to static? Recommendation: ship
+   static as the default, File API as an opt-in upgrade.
 2. **Scope:** build all five phases (~4–6 wks), or stop after P1–P2 (any-codebase +
-   multi-lang enforcement) and treat retrieval/capture as a later push?
-3. **JBS granularity:** components per `apps/*` + `libs/*` child (default), or per
-   top-level dir? (Tunable once we see the real layout.)
+   multi-lang enforcement incl. C++) and treat retrieval/capture as a later push?
+3. **JBS granularity:** for C++ the components fall out of CMake targets (122 of
+   them) — keep them 1:1, or group targets into coarser subsystems? For the
+   non-CMake parts, components per `apps/*` + `libs/*` child or per top-level dir?
