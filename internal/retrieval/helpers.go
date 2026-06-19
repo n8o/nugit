@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/n8o/nugit/internal/knowledge"
 	"github.com/n8o/nugit/internal/model"
@@ -56,7 +57,8 @@ func relevant(o *model.KnowledgeObject, comp, path string) bool {
 			return true
 		}
 	}
-	return false
+	// A global/unscoped spec serves a path that has no component-scoped spec.
+	return o.Scope == "" || o.Scope == "global"
 }
 
 func toItem(o *model.KnowledgeObject, via string) Item {
@@ -198,7 +200,9 @@ func dedup(ss []string) []string {
 	return out
 }
 
-func tokensOf(s string) int { return len(s)/4 + 1 }
+// tokensOf is a coarse rune-based token estimate (~4 chars/token), rune-counted
+// so multibyte content (em-dashes, unicode) isn't over-counted ~3x.
+func tokensOf(s string) int { return utf8.RuneCountInString(s)/4 + 1 }
 
 func firstWord(s string) string {
 	f := strings.Fields(s)

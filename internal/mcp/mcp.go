@@ -33,28 +33,30 @@ type rpcError struct {
 	Message string `json:"message"`
 }
 
-// Serve runs the stdio MCP loop until in is exhausted.
+// Serve runs the stdio MCP loop until in is exhausted. It uses a bufio.Reader
+// (not a Scanner) so an arbitrarily large LLM-facing request never overflows a
+// token-size cap and tears down the session.
 func Serve(repoDir string, in io.Reader, out io.Writer) error {
-	sc := bufio.NewScanner(in)
-	sc.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
+	rd := bufio.NewReader(in)
 	enc := json.NewEncoder(out)
-	for sc.Scan() {
-		line := bytes.TrimSpace(sc.Bytes())
-		if len(line) == 0 {
-			continue
+	for {
+		line, err := rd.ReadBytes('\n')
+		if t := bytes.TrimSpace(line); len(t) > 0 {
+			var req request
+			if json.Unmarshal(t, &req) == nil && len(req.ID) != 0 {
+				if e := enc.Encode(handle(repoDir, req)); e != nil {
+					return e
+				}
+			}
+			// a notification (no id) or unparseable line: no reply, keep going
 		}
-		var req request
-		if err := json.Unmarshal(line, &req); err != nil {
-			continue
-		}
-		if len(req.ID) == 0 {
-			continue // a notification (e.g. notifications/initialized) — no reply
-		}
-		if err := enc.Encode(handle(repoDir, req)); err != nil {
+		if err != nil {
+			if err == io.EOF {
+				return nil
+			}
 			return err
 		}
 	}
-	return sc.Err()
 }
 
 func handle(repoDir string, req request) response {

@@ -116,6 +116,11 @@ func Context(opt Options) (Bundle, error) {
 		}
 		switch o.Type {
 		case model.KindDecision:
+			// Component-scoped decisions always; global ones only when relevant to
+			// the task (else every global decision floods every path's bundle).
+			if (o.Scope == "" || o.Scope == "global") && len(kw) > 0 && !matches(o, kw) {
+				continue
+			}
 			decisions = append(decisions, toItem(o, ""))
 			pulled[o.ID] = true
 		case model.KindSpec:
@@ -134,8 +139,14 @@ func Context(opt Options) (Bundle, error) {
 		}
 	}
 
-	// One-hop relates_to traversal: pull the "why" linked by in-scope objects.
-	for _, src := range append(append([]Item{}, decisions...), lessons...) {
+	// One-hop relates_to traversal: pull the "why" linked by in-scope objects
+	// (including the active spec — its justifying decision is exactly the "why").
+	seeds := append([]Item{}, decisions...)
+	seeds = append(seeds, lessons...)
+	if spec != nil {
+		seeds = append(seeds, *spec)
+	}
+	for _, src := range seeds {
 		o := byKey[src.ID]
 		if o == nil {
 			continue
@@ -147,6 +158,10 @@ func Context(opt Options) (Bundle, error) {
 				continue
 			}
 			pulled[tgt.ID] = true
+			// Never surface a superseded/invalidated rationale as live context.
+			if st := effectiveStatus(tgt); st == model.StatusSuperseded || st == model.StatusInvalidated {
+				continue
+			}
 			via := edge.Relation + ":" + src.ID
 			if tgt.Type == model.KindDecision {
 				decisions = append(decisions, toItem(tgt, via))
@@ -173,6 +188,12 @@ func truncate(b *Bundle, budget int) {
 	used := tokensOf(b.C4.Component) + 20
 	if b.Spec != nil {
 		used += b.Spec.tokens
+	}
+	// The mandatory c4+spec baseline can itself exceed the budget — surface that
+	// rather than returning EstimatedTokens > budget with Truncated=false.
+	if used > budget {
+		b.Truncated = true
+		b.Dropped = append(b.Dropped, "(c4+spec baseline exceeds the token budget)")
 	}
 	add := func(items []Item, kind string) []Item {
 		var kept []Item
