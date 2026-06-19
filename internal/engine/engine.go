@@ -68,7 +68,7 @@ func BuildReport(opt Options) (model.Report, error) {
 	if err != nil {
 		return model.Report{}, err
 	}
-	plan := delta.Plan(repo, opt.Head, prefix)
+	plan := delta.DiffPlan(repo, base, opt.Head, prefix)
 
 	commits, err := repo.Log(base, opt.Head)
 	if err != nil {
@@ -139,6 +139,7 @@ func BuildReport(opt Options) (model.Report, error) {
 		Plan:         plan,
 		Findings:     findings,
 		Significance: sig,
+		HeadModel:    headModel,
 	}
 	// Opt-in, off by default: inert (no network) unless explicitly enabled +
 	// architectural + ANTHROPIC_API_KEY set. Never alters the deterministic facts.

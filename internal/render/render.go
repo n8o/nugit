@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/n8o/nugit/internal/c4"
 	"github.com/n8o/nugit/internal/model"
 )
 
@@ -42,7 +43,11 @@ func Markdown(rep model.Report) string {
 	expandCode := true // code delta always relevant
 	expandKnow := tier != model.TierTrivial && !rep.Knowledge.Empty()
 
-	b.WriteString(details("🏛 Architecture delta (C4)", c4Section(rep.C4), expandArch))
+	arch := c4Section(rep.C4)
+	if dia := c4.MermaidDiff(rep.C4, rep.HeadModel); dia != "" {
+		arch += "\n" + dia
+	}
+	b.WriteString(details("🏛 Architecture delta (C4)", arch, expandArch))
 	b.WriteString(details("📝 Code delta (grouped by component)", codeSection(rep.Code), expandCode))
 	b.WriteString(details("📚 Knowledge delta", knowledgeSection(rep.Knowledge), expandKnow))
 	if rep.Plan.Present {
@@ -202,6 +207,24 @@ func planSection(p model.PlanPosition) string {
 	}
 	if len(p.Remaining) > 0 {
 		fmt.Fprintf(&b, "- ⏳ remaining: %s\n", clean(p.Remaining))
+	}
+	if p.Changed() {
+		b.WriteString("\n**Changes since base:**\n")
+		if len(p.NewlyCompleted) > 0 {
+			fmt.Fprintf(&b, "- ✅ newly completed: %s\n", clean(p.NewlyCompleted))
+		}
+		if len(p.NewlyStarted) > 0 {
+			fmt.Fprintf(&b, "- ▶️ newly started: %s\n", clean(p.NewlyStarted))
+		}
+		if len(p.AddedItems) > 0 {
+			fmt.Fprintf(&b, "- ➕ added: %s\n", clean(p.AddedItems))
+		}
+		if len(p.RemovedItems) > 0 {
+			fmt.Fprintf(&b, "- ➖ removed: %s\n", clean(p.RemovedItems))
+		}
+		if len(p.Regressed) > 0 {
+			fmt.Fprintf(&b, "- ⚠️ reopened: %s\n", clean(p.Regressed))
+		}
 	}
 	if p.Note != "" {
 		fmt.Fprintf(&b, "- _%s_\n", esc(oneLine(p.Note)))

@@ -249,6 +249,18 @@ type PlanPosition struct {
 	Current   string
 	Remaining []string
 	Note      string
+	// Diff vs the base ref (what moved), populated by delta.DiffPlan.
+	NewlyCompleted []string
+	NewlyStarted   []string
+	AddedItems     []string
+	RemovedItems   []string
+	Regressed      []string // were done at base, no longer done at head (reopened)
+}
+
+// Changed reports whether the plan moved between base and head.
+func (p PlanPosition) Changed() bool {
+	return len(p.NewlyCompleted) > 0 || len(p.NewlyStarted) > 0 ||
+		len(p.AddedItems) > 0 || len(p.RemovedItems) > 0 || len(p.Regressed) > 0
 }
 
 // ---- Cross-artifact consistency ----
@@ -302,4 +314,7 @@ type Report struct {
 	Findings     []Finding
 	Significance Significance
 	Narrative    string // optional opt-in LLM prose; "" on the deterministic path
+	// HeadModel feeds the in-comment C4 diagram only; kept out of the structured
+	// JSON contract (it would leak every component's path globs to reviewer agents).
+	HeadModel Model `json:"-"`
 }

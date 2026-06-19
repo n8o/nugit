@@ -98,6 +98,7 @@ workspace "nugit" "Git-native typed knowledge & unified PR view — self-model (
             knowledge -> model_ "uses types"
             significance -> model_ "uses types"
             render -> model_ "uses types"
+            render -> c4 "renders the focused C4 diff diagram"
 
             delta -> model_ "uses types"
             delta -> c4 "parses + diffs the model"
