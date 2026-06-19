@@ -130,11 +130,19 @@ knowledge objects under [`.nugit/decisions/`](.nugit/decisions/). Start with
 first) and [ADR-0002](.nugit/decisions/0002-file-to-component-binding.md) (the
 file→component primitive).
 
-## Install
+## Install & upgrade
 
 ```sh
-go install github.com/n8o/nugit/cmd/nugit@latest
+go install github.com/n8o/nugit/cmd/nugit@latest    # or @v0.1.0 to pin a release
+nugit version                                        # confirm what you have
 ```
+
+**Upgrade** by re-running the same command (`@latest` or a newer tag) — it
+overwrites the binary in place, so an existing MCP wiring (`.mcp.json` points at
+the binary) and the `nugit` skill keep working; just restart your editor so it
+relaunches the MCP server. In CI, bump the Action pin (`uses: n8o/nugit@v0.1.0` →
+`@v0.2.0`). `.nugit/` stores are plain git text and forward-compatible within a
+schema version. Ensure `~/go/bin` is on `PATH`.
 
 ## Status & license
 
