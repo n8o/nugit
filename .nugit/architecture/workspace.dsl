@@ -59,6 +59,12 @@ workspace "nugit" "Git-native typed knowledge & unified PR view — self-model (
             eval = component "Eval" "Labeled corpus measuring heuristic accuracy" "Go" {
                 properties { paths "internal/eval/**" }
             }
+            retrieval = component "Retrieval" "context(path): scoped typed knowledge bundle" "Go" {
+                properties { paths "internal/retrieval/**" }
+            }
+            mcp = component "MCP server" "Exposes context() as an MCP stdio tool" "Go" {
+                properties { paths "internal/mcp/**" }
+            }
             cli = component "CLI" "nugit command entrypoint" "Go" {
                 properties { paths "cmd/nugit/**" }
             }
@@ -108,11 +114,21 @@ workspace "nugit" "Git-native typed knowledge & unified PR view — self-model (
             eval -> engine "runs the corpus"
             eval -> model_ "uses types"
 
+            retrieval -> c4 "parses the model"
+            retrieval -> config "reads config"
+            retrieval -> knowledge "loads objects"
+            retrieval -> mapping "resolves the component"
+            retrieval -> model_ "uses types"
+
+            mcp -> retrieval "serves context()"
+
             cli -> model_ "uses types"
             cli -> engine "builds report"
             cli -> render "emits output"
             cli -> scaffold "runs init"
             cli -> config "reads fail-on default"
+            cli -> retrieval "context command"
+            cli -> mcp "mcp command"
         }
     }
 

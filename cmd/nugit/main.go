@@ -5,6 +5,7 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
@@ -12,8 +13,10 @@ import (
 
 	"github.com/n8o/nugit/internal/config"
 	"github.com/n8o/nugit/internal/engine"
+	"github.com/n8o/nugit/internal/mcp"
 	"github.com/n8o/nugit/internal/model"
 	"github.com/n8o/nugit/internal/render"
+	"github.com/n8o/nugit/internal/retrieval"
 	"github.com/n8o/nugit/internal/scaffold"
 )
 
@@ -21,8 +24,16 @@ const usage = `nugit — git-native PR view (thin keystone)
 
 usage:
   nugit init [flags]          scaffold .nugit/ and bootstrap a C4 model from the import graph
+  nugit context [flags]       scoped, typed knowledge bundle for a path (for agents)
   nugit pr-render [flags]      compute & render the unified PR view
   nugit version
+
+context flags:
+  -C dir         repo directory (default ".")
+  -path p        file or dir the agent is operating on (required)
+  -task t        task description for keyword matching
+  -budget n      token budget (default 4000)
+  -format f      markdown (default) | json
 
 init flags:
   -C dir            repo directory (default ".")
@@ -49,6 +60,10 @@ func main() {
 	switch os.Args[1] {
 	case "init":
 		os.Exit(cmdInit(os.Args[2:]))
+	case "context":
+		os.Exit(cmdContext(os.Args[2:]))
+	case "mcp":
+		os.Exit(cmdMCP(os.Args[2:]))
 	case "pr-render":
 		os.Exit(cmdPRRender(os.Args[2:]))
 	case "version":
@@ -129,6 +144,50 @@ func cmdInit(args []string) int {
 	case res.Components > 0:
 		fmt.Printf("A workspace.dsl already exists (left unchanged); discovered %d component(s), %d edge(s). Use -force to regenerate.\n",
 			res.Components, res.Edges)
+	}
+	return 0
+}
+
+func cmdMCP(args []string) int {
+	fs := flag.NewFlagSet("mcp", flag.ExitOnError)
+	dir := fs.String("C", ".", "repo directory")
+	_ = fs.Parse(args)
+	if err := mcp.Serve(*dir, os.Stdin, os.Stdout); err != nil {
+		fmt.Fprintf(os.Stderr, "nugit mcp: %v\n", err)
+		return 1
+	}
+	return 0
+}
+
+func cmdContext(args []string) int {
+	fs := flag.NewFlagSet("context", flag.ExitOnError)
+	dir := fs.String("C", ".", "repo directory")
+	path := fs.String("path", "", "file or dir the agent is operating on (required)")
+	task := fs.String("task", "", "task description for keyword matching")
+	budget := fs.Int("budget", 0, "token budget (default 4000)")
+	format := fs.String("format", "markdown", "output: markdown|json")
+	_ = fs.Parse(args)
+	if *path == "" {
+		fmt.Fprintln(os.Stderr, "nugit context: -path is required")
+		return 2
+	}
+	b, err := retrieval.Context(retrieval.Options{
+		RepoDir: *dir, Path: *path, Task: *task, BudgetTokens: *budget,
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "nugit context: %v\n", err)
+		return 1
+	}
+	switch *format {
+	case "json":
+		out, err := json.MarshalIndent(b, "", "  ")
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "nugit context: %v\n", err)
+			return 1
+		}
+		fmt.Println(string(out))
+	default:
+		fmt.Print(b.Markdown())
 	}
 	return 0
 }
