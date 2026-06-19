@@ -9,6 +9,10 @@ var explanations = map[string]string{
 		"Fix: add the `src -> dst` relationship to the model, or remove the import.",
 	"cmake<->code": "CMake target_link_libraries links two components the model does not declare.\n" +
 		"Fix: add the `src -> dst` relationship to workspace.dsl, or remove the link.",
+	"python<->code": "A Python import crosses two components the model does not declare.\n" +
+		"Fix: add the `src -> dst` relationship to workspace.dsl, or remove the import.",
+	"ts<->code": "A TypeScript/JS import crosses two components the model does not declare (resolved by dependency-cruiser).\n" +
+		"Fix: add the `src -> dst` relationship, remove the import, or install dependency-cruiser to enforce TS edges.",
 	"stale-knowledge": "The PR changes code governed by a superseded/invalidated knowledge object without updating it.\n" +
 		"Fix: update the object, or supersede it with a new record.",
 	"decision-coverage": "An architecturally-significant change has no accompanying decision record.\n" +

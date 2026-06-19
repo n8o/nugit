@@ -19,7 +19,9 @@ import (
 	"github.com/n8o/nugit/internal/knowledge"
 	"github.com/n8o/nugit/internal/mapping"
 	"github.com/n8o/nugit/internal/model"
+	"github.com/n8o/nugit/internal/pyimports"
 	"github.com/n8o/nugit/internal/trailers"
+	"github.com/n8o/nugit/internal/tsdeps"
 )
 
 // Input bundles everything the checks need (all already computed).
@@ -50,15 +52,63 @@ type Input struct {
 // significance verdict, which in turn gates decision-coverage — running it
 // separately avoids a dependency cycle.
 func C4CodeFindings(in Input) []model.Finding {
-	fs := append(checkC4Code(in), checkCMakeCode(in)...)
-	return Sort(append(fs, checkModelHealth(in)...))
+	fs := checkC4Code(in)
+	fs = append(fs, checkCMakeCode(in)...)
+	fs = append(fs, checkPythonCode(in)...)
+	fs = append(fs, checkTSCode(in)...)
+	fs = append(fs, checkModelHealth(in)...)
+	return Sort(fs)
 }
 
 // IsUndeclaredEdge reports whether a finding is a genuine code-introduced
-// cross-component dependency the model doesn't declare (Go or CMake), as opposed
+// cross-component dependency the model doesn't declare (any language), as opposed
 // to a model-health warning.
 func IsUndeclaredEdge(f model.Finding) bool {
-	return f.Check == "c4<->code" || f.Check == "cmake<->code"
+	switch f.Check {
+	case "c4<->code", "cmake<->code", "python<->code", "ts<->code":
+		return true
+	}
+	return false
+}
+
+// flagDirEdges maps a language's directory dependency edges onto component edges
+// and flags those the model doesn't declare, for components the PR touched. The
+// single enforcement core shared by CMake/Python/TS (Go has its own per-file path).
+func flagDirEdges(in Input, check, detailFmt string, edges [][2]string) []model.Finding {
+	touched := map[string]bool{}
+	for _, fc := range in.Code.Files {
+		if fc.Component != "" {
+			touched[fc.Component] = true
+		}
+	}
+	sev := model.SevFail
+	if in.C4Warn {
+		sev = model.SevWarn
+	}
+	seen := map[[2]string]bool{}
+	var fs []model.Finding
+	for _, e := range edges {
+		src := in.Mapper.ResolveDir(in.Prefix + e[0])
+		dst := in.Mapper.ResolveDir(in.Prefix + e[1])
+		if src == "" || dst == "" || src == dst || !touched[src] {
+			continue
+		}
+		if in.HeadModel.HasRelationship(src, dst) {
+			continue
+		}
+		k := [2]string{src, dst}
+		if seen[k] {
+			continue
+		}
+		seen[k] = true
+		fs = append(fs, model.Finding{
+			Check:    check,
+			Severity: sev,
+			Title:    fmt.Sprintf("undeclared dependency %s → %s", src, dst),
+			Detail:   fmt.Sprintf(detailFmt, src, dst),
+		})
+	}
+	return fs
 }
 
 // checkCMakeCode is the C++ analogue of checkC4Code: it re-derives the CMake
@@ -77,44 +127,49 @@ func checkCMakeCode(in Input) []model.Finding {
 		return nil // not a CMake project at this ref
 	}
 	cg := cmake.DiscoverFiles(files)
-	if len(cg.Edges) == 0 {
+	return flagDirEdges(in, "cmake<->code",
+		"CMake links %s → %s via target_link_libraries, but workspace.dsl declares no such relationship; add it or remove the link",
+		cg.Edges)
+}
+
+// checkPythonCode flags Python imports between components the model doesn't
+// declare. Derived from the working tree (== head in CI); changed-file detection
+// is still ref-correct via the code delta.
+func checkPythonCode(in Input) []model.Finding {
+	if in.Mapper.Empty() || in.HeadModel.Structural() || !pyimports.Detect(in.RepoDir) {
 		return nil
 	}
-	touched := map[string]bool{}
-	for _, fc := range in.Code.Files {
-		if fc.Component != "" {
-			touched[fc.Component] = true
-		}
+	pg, err := pyimports.Discover(in.RepoDir)
+	if err != nil {
+		return nil
 	}
-	sev := model.SevFail
-	if in.C4Warn {
-		sev = model.SevWarn
+	return flagDirEdges(in, "python<->code",
+		"Python imports %s → %s, but workspace.dsl declares no such relationship; add it or remove the import",
+		pg.Edges)
+}
+
+// checkTSCode flags TypeScript/JS imports the model doesn't declare, via
+// dependency-cruiser. When it isn't installed, emit one info finding (TS edges
+// unenforced) rather than silently passing.
+func checkTSCode(in Input) []model.Finding {
+	if in.Mapper.Empty() || in.HeadModel.Structural() || !tsdeps.Detect(in.RepoDir) {
+		return nil
 	}
-	seen := map[[2]string]bool{}
-	var fs []model.Finding
-	for _, e := range cg.Edges {
-		src := in.Mapper.ResolveDir(in.Prefix + e[0])
-		dst := in.Mapper.ResolveDir(in.Prefix + e[1])
-		if src == "" || dst == "" || src == dst || !touched[src] {
-			continue
-		}
-		if in.HeadModel.HasRelationship(src, dst) {
-			continue
-		}
-		k := [2]string{src, dst}
-		if seen[k] {
-			continue
-		}
-		seen[k] = true
-		fs = append(fs, model.Finding{
-			Check:    "cmake<->code",
-			Severity: sev,
-			Title:    fmt.Sprintf("undeclared dependency %s → %s", src, dst),
-			Detail: fmt.Sprintf("CMake links %s → %s via target_link_libraries, but workspace.dsl declares no such relationship; "+
-				"add the relationship to the model or remove the link", src, dst),
-		})
+	if !tsdeps.Available() {
+		return []model.Finding{{
+			Check:    "ts<->code",
+			Severity: model.SevInfo,
+			Title:    "TypeScript architecture unenforced",
+			Detail:   "dependency-cruiser is not installed, so TS import edges aren't checked; `npm i -g dependency-cruiser` to enforce them",
+		}}
 	}
-	return fs
+	tg, _, err := tsdeps.Discover(in.RepoDir)
+	if err != nil {
+		return nil
+	}
+	return flagDirEdges(in, "ts<->code",
+		"TypeScript imports %s → %s, but workspace.dsl declares no such relationship; add it or remove the import",
+		tg.Edges)
 }
 
 // checkModelHealth surfaces authoring errors in workspace.dsl that would

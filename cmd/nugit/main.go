@@ -134,9 +134,9 @@ func cmdInit(args []string) int {
 		fmt.Println("Scaffolded .nugit/. A workspace.dsl already exists (left unchanged); use -force to replace it with a template.")
 	case res.ModelEmpty:
 		fmt.Println("No components found — wrote a template workspace.dsl. Define your components and paths globs by hand.")
-	case res.WroteModel && res.CMake:
-		fmt.Printf("Bootstrapped a C4 model from CMake: %d component(s), %d dependency edge(s) (target_link_libraries), in %s mode.\n",
-			res.Components, res.Edges, res.Mode)
+	case res.WroteModel && res.Backend != "":
+		fmt.Printf("Bootstrapped a C4 model from %s: %d component(s), %d dependency edge(s), in %s mode.\n",
+			res.Backend, res.Components, res.Edges, res.Mode)
 		fmt.Println("Next: review .nugit/architecture/workspace.dsl, then run `nugit pr-render`.")
 		if res.Mode == "warn" {
 			fmt.Println("When the model is ratified, set c4.mode to `enforce` in .nugit/config.yml.")
@@ -249,15 +249,21 @@ func cmdHook(args []string) int {
 	}
 	switch args[0] {
 	case "commit-msg":
-		if len(args) < 2 {
+		fs := flag.NewFlagSet("hook commit-msg", flag.ContinueOnError)
+		dir := fs.String("C", ".", "nugit root (relative to the git toplevel)")
+		if fs.Parse(args[1:]) != nil {
+			return 0 // never block a commit on a flag parse error
+		}
+		rest := fs.Args()
+		if len(rest) < 1 {
 			fmt.Fprintln(os.Stderr, "nugit hook commit-msg: missing message file")
 			return 2
 		}
-		cfg, _ := config.Load(".")
+		cfg, _ := config.Load(*dir)
 		if cfg.Capture.CommitMsg == "off" {
 			return 0
 		}
-		b, err := os.ReadFile(args[1])
+		b, err := os.ReadFile(rest[0])
 		if err != nil {
 			return 0 // never block a commit on a hook read error
 		}

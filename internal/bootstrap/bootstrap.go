@@ -20,6 +20,8 @@ import (
 	"github.com/n8o/nugit/internal/goimports"
 	"github.com/n8o/nugit/internal/mapping"
 	"github.com/n8o/nugit/internal/model"
+	"github.com/n8o/nugit/internal/pyimports"
+	"github.com/n8o/nugit/internal/tsdeps"
 )
 
 // Component is a discovered package directory that becomes a C4 component.
@@ -179,28 +181,18 @@ func GenerateDSL(g Graph, name string) string {
 // DetectCMake reports whether rootDir is a CMake project.
 func DetectCMake(rootDir string) bool { return cmake.Detect(rootDir) }
 
-// DiscoverCMake builds a component graph from CMake's target_link_libraries:
-// directory-level components (dirs that define targets) WITH edges (link deps),
-// statically, no configure. The root "." aggregate targets are dropped for a
-// clean first-pass model. This makes a C++/CMake repo's architecture enforceable.
-func DiscoverCMake(repoDir string) (Graph, error) {
-	cg, err := cmake.Discover(repoDir)
-	if err != nil {
-		return Graph{}, err
-	}
-	prefix := gitutil.Repo{Dir: repoDir}.Prefix()
-
-	// Keep the root "." component (root-defined targets) — dropping it would
-	// silently delete every edge that touches a root target. Its glob is the
-	// root-files glob "*" (single segment), so it owns top-level files without
-	// swallowing deeper components.
-	idOf := assignIDs(cg.Dirs)
+// fromDirGraph converts a language-agnostic directory graph (dirs + dir->dir
+// edges) into a bootstrap.Graph with stable ids and git-root-relative globs. The
+// root "." gets the single-segment "*" glob so it owns top-level files without
+// swallowing deeper components. Shared by every dir-graph backend (CMake/Py/TS).
+func fromDirGraph(prefix string, dirs []string, edges [][2]string) Graph {
+	idOf := assignIDs(dirs)
 	g := Graph{}
-	for _, d := range cg.Dirs {
+	for _, d := range dirs {
 		g.Components = append(g.Components, Component{ID: idOf[d], Name: lastSeg(d), Dir: d, Glob: gitRootGlob(prefix, d, "*")})
 	}
 	edgeSet := map[[2]string]bool{}
-	for _, e := range cg.Edges {
+	for _, e := range edges {
 		s, sok := idOf[e[0]]
 		t, tok := idOf[e[1]]
 		if sok && tok && s != t {
@@ -216,7 +208,40 @@ func DiscoverCMake(repoDir string) (Graph, error) {
 		}
 		return g.Edges[i][1] < g.Edges[j][1]
 	})
-	return g, nil
+	return g
+}
+
+// DiscoverCMake builds an edged C4 model from CMake target_link_libraries.
+func DiscoverCMake(repoDir string) (Graph, error) {
+	cg, err := cmake.Discover(repoDir)
+	if err != nil {
+		return Graph{}, err
+	}
+	return fromDirGraph(gitutil.Repo{Dir: repoDir}.Prefix(), cg.Dirs, cg.Edges), nil
+}
+
+// DetectPython / DiscoverPython — Python package import graph (pure Go).
+func DetectPython(rootDir string) bool { return pyimports.Detect(rootDir) }
+
+func DiscoverPython(repoDir string) (Graph, error) {
+	pg, err := pyimports.Discover(repoDir)
+	if err != nil {
+		return Graph{}, err
+	}
+	return fromDirGraph(gitutil.Repo{Dir: repoDir}.Prefix(), pg.Dirs, pg.Edges), nil
+}
+
+// DetectTS / DiscoverTS — TypeScript/JS graph via dependency-cruiser. The bool is
+// whether dependency-cruiser was available; false yields an empty (edge-free)
+// model so the caller can warn that TS edges are unenforced.
+func DetectTS(rootDir string) bool { return tsdeps.Detect(rootDir) }
+
+func DiscoverTS(repoDir string) (Graph, bool, error) {
+	tg, avail, err := tsdeps.Discover(repoDir)
+	if err != nil {
+		return Graph{}, avail, err
+	}
+	return fromDirGraph(gitutil.Repo{Dir: repoDir}.Prefix(), tg.Dirs, tg.Edges), avail, nil
 }
 
 // gitRootGlob returns the git-root-relative paths glob for a nugit-root-relative

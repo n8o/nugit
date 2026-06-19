@@ -23,6 +23,12 @@ workspace "nugit" "Git-native typed knowledge & unified PR view — self-model (
             cmake = component "CMake analyzer" "Static target_link_libraries dependency graph" "Go" {
                 properties { paths "internal/cmake/**" }
             }
+            pyimports = component "Python analyzer" "Python import graph (pure Go)" "Go" {
+                properties { paths "internal/pyimports/**" }
+            }
+            tsdeps = component "TS analyzer" "TypeScript graph via dependency-cruiser" "Go" {
+                properties { paths "internal/tsdeps/**" }
+            }
             c4 = component "C4 parser + diff" "Structurizr DSL subset + structural delta" "Go" {
                 properties { paths "internal/c4/**" }
             }
@@ -94,6 +100,8 @@ workspace "nugit" "Git-native typed knowledge & unified PR view — self-model (
             consistency -> mapping "resolves components"
             consistency -> trailers "validates capture hygiene"
             consistency -> cmake "re-derives the CMake graph for enforcement"
+            consistency -> pyimports "re-derives the Python graph for enforcement"
+            consistency -> tsdeps "re-derives the TS graph for enforcement"
 
             engine -> model_ "uses types"
             engine -> consistency "runs checks"
@@ -108,6 +116,8 @@ workspace "nugit" "Git-native typed knowledge & unified PR view — self-model (
 
             bootstrap -> goimports "reads import graph"
             bootstrap -> cmake "reads CMake dependency graph"
+            bootstrap -> pyimports "reads Python import graph"
+            bootstrap -> tsdeps "reads TS dependency graph"
             bootstrap -> mapping "resolves edges like the check does"
             bootstrap -> gitutil "git-root prefix for globs"
             bootstrap -> model_ "uses types"

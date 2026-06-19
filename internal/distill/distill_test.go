@@ -20,6 +20,52 @@ func git(t *testing.T, dir string, args ...string) string {
 	return string(out)
 }
 
+// Two distinct lessons that slug identically must get distinct files + ids, and a
+// multi-affects decision must scope global (P4 review findings).
+func TestDistillSlugCollisionAndMultiAffectsScope(t *testing.T) {
+	dir := t.TempDir()
+	git(t, dir, "init", "-q")
+	os.WriteFile(filepath.Join(dir, "f"), []byte("a"), 0o644)
+	git(t, dir, "add", "-A")
+	git(t, dir, "commit", "-q", "-m", "base")
+	base := git(t, dir, "rev-parse", "HEAD")[:40]
+
+	os.WriteFile(filepath.Join(dir, "f"), []byte("b"), 0o644)
+	git(t, dir, "add", "-A")
+	git(t, dir, "commit", "-q", "-m", "c1\n\ndecision: cross-cutting choice\naffects: web, api\nlearned: cache invalidation!\nkeywords: x")
+	os.WriteFile(filepath.Join(dir, "f"), []byte("c"), 0o644)
+	git(t, dir, "add", "-A")
+	git(t, dir, "commit", "-q", "-m", "c2\n\ndecision: another choice\nlearned: cache invalidation?\nkeywords: y")
+
+	res, err := Distill(Options{RepoDir: dir, Base: base, Head: "HEAD", Now: "2026-01-01T00:00:00Z"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// both lessons promoted to DISTINCT files (slug collision disambiguated)
+	if len(res.Lessons) != 2 {
+		t.Fatalf("want 2 distinct lesson files, got %v", res.Lessons)
+	}
+	if res.Lessons[0] == res.Lessons[1] {
+		t.Errorf("colliding lessons wrote the same path: %v", res.Lessons)
+	}
+
+	objs, _ := knowledge.Load(dir)
+	ids := map[string]bool{}
+	var crossCut bool
+	for _, o := range objs {
+		if ids[o.ID] {
+			t.Errorf("duplicate id %s", o.ID)
+		}
+		ids[o.ID] = true
+		if o.Type == "decision" && o.Scope == "global" {
+			crossCut = true // the multi-affects (web, api) decision scoped global
+		}
+	}
+	if !crossCut {
+		t.Error("a decision with affects: web, api must scope global, not the first component")
+	}
+}
+
 func TestDistillPromotesAndIsIdempotent(t *testing.T) {
 	dir := t.TempDir()
 	git(t, dir, "init", "-q")

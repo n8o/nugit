@@ -24,7 +24,7 @@ func Mermaid(m model.Model) string {
 	var b strings.Builder
 	b.WriteString("graph LR\n")
 	for _, c := range comps {
-		fmt.Fprintf(&b, "  %s[%q]\n", c.ID, label(c))
+		fmt.Fprintf(&b, "  %s[\"%s\"]\n", c.ID, mermaidLabel(label(c)))
 	}
 	for _, r := range rels {
 		fmt.Fprintf(&b, "  %s --> %s\n", r.Src, r.Dst)
@@ -38,3 +38,13 @@ func label(c model.Component) string {
 	}
 	return c.ID
 }
+
+// mermaidLabel escapes for Mermaid (NOT Go's %q): a literal quote or square
+// bracket otherwise closes the node and breaks GitHub's parser. Entity-encode the
+// dangerous characters and flatten newlines.
+var mermaidEsc = strings.NewReplacer(
+	`"`, "&quot;", "[", "&#91;", "]", "&#93;",
+	"{", "&#123;", "}", "&#125;", "\n", " ", "\r", " ",
+)
+
+func mermaidLabel(s string) string { return mermaidEsc.Replace(s) }

@@ -30,13 +30,14 @@ type Result struct {
 	Components    int
 	Edges         int
 	Mode          string
-	ModelEmpty    bool // no components found; wrote a template
-	WroteModel    bool // a bootstrapped (non-template) workspace.dsl was written
-	Structural    bool // components came from the directory layout (no edges)
-	CMake         bool // components + edges came from CMake target_link_libraries
-	DSLCreated    bool // a workspace.dsl was actually written (not skipped)
-	PolyglotHint  bool // a root go.mod was used but the layout suggests a polyglot repo
-	HookInstalled bool // a commit-msg hook was installed
+	ModelEmpty    bool   // no components found; wrote a template
+	WroteModel    bool   // a bootstrapped (non-template) workspace.dsl was written
+	Structural    bool   // components came from the directory layout (no edges)
+	CMake         bool   // components + edges came from CMake target_link_libraries
+	Backend       string // human label of the edged backend (CMake/Python imports/TypeScript)
+	DSLCreated    bool   // a workspace.dsl was actually written (not skipped)
+	PolyglotHint  bool   // a root go.mod was used but the layout suggests a polyglot repo
+	HookInstalled bool   // a commit-msg hook was installed
 }
 
 // Run scaffolds .nugit/ under opt.RepoDir.
@@ -76,12 +77,25 @@ func Run(opt Options) (Result, error) {
 	case opt.NoModel:
 		put(dslPath, templateDSL(name))
 	case opt.Layout == "cmake":
-		// Explicit CMake backend: edged C++ model from target_link_libraries.
 		g, err := bootstrap.DiscoverCMake(opt.RepoDir)
 		if err != nil {
 			return res, err
 		}
-		res.Components, res.Edges, res.CMake = len(g.Components), len(g.Edges), true
+		res.Components, res.Edges, res.CMake, res.Backend = len(g.Components), len(g.Edges), true, "CMake"
+		writeModel(&res, put, dslPath, g, name)
+	case opt.Layout == "python":
+		g, err := bootstrap.DiscoverPython(opt.RepoDir)
+		if err != nil {
+			return res, err
+		}
+		res.Components, res.Edges, res.Backend = len(g.Components), len(g.Edges), "Python imports"
+		writeModel(&res, put, dslPath, g, name)
+	case opt.Layout == "ts":
+		g, _, err := bootstrap.DiscoverTS(opt.RepoDir)
+		if err != nil {
+			return res, err
+		}
+		res.Components, res.Edges, res.Backend = len(g.Components), len(g.Edges), "TypeScript (dependency-cruiser)"
 		writeModel(&res, put, dslPath, g, name)
 	case opt.Layout != "":
 		// Explicit structural layout (any codebase).
@@ -129,15 +143,24 @@ func Run(opt Options) (Result, error) {
 		}
 		res.Components, res.Edges = len(g.Components), len(g.Edges)
 		writeModel(&res, put, dslPath, g, name)
-	case bootstrap.DetectCMake(opt.RepoDir):
-		// A CMake project (no Go module): derive an edged C++ model from
-		// target_link_libraries — a real, enforceable architecture, no configure.
-		g, err := bootstrap.DiscoverCMake(opt.RepoDir)
+	case bootstrap.DetectCMake(opt.RepoDir) || bootstrap.DetectPython(opt.RepoDir) || bootstrap.DetectTS(opt.RepoDir):
+		// No Go module, but a buildsystem/language we can derive edges from
+		// (CMake -> Python -> TS, in that order). An edged model is enforceable.
+		g, backend, err := autoEdged(opt.RepoDir)
 		if err != nil {
 			return res, err
 		}
-		res.Components, res.Edges, res.CMake = len(g.Components), len(g.Edges), true
-		writeModel(&res, put, dslPath, g, name)
+		if len(g.Components) > 0 {
+			res.Components, res.Edges, res.Backend, res.CMake = len(g.Components), len(g.Edges), backend, backend == "CMake"
+			writeModel(&res, put, dslPath, g, name)
+		} else {
+			sg, err := bootstrap.DiscoverStructural(opt.RepoDir, bootstrap.StructuralOptions{ContainerDirs: opt.ComponentDirs})
+			if err != nil {
+				return res, err
+			}
+			res.Components, res.Structural = len(sg.Components), true
+			writeModel(&res, put, dslPath, sg, name)
+		}
 	default:
 		// No Go module / CMake rooted here (polyglot / non-Go / monorepo root): a
 		// structural directory-layout model is the right default — incidental Go
@@ -180,10 +203,16 @@ func installCommitMsgHook(res *Result, repoDir string, force bool) {
 	if err := os.MkdirAll(hooks, 0o755); err != nil {
 		return
 	}
+	// Git runs hooks with cwd = git toplevel; when the nugit root is nested, embed
+	// its prefix so the hook loads the right .nugit/config.yml (not the toplevel's).
+	cArg := ""
+	if prefix := strings.TrimSuffix(gitutil.Repo{Dir: repoDir}.Prefix(), "/"); prefix != "" {
+		cArg = " -C \"" + prefix + "\""
+	}
 	script := "#!/bin/sh\n" +
 		"# installed by `nugit init` — validates the commit-trailer block (§6.1)\n" +
 		"command -v nugit >/dev/null 2>&1 || exit 0\n" +
-		"exec nugit hook commit-msg \"$1\"\n"
+		"exec nugit hook commit-msg" + cArg + " \"$1\"\n"
 	if os.WriteFile(path, []byte(script), 0o755) == nil {
 		res.Created = append(res.Created, path)
 		res.HookInstalled = true
@@ -252,6 +281,39 @@ func writeModel(res *Result, put func(string, string), dslPath string, g bootstr
 func hasGoMod(dir string) bool {
 	_, err := os.Stat(filepath.Join(dir, "go.mod"))
 	return err == nil
+}
+
+// autoEdged tries each non-Go edged backend in priority order (CMake, Python,
+// TypeScript) and returns the first that yields components, with a human label.
+func autoEdged(repoDir string) (bootstrap.Graph, string, error) {
+	if bootstrap.DetectCMake(repoDir) {
+		g, err := bootstrap.DiscoverCMake(repoDir)
+		if err != nil {
+			return bootstrap.Graph{}, "", err
+		}
+		if len(g.Components) > 0 {
+			return g, "CMake", nil
+		}
+	}
+	if bootstrap.DetectPython(repoDir) {
+		g, err := bootstrap.DiscoverPython(repoDir)
+		if err != nil {
+			return bootstrap.Graph{}, "", err
+		}
+		if len(g.Components) > 0 {
+			return g, "Python imports", nil
+		}
+	}
+	if bootstrap.DetectTS(repoDir) {
+		g, _, err := bootstrap.DiscoverTS(repoDir)
+		if err != nil {
+			return bootstrap.Graph{}, "", err
+		}
+		if len(g.Components) > 0 {
+			return g, "TypeScript (dependency-cruiser)", nil
+		}
+	}
+	return bootstrap.Graph{}, "", nil
 }
 
 func contains(ss []string, s string) bool {
