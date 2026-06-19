@@ -41,6 +41,9 @@ workspace "nugit" "Git-native typed knowledge & unified PR view — self-model (
             delta = component "Delta engine" "Computes the four deterministic deltas" "Go" {
                 properties { paths "internal/delta/**" }
             }
+            beads = component "Beads adapter" "Reads .beads/*.jsonl for plan position" "Go" {
+                properties { paths "internal/beads/**" }
+            }
             consistency = component "Consistency checks" "Cross-artifact verification" "Go" {
                 properties { paths "internal/consistency/**" }
             }
@@ -92,6 +95,7 @@ workspace "nugit" "Git-native typed knowledge & unified PR view — self-model (
             delta -> gitutil "reads refs"
             delta -> knowledge "parses objects"
             delta -> mapping "groups by component"
+            delta -> beads "reads the plan graph"
 
             consistency -> model_ "uses types"
             consistency -> gitutil "reads refs"

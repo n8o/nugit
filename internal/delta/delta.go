@@ -4,7 +4,6 @@
 package delta
 
 import (
-	"path/filepath"
 	"sort"
 	"strings"
 
@@ -92,18 +91,4 @@ func Knowledge(repo gitutil.Repo, base, head, prefix string) (model.KnowledgeDel
 	}
 	sort.Slice(d.Changes, func(i, j int) bool { return d.Changes[i].Path < d.Changes[j].Path })
 	return d, nil
-}
-
-// Plan reads an optional committed plan file for the plan-position delta. Beads
-// integration is deferred (review item); for the keystone we read a simple
-// .nugit/plan.yml if present, else report Present=false.
-func Plan(repoDir string) model.PlanPosition {
-	// Intentionally minimal and dependency-free: look for a plan marker file.
-	for _, name := range []string{".nugit/plan.yml", ".nugit/plan.yaml"} {
-		p := filepath.Join(repoDir, name)
-		if pos, ok := readPlan(p); ok {
-			return pos
-		}
-	}
-	return model.PlanPosition{Present: false, Note: "no .nugit/plan.yml (Beads plan integration deferred)"}
 }
