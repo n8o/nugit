@@ -21,6 +21,10 @@ significance:
 
 pr_render:
   fail_on: fail
+
+capture:
+  # commit_msg: warn | block | off — validate the trailer block on commit
+  commit_msg: warn
 `, mode)
 }
 

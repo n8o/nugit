@@ -27,6 +27,9 @@ type Config struct {
 	PRRender struct {
 		FailOn string `yaml:"fail_on"`
 	} `yaml:"pr_render"`
+	Capture struct {
+		CommitMsg string `yaml:"commit_msg"` // warn (default) | block | off
+	} `yaml:"capture"`
 }
 
 // Default returns the built-in defaults used when config.yml is absent or a key
@@ -40,6 +43,7 @@ func Default() Config {
 	c.Significance.TrivialMaxFiles = 2
 	c.Significance.TrivialMaxChurn = 20
 	c.PRRender.FailOn = "fail"
+	c.Capture.CommitMsg = "warn"
 	return c
 }
 
@@ -83,6 +87,10 @@ func LoadBytes(b []byte) (Config, error) {
 	}
 	if c.PRRender.FailOn == "" {
 		c.PRRender.FailOn = "fail"
+	}
+	c.Capture.CommitMsg = strings.ToLower(strings.TrimSpace(c.Capture.CommitMsg))
+	if c.Capture.CommitMsg != "block" && c.Capture.CommitMsg != "off" {
+		c.Capture.CommitMsg = "warn"
 	}
 	return c, nil
 }

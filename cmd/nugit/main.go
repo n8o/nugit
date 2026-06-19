@@ -12,19 +12,23 @@ import (
 	"strings"
 
 	"github.com/n8o/nugit/internal/config"
+	"github.com/n8o/nugit/internal/distill"
 	"github.com/n8o/nugit/internal/engine"
 	"github.com/n8o/nugit/internal/mcp"
 	"github.com/n8o/nugit/internal/model"
 	"github.com/n8o/nugit/internal/render"
 	"github.com/n8o/nugit/internal/retrieval"
 	"github.com/n8o/nugit/internal/scaffold"
+	"github.com/n8o/nugit/internal/trailers"
 )
 
 const usage = `nugit — git-native PR view (thin keystone)
 
 usage:
-  nugit init [flags]          scaffold .nugit/ and bootstrap a C4 model from the import graph
+  nugit init [flags]          scaffold .nugit/ and bootstrap a C4 model
   nugit context [flags]       scoped, typed knowledge bundle for a path (for agents)
+  nugit mcp [flags]           run the MCP stdio server (exposes context() to agents)
+  nugit distill [flags]       promote commit-trailer decisions/lessons to durable knowledge
   nugit pr-render [flags]      compute & render the unified PR view
   nugit version
 
@@ -64,6 +68,10 @@ func main() {
 		os.Exit(cmdContext(os.Args[2:]))
 	case "mcp":
 		os.Exit(cmdMCP(os.Args[2:]))
+	case "hook":
+		os.Exit(cmdHook(os.Args[2:]))
+	case "distill":
+		os.Exit(cmdDistill(os.Args[2:]))
 	case "pr-render":
 		os.Exit(cmdPRRender(os.Args[2:]))
 	case "version":
@@ -146,6 +154,78 @@ func cmdInit(args []string) int {
 			res.Components, res.Edges)
 	}
 	return 0
+}
+
+// cmdHook implements git hook entrypoints. `nugit hook commit-msg <file>`
+// validates the trailer block per config capture.commit_msg (warn|block|off).
+// cmdDistill promotes commit-trailer decisions/lessons into durable .nugit/ objects.
+func cmdDistill(args []string) int {
+	fs := flag.NewFlagSet("distill", flag.ExitOnError)
+	dir := fs.String("C", ".", "repo directory")
+	base := fs.String("base", "HEAD~1", "base ref")
+	head := fs.String("head", "HEAD", "head ref")
+	min := fs.Int("min-recur", 2, "min recurrences for a lesson to promote")
+	_ = fs.Parse(args)
+	res, err := distill.Distill(distill.Options{RepoDir: *dir, Base: *base, Head: *head, MinRecur: *min})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "nugit distill: %v\n", err)
+		return 1
+	}
+	for _, p := range res.Decisions {
+		fmt.Printf("  promoted decision  %s\n", p)
+	}
+	for _, p := range res.Lessons {
+		fmt.Printf("  promoted lesson    %s\n", p)
+	}
+	if len(res.Decisions) == 0 && len(res.Lessons) == 0 {
+		fmt.Printf("Nothing to promote (%d already in the store).\n", res.Skipped)
+	} else {
+		fmt.Printf("\nPromoted %d decision(s), %d lesson(s). Review and commit them with the PR.\n", len(res.Decisions), len(res.Lessons))
+	}
+	return 0
+}
+
+func cmdHook(args []string) int {
+	if len(args) < 1 {
+		fmt.Fprintln(os.Stderr, "nugit hook: usage: nugit hook commit-msg <file>")
+		return 2
+	}
+	switch args[0] {
+	case "commit-msg":
+		if len(args) < 2 {
+			fmt.Fprintln(os.Stderr, "nugit hook commit-msg: missing message file")
+			return 2
+		}
+		cfg, _ := config.Load(".")
+		if cfg.Capture.CommitMsg == "off" {
+			return 0
+		}
+		b, err := os.ReadFile(args[1])
+		if err != nil {
+			return 0 // never block a commit on a hook read error
+		}
+		// the body is everything after the subject line
+		msg := string(b)
+		body := msg
+		if i := strings.IndexByte(msg, '\n'); i >= 0 {
+			body = msg[i+1:]
+		}
+		warns := trailers.Validate(trailers.Parse(body))
+		if len(warns) == 0 {
+			return 0
+		}
+		for _, w := range warns {
+			fmt.Fprintf(os.Stderr, "nugit: %s\n", w)
+		}
+		if cfg.Capture.CommitMsg == "block" {
+			fmt.Fprintln(os.Stderr, "nugit: commit blocked (capture.commit_msg: block). Fix the trailer or remove the block.")
+			return 1
+		}
+		return 0 // warn mode: advise, don't block
+	default:
+		fmt.Fprintf(os.Stderr, "nugit hook: unknown hook %q\n", args[0])
+		return 2
+	}
 }
 
 func cmdMCP(args []string) int {

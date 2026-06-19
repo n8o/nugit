@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"fmt"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -48,6 +49,20 @@ func (r Repo) Prefix() string {
 		return ""
 	}
 	return strings.TrimSpace(out)
+}
+
+// HooksDir returns the absolute path of the repo's git hooks directory, or ""
+// when Dir is not in a git repo.
+func (r Repo) HooksDir() string {
+	out, err := r.git("rev-parse", "--git-path", "hooks")
+	if err != nil {
+		return ""
+	}
+	p := strings.TrimSpace(out)
+	if !filepath.IsAbs(p) {
+		p = filepath.Join(r.Dir, p)
+	}
+	return p
 }
 
 // Toplevel returns the absolute path of the git working-tree root, or Dir if it

@@ -56,6 +56,9 @@ workspace "nugit" "Git-native typed knowledge & unified PR view — self-model (
             scaffold = component "Scaffold" "nugit init: writes the .nugit/ tree" "Go" {
                 properties { paths "internal/scaffold/**" }
             }
+            distill = component "Distiller" "Promotes commit trailers to durable knowledge" "Go" {
+                properties { paths "internal/distill/**" }
+            }
             eval = component "Eval" "Labeled corpus measuring heuristic accuracy" "Go" {
                 properties { paths "internal/eval/**" }
             }
@@ -110,6 +113,12 @@ workspace "nugit" "Git-native typed knowledge & unified PR view — self-model (
             bootstrap -> model_ "uses types"
 
             scaffold -> bootstrap "generates the model"
+            scaffold -> gitutil "installs the commit-msg hook"
+
+            distill -> gitutil "reads the commit range"
+            distill -> trailers "parses trailers"
+            distill -> knowledge "dedups against the store"
+            distill -> model_ "uses types"
 
             eval -> engine "runs the corpus"
             eval -> model_ "uses types"
@@ -129,6 +138,8 @@ workspace "nugit" "Git-native typed knowledge & unified PR view — self-model (
             cli -> config "reads fail-on default"
             cli -> retrieval "context command"
             cli -> mcp "mcp command"
+            cli -> distill "distill command"
+            cli -> trailers "commit-msg hook validation"
         }
     }
 

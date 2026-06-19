@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/n8o/nugit/internal/bootstrap"
+	"github.com/n8o/nugit/internal/gitutil"
 )
 
 // Options configures an init run.
@@ -24,17 +25,18 @@ type Options struct {
 
 // Result reports what init did.
 type Result struct {
-	Created      []string
-	Skipped      []string
-	Components   int
-	Edges        int
-	Mode         string
-	ModelEmpty   bool // no components found; wrote a template
-	WroteModel   bool // a bootstrapped (non-template) workspace.dsl was written
-	Structural   bool // components came from the directory layout (no edges)
-	CMake        bool // components + edges came from CMake target_link_libraries
-	DSLCreated   bool // a workspace.dsl was actually written (not skipped)
-	PolyglotHint bool // a root go.mod was used but the layout suggests a polyglot repo
+	Created       []string
+	Skipped       []string
+	Components    int
+	Edges         int
+	Mode          string
+	ModelEmpty    bool // no components found; wrote a template
+	WroteModel    bool // a bootstrapped (non-template) workspace.dsl was written
+	Structural    bool // components came from the directory layout (no edges)
+	CMake         bool // components + edges came from CMake target_link_libraries
+	DSLCreated    bool // a workspace.dsl was actually written (not skipped)
+	PolyglotHint  bool // a root go.mod was used but the layout suggests a polyglot repo
+	HookInstalled bool // a commit-msg hook was installed
 }
 
 // Run scaffolds .nugit/ under opt.RepoDir.
@@ -158,7 +160,34 @@ func Run(opt Options) (Result, error) {
 	if err := ensureGitignore(&res, opt.RepoDir); err != nil {
 		return res, err
 	}
+	installCommitMsgHook(&res, opt.RepoDir, opt.Force)
 	return res, nil
+}
+
+// installCommitMsgHook writes a commit-msg hook that validates trailer blocks
+// (it skips if nugit isn't on PATH, so it never breaks commits). A pre-existing
+// hook is preserved unless Force is set.
+func installCommitMsgHook(res *Result, repoDir string, force bool) {
+	hooks := gitutil.Repo{Dir: repoDir}.HooksDir()
+	if hooks == "" {
+		return // not a git repo
+	}
+	path := filepath.Join(hooks, "commit-msg")
+	if _, err := os.Stat(path); err == nil && !force {
+		res.Skipped = append(res.Skipped, path)
+		return
+	}
+	if err := os.MkdirAll(hooks, 0o755); err != nil {
+		return
+	}
+	script := "#!/bin/sh\n" +
+		"# installed by `nugit init` — validates the commit-trailer block (§6.1)\n" +
+		"command -v nugit >/dev/null 2>&1 || exit 0\n" +
+		"exec nugit hook commit-msg \"$1\"\n"
+	if os.WriteFile(path, []byte(script), 0o755) == nil {
+		res.Created = append(res.Created, path)
+		res.HookInstalled = true
+	}
 }
 
 // writeFile writes path unless it exists and !force (then records a skip). It
