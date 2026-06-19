@@ -83,6 +83,9 @@ workspace "nugit" "Git-native typed knowledge & unified PR view — self-model (
             mcp = component "MCP server" "Exposes context() as an MCP stdio tool" "Go" {
                 properties { paths "internal/mcp/**" }
             }
+            doctor = component "Doctor" "Setup pre-flight health checks" "Go" {
+                properties { paths "internal/doctor/**" }
+            }
             cli = component "CLI" "nugit command entrypoint" "Go" {
                 properties { paths "cmd/nugit/**" }
             }
@@ -170,6 +173,13 @@ workspace "nugit" "Git-native typed knowledge & unified PR view — self-model (
             cli -> trailers "commit-msg hook validation"
             cli -> c4 "c4 render command"
             cli -> consistency "explain command"
+            cli -> doctor "doctor command"
+
+            doctor -> config "checks config"
+            doctor -> c4 "checks the model parses"
+            doctor -> gitutil "checks the hook"
+            doctor -> bootstrap "detects the backend"
+            doctor -> knowledge "checks the store"
         }
     }
 
