@@ -15,6 +15,7 @@ import (
 	"github.com/n8o/nugit/internal/config"
 	"github.com/n8o/nugit/internal/consistency"
 	"github.com/n8o/nugit/internal/distill"
+	"github.com/n8o/nugit/internal/doctor"
 	"github.com/n8o/nugit/internal/engine"
 	"github.com/n8o/nugit/internal/localmem"
 	"github.com/n8o/nugit/internal/mcp"
@@ -83,6 +84,8 @@ func main() {
 		os.Exit(cmdC4(os.Args[2:]))
 	case "explain":
 		os.Exit(cmdExplain(os.Args[2:]))
+	case "doctor":
+		os.Exit(cmdDoctor(os.Args[2:]))
 	case "pr-render":
 		os.Exit(cmdPRRender(os.Args[2:]))
 	case "version":
@@ -213,6 +216,27 @@ func cmdC4(args []string) int {
 		fmt.Fprintf(os.Stderr, "nugit c4 render: unknown format %q\n", *format)
 		return 2
 	}
+	return 0
+}
+
+// cmdDoctor runs the setup pre-flight (`nugit doctor`).
+func cmdDoctor(args []string) int {
+	fs := flag.NewFlagSet("doctor", flag.ExitOnError)
+	dir := fs.String("C", ".", "repo directory")
+	_ = fs.Parse(args)
+	r := doctor.Run(*dir)
+	for _, c := range r.Checks {
+		mark := "✓"
+		if !c.OK {
+			mark = "✗"
+		}
+		fmt.Printf("  %s %s — %s\n", mark, c.Name, c.Detail)
+	}
+	if !r.AllOK() {
+		fmt.Println("\nSome checks failed. Run `nugit init` or fix the items above.")
+		return 1
+	}
+	fmt.Println("\nnugit is set up correctly here.")
 	return 0
 }
 
