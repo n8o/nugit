@@ -9,6 +9,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"runtime/debug"
 	"strings"
 
 	"github.com/n8o/nugit/internal/c4"
@@ -89,13 +90,44 @@ func main() {
 	case "pr-render":
 		os.Exit(cmdPRRender(os.Args[2:]))
 	case "version":
-		fmt.Println("nugit 0.1.0-keystone")
+		fmt.Println(versionString())
 	case "-h", "--help", "help":
 		fmt.Print(usage)
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command %q\n\n%s", os.Args[1], usage)
 		os.Exit(2)
 	}
+}
+
+// versionString reports the real installed version with no ldflags: `go install
+// …@v0.1.0` stamps Main.Version, and a local build stamps the VCS revision/dirty
+// flag — so `nugit version` always reflects what you actually have.
+func versionString() string {
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		return "nugit (unknown)"
+	}
+	if v := info.Main.Version; v != "" && v != "(devel)" {
+		return "nugit " + v
+	}
+	rev, dirty := "", ""
+	for _, s := range info.Settings {
+		switch s.Key {
+		case "vcs.revision":
+			rev = s.Value
+			if len(rev) > 12 {
+				rev = rev[:12]
+			}
+		case "vcs.modified":
+			if s.Value == "true" {
+				dirty = "-dirty"
+			}
+		}
+	}
+	if rev != "" {
+		return "nugit (devel " + rev + dirty + ")"
+	}
+	return "nugit (devel)"
 }
 
 func cmdInit(args []string) int {
