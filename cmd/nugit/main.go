@@ -97,8 +97,10 @@ func cmdInit(args []string) int {
 	}
 	fmt.Println()
 	switch {
-	case *noModel:
+	case *noModel && res.DSLCreated:
 		fmt.Println("Scaffolded .nugit/ with a template workspace.dsl. Define your components + paths globs, then run `nugit pr-render`.")
+	case *noModel:
+		fmt.Println("Scaffolded .nugit/. A workspace.dsl already exists (left unchanged); use -force to replace it with a template.")
 	case res.ModelEmpty:
 		fmt.Println("No components found — wrote a template workspace.dsl. Define your components and paths globs by hand.")
 	case res.WroteModel && res.Structural:
@@ -112,6 +114,11 @@ func cmdInit(args []string) int {
 		if res.Mode == "warn" {
 			fmt.Println("When the model is ratified, set c4.mode to `enforce` in .nugit/config.yml.")
 		}
+		if res.PolyglotHint {
+			fmt.Println("Note: this repo has apps/libs subtrees the Go model doesn't cover — for a whole-repo (polyglot) model, run `nugit init -force -layout container`.")
+		}
+	case res.Structural && res.Components > 0:
+		fmt.Printf("A workspace.dsl already exists (left unchanged); the layout has %d component(s). Use -force to regenerate.\n", res.Components)
 	case res.Components > 0:
 		fmt.Printf("A workspace.dsl already exists (left unchanged); discovered %d component(s), %d edge(s). Use -force to regenerate.\n",
 			res.Components, res.Edges)

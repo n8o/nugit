@@ -156,6 +156,11 @@ func GenerateDSL(g Graph, name string) string {
 		b.WriteString("    // stays silent here, so a clean run is NOT an architecture guarantee.\n\n")
 	}
 	fmt.Fprintf(&b, "    sys = softwareSystem %q {\n\n", name)
+	if g.Structural {
+		// Parseable marker (survives c4.Parse, unlike a comment): keeps the
+		// c4<->code import check silent for an edges-free structural model.
+		b.WriteString("      properties { nugit_structural \"true\" }\n\n")
+	}
 	for _, c := range g.Components {
 		fmt.Fprintf(&b, "      %s = component %q {\n        properties { paths %q }\n      }\n",
 			c.ID, c.Name, c.Glob)

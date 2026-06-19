@@ -146,7 +146,15 @@ type Model struct {
 	Name          string
 	Components    []Component
 	Relationships []Relationship
+	// Properties are model-level key/values (a Structurizr `properties` block).
+	Properties map[string]string
 }
+
+// Structural reports whether this model came from the directory layout (no
+// language analysis), in which case the c4<->code import check must stay silent —
+// the model deliberately declares no relationships, so a clean run is not an
+// architecture guarantee. Persisted as a model property by `nugit init`.
+func (m Model) Structural() bool { return m.Properties["nugit_structural"] == "true" }
 
 // Comp returns the component with the given id, if present.
 func (m Model) Comp(id string) (Component, bool) {

@@ -8,6 +8,7 @@
 package mapping
 
 import (
+	"path"
 	"sort"
 	"strings"
 
@@ -90,7 +91,9 @@ func (mp *Mapper) Resolve(path string) string {
 // probes a synthetic source file (for `dir/**` globs), then the bare dir, then
 // falls back to matching the directory portion of a single-file glob.
 func (mp *Mapper) ResolveDir(dir string) string {
-	dir = strings.TrimPrefix(dir, "./")
+	// path.Clean collapses a nested module-root import like "apps/op/." -> "apps/op"
+	// (and "." -> ".") so the root package resolves; no-op for clean inputs.
+	dir = path.Clean(dir)
 	if c := mp.Resolve(dir + "/__pkg__.go"); c != "" {
 		return c
 	}

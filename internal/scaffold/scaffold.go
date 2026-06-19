@@ -24,14 +24,16 @@ type Options struct {
 
 // Result reports what init did.
 type Result struct {
-	Created    []string
-	Skipped    []string
-	Components int
-	Edges      int
-	Mode       string
-	ModelEmpty bool // no components found; wrote a template
-	WroteModel bool // a bootstrapped (non-template) workspace.dsl was written
-	Structural bool // components came from the directory layout (no edges)
+	Created      []string
+	Skipped      []string
+	Components   int
+	Edges        int
+	Mode         string
+	ModelEmpty   bool // no components found; wrote a template
+	WroteModel   bool // a bootstrapped (non-template) workspace.dsl was written
+	Structural   bool // components came from the directory layout (no edges)
+	DSLCreated   bool // a workspace.dsl was actually written (not skipped)
+	PolyglotHint bool // a root go.mod was used but the layout suggests a polyglot repo
 }
 
 // Run scaffolds .nugit/ under opt.RepoDir.
@@ -86,15 +88,21 @@ func Run(opt Options) (Result, error) {
 		if err != nil {
 			return res, err
 		}
-		if len(g.Components) == 0 {
-			sg, err := bootstrap.DiscoverStructural(opt.RepoDir,
-				bootstrap.StructuralOptions{ContainerDirs: opt.ComponentDirs})
-			if err != nil {
-				return res, err
-			}
+		sg, err := bootstrap.DiscoverStructural(opt.RepoDir,
+			bootstrap.StructuralOptions{ContainerDirs: opt.ComponentDirs})
+		if err != nil {
+			return res, err
+		}
+		switch {
+		case len(g.Components) == 0:
 			if len(sg.Components) > 0 {
 				g, res.Structural = sg, true
 			}
+		case len(sg.Components) > len(g.Components):
+			// The directory layout has more structure than the Go model covers —
+			// likely a polyglot repo with a root go.mod. Keep the Go model (it has
+			// edges) but hint at -layout for a whole-repo view.
+			res.PolyglotHint = true
 		}
 		res.Components, res.Edges = len(g.Components), len(g.Edges)
 		writeModel(&res, put, dslPath, g, name)
@@ -114,7 +122,8 @@ func Run(opt Options) (Result, error) {
 	if ferr != nil {
 		return res, ferr
 	}
-	res.WroteModel = !opt.NoModel && !res.ModelEmpty && contains(res.Created, dslPath)
+	res.DSLCreated = contains(res.Created, dslPath)
+	res.WroteModel = !opt.NoModel && !res.ModelEmpty && res.DSLCreated
 
 	if err := ensureGitignore(&res, opt.RepoDir); err != nil {
 		return res, err

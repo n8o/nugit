@@ -156,6 +156,14 @@ func (p *parser) parse() model.Model {
 				}
 				continue
 			}
+			// A model/workspace-level `properties { key "val" }` block (component
+			// properties are handled inside parseComponentBlock, not here).
+			if t.val == "properties" {
+				if nt, ok := p.peek(); ok && nt.kind == tLBrace {
+					p.parseModelProperties()
+				}
+				continue
+			}
 			// Two interesting shapes start with a word:
 			//   IDENT = component "Name" ...      (element declaration)
 			//   IDENT -> IDENT ["desc"]           (relationship)
@@ -256,6 +264,30 @@ func (p *parser) parseComponentBlock(comp *model.Component) {
 				p.skipBlockBody()
 			}
 		}
+	}
+}
+
+// parseModelProperties reads a model/workspace-level properties block into the
+// model's Properties map.
+func (p *parser) parseModelProperties() {
+	p.next() // consume '{'
+	for {
+		k, ok := p.next()
+		if !ok || k.kind == tRBrace {
+			return
+		}
+		if k.kind != tWord {
+			continue
+		}
+		v, ok := p.peek()
+		if !ok || v.kind != tStr {
+			continue
+		}
+		p.next()
+		if p.m.Properties == nil {
+			p.m.Properties = map[string]string{}
+		}
+		p.m.Properties[k.val] = v.val
 	}
 }
 

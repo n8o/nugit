@@ -151,7 +151,8 @@ func sevRank(s model.Severity) int {
 // components that the model does not declare. This is the headline check and
 // the bootstrapping spike — it runs against nugit's own import graph.
 func checkC4Code(in Input) []model.Finding {
-	if in.Mapper.Empty() || in.Module == "" {
+	// A structural model declares no relationships on purpose — never grade it.
+	if in.Mapper.Empty() || in.Module == "" || in.HeadModel.Structural() {
 		return nil
 	}
 	type edge struct{ src, dst string }

@@ -56,13 +56,13 @@ func DiscoverStructural(rootDir string, opt StructuralOptions) (Graph, error) {
 	case "flat":
 		compDirs = []string{"."}
 	case "toplevel":
-		for _, e := range readDirs(rootDir, "") {
-			compDirs = append(compDirs, e)
-		}
+		compDirs = append(compDirs, readDirs(rootDir, "", nil)...)
 	default: // container
-		for _, top := range readDirs(rootDir, "") {
+		// An explicitly-requested container name (e.g. "target") must not be
+		// dropped by the build-dir denylist — pass containers as a keep set.
+		for _, top := range readDirs(rootDir, "", containers) {
 			if containers[top] {
-				children := readDirs(rootDir, top)
+				children := readDirs(rootDir, top, nil)
 				if len(children) == 0 {
 					compDirs = append(compDirs, top) // empty container → itself
 					continue
@@ -93,15 +93,16 @@ func DiscoverStructural(rootDir string, opt StructuralOptions) (Graph, error) {
 }
 
 // readDirs returns the immediate child directory names of rootDir/sub, sorted,
-// skipping non-first-party dirs.
-func readDirs(rootDir, sub string) []string {
+// skipping non-first-party dirs except names in keep (explicitly-requested
+// containers that must survive the build-dir denylist).
+func readDirs(rootDir, sub string, keep map[string]bool) []string {
 	entries, err := os.ReadDir(filepath.Join(rootDir, sub))
 	if err != nil {
 		return nil
 	}
 	var out []string
 	for _, e := range entries {
-		if e.IsDir() && !structuralSkip(e.Name()) {
+		if e.IsDir() && (keep[e.Name()] || !structuralSkip(e.Name())) {
 			out = append(out, e.Name())
 		}
 	}
