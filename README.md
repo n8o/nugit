@@ -89,7 +89,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
-      - uses: n8o/nugit@v1          # builds nugit, renders, sticky PR comment + gate
+      - uses: n8o/nugit@v0.1.0      # builds nugit, renders, sticky PR comment + gate
         with: { fail-on: fail }
 ```
 
