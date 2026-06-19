@@ -25,6 +25,13 @@ See [ADR-0004](.nugit/decisions/0004-thin-keystone-first.md) for the rationale.
 observable signal that should pull it forward. Until that signal, building it is
 speculative cost (ADR-0004).
 
+**Validated on real repos.** `nugit init` + `pr-render` were run on 7 external Go
+projects (go-cmp, cobra, mux, chi, bubbletea, go-sqlite3, and **cli/cli at 307
+components / 1649 edges**). All: no crashes, sub-second, a green-by-construction
+model (zero `c4<->code` findings), zero id collisions, with build tags, cgo,
+`main` packages, and non-Go files all handled correctly. The keystone holds
+outside its own repo.
+
 ## Format-freeze decisions (locked before any store format ships)
 
 These were taken now because content-addressed IDs make later format changes a
