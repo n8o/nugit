@@ -32,6 +32,7 @@ type Result struct {
 	ModelEmpty   bool // no components found; wrote a template
 	WroteModel   bool // a bootstrapped (non-template) workspace.dsl was written
 	Structural   bool // components came from the directory layout (no edges)
+	CMake        bool // components + edges came from CMake target_link_libraries
 	DSLCreated   bool // a workspace.dsl was actually written (not skipped)
 	PolyglotHint bool // a root go.mod was used but the layout suggests a polyglot repo
 }
@@ -72,6 +73,14 @@ func Run(opt Options) (Result, error) {
 	switch {
 	case opt.NoModel:
 		put(dslPath, templateDSL(name))
+	case opt.Layout == "cmake":
+		// Explicit CMake backend: edged C++ model from target_link_libraries.
+		g, err := bootstrap.DiscoverCMake(opt.RepoDir)
+		if err != nil {
+			return res, err
+		}
+		res.Components, res.Edges, res.CMake = len(g.Components), len(g.Edges), true
+		writeModel(&res, put, dslPath, g, name)
 	case opt.Layout != "":
 		// Explicit structural layout (any codebase).
 		g, err := bootstrap.DiscoverStructural(opt.RepoDir,
@@ -106,8 +115,17 @@ func Run(opt Options) (Result, error) {
 		}
 		res.Components, res.Edges = len(g.Components), len(g.Edges)
 		writeModel(&res, put, dslPath, g, name)
+	case bootstrap.DetectCMake(opt.RepoDir):
+		// A CMake project (no Go module): derive an edged C++ model from
+		// target_link_libraries — a real, enforceable architecture, no configure.
+		g, err := bootstrap.DiscoverCMake(opt.RepoDir)
+		if err != nil {
+			return res, err
+		}
+		res.Components, res.Edges, res.CMake = len(g.Components), len(g.Edges), true
+		writeModel(&res, put, dslPath, g, name)
 	default:
-		// No Go module rooted here (polyglot / non-Go / monorepo root): a
+		// No Go module / CMake rooted here (polyglot / non-Go / monorepo root): a
 		// structural directory-layout model is the right default — incidental Go
 		// packages scattered in subtrees would otherwise yield a misleading
 		// Go-only model that ignores the rest of the repo.

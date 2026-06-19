@@ -27,8 +27,8 @@ usage:
 init flags:
   -C dir            repo directory (default ".")
   -mode m           c4 enforcement written to config: warn (default) | enforce
-  -layout l         structural model for any codebase: container|toplevel|flat
-                    (default: Go import graph; falls back to structural if no Go)
+  -layout l         model layout: cmake (C++ edges) | container|toplevel|flat
+                    (default: auto — Go import graph, else CMake, else structural)
   -component-dirs d comma-separated container dirs for structural layout
   -no-model         scaffold only; write a template workspace.dsl
   -force            overwrite existing .nugit files
@@ -103,6 +103,13 @@ func cmdInit(args []string) int {
 		fmt.Println("Scaffolded .nugit/. A workspace.dsl already exists (left unchanged); use -force to replace it with a template.")
 	case res.ModelEmpty:
 		fmt.Println("No components found — wrote a template workspace.dsl. Define your components and paths globs by hand.")
+	case res.WroteModel && res.CMake:
+		fmt.Printf("Bootstrapped a C4 model from CMake: %d component(s), %d dependency edge(s) (target_link_libraries), in %s mode.\n",
+			res.Components, res.Edges, res.Mode)
+		fmt.Println("Next: review .nugit/architecture/workspace.dsl, then run `nugit pr-render`.")
+		if res.Mode == "warn" {
+			fmt.Println("When the model is ratified, set c4.mode to `enforce` in .nugit/config.yml.")
+		}
 	case res.WroteModel && res.Structural:
 		fmt.Printf("Bootstrapped a STRUCTURAL model: %d component(s) from the directory layout, no relationships derived, in %s mode.\n",
 			res.Components, res.Mode)
