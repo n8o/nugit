@@ -301,4 +301,5 @@ type Report struct {
 	Plan         PlanPosition
 	Findings     []Finding
 	Significance Significance
+	Narrative    string // optional opt-in LLM prose; "" on the deterministic path
 }

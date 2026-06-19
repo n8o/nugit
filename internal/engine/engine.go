@@ -13,6 +13,7 @@ import (
 	"github.com/n8o/nugit/internal/knowledge"
 	"github.com/n8o/nugit/internal/mapping"
 	"github.com/n8o/nugit/internal/model"
+	"github.com/n8o/nugit/internal/narrative"
 	"github.com/n8o/nugit/internal/significance"
 	"github.com/n8o/nugit/internal/trailers"
 )
@@ -128,7 +129,7 @@ func BuildReport(opt Options) (model.Report, error) {
 	other := consistency.OtherFindings(in)
 	findings := consistency.Sort(append(c4Findings, other...))
 
-	return model.Report{
+	rep := model.Report{
 		BaseRef:      base,
 		HeadRef:      opt.Head,
 		Commits:      commits,
@@ -138,5 +139,9 @@ func BuildReport(opt Options) (model.Report, error) {
 		Plan:         plan,
 		Findings:     findings,
 		Significance: sig,
-	}, nil
+	}
+	// Opt-in, off by default: inert (no network) unless explicitly enabled +
+	// architectural + ANTHROPIC_API_KEY set. Never alters the deterministic facts.
+	rep.Narrative = narrative.Generate(rep, opt.RepoDir, cfg.Narrative.Enabled, cfg.Narrative.Model)
+	return rep, nil
 }

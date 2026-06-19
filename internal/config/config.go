@@ -30,6 +30,10 @@ type Config struct {
 	Capture struct {
 		CommitMsg string `yaml:"commit_msg"` // warn (default) | block | off
 	} `yaml:"capture"`
+	Narrative struct {
+		Enabled bool   `yaml:"enabled"` // opt-in LLM prose; default false (off)
+		Model   string `yaml:"model"`
+	} `yaml:"narrative"`
 }
 
 // Default returns the built-in defaults used when config.yml is absent or a key

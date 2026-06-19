@@ -25,6 +25,11 @@ pr_render:
 capture:
   # commit_msg: warn | block | off — validate the trailer block on commit
   commit_msg: warn
+
+narrative:
+  # opt-in LLM prose summary (architectural PRs only; needs ANTHROPIC_API_KEY).
+  # off by default — output is byte-identical to the deterministic view when off.
+  enabled: false
 `, mode)
 }
 

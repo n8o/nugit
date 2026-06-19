@@ -27,6 +27,13 @@ func Markdown(rep model.Report) string {
 		fmt.Fprintf(&b, "_Significance: %s_\n\n", strings.Join(rep.Significance.Reasons, "; "))
 	}
 
+	// Opt-in AI prose summary — present only when explicitly enabled; absent here
+	// keeps the output byte-identical to the deterministic path.
+	if rep.Narrative != "" {
+		b.WriteString(details("🗒 Summary (AI-generated, advisory)", rep.Narrative, tier == model.TierArchitectural))
+		b.WriteString("\n")
+	}
+
 	// Consistency first — it is the trust core and always shown.
 	b.WriteString(consistencySection(rep.Findings))
 	b.WriteString("\n")

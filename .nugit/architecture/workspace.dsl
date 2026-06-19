@@ -56,6 +56,9 @@ workspace "nugit" "Git-native typed knowledge & unified PR view — self-model (
             render = component "Renderer" "Markdown / check-run / structured JSON" "Go" {
                 properties { paths "internal/render/**" }
             }
+            narrative = component "LLM narrative" "Opt-in cached prose summary" "Go" {
+                properties { paths "internal/narrative/**" }
+            }
             engine = component "Engine" "Orchestrates the pr-render pipeline" "Go" {
                 properties { paths "internal/engine/**" }
             }
@@ -122,6 +125,9 @@ workspace "nugit" "Git-native typed knowledge & unified PR view — self-model (
             engine -> significance "classifies"
             engine -> trailers "parses commits"
             engine -> config "loads config"
+            engine -> narrative "optional prose"
+
+            narrative -> model_ "uses types"
 
             bootstrap -> goimports "reads import graph"
             bootstrap -> cmake "reads CMake dependency graph"
