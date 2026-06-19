@@ -14,10 +14,12 @@ import (
 
 // Options configures an init run.
 type Options struct {
-	RepoDir string
-	Force   bool   // overwrite existing files
-	NoModel bool   // scaffold only; write a template workspace.dsl
-	Mode    string // c4 enforcement written to config: warn (default) | enforce
+	RepoDir       string
+	Force         bool     // overwrite existing files
+	NoModel       bool     // scaffold only; write a template workspace.dsl
+	Mode          string   // c4 enforcement written to config: warn (default) | enforce
+	Layout        string   // structural layout: container|toplevel|flat ("" = auto: Go import graph, else structural)
+	ComponentDirs []string // override the container dir set for structural layout
 }
 
 // Result reports what init did.
@@ -27,8 +29,9 @@ type Result struct {
 	Components int
 	Edges      int
 	Mode       string
-	ModelEmpty bool // no Go packages found; wrote a template
+	ModelEmpty bool // no components found; wrote a template
 	WroteModel bool // a bootstrapped (non-template) workspace.dsl was written
+	Structural bool // components came from the directory layout (no edges)
 }
 
 // Run scaffolds .nugit/ under opt.RepoDir.
@@ -64,20 +67,49 @@ func Run(opt Options) (Result, error) {
 
 	dslPath := filepath.Join(nugitDir, "architecture", "workspace.dsl")
 	name := repoName(opt.RepoDir)
-	if opt.NoModel {
+	switch {
+	case opt.NoModel:
 		put(dslPath, templateDSL(name))
-	} else {
+	case opt.Layout != "":
+		// Explicit structural layout (any codebase).
+		g, err := bootstrap.DiscoverStructural(opt.RepoDir,
+			bootstrap.StructuralOptions{Layout: opt.Layout, ContainerDirs: opt.ComponentDirs})
+		if err != nil {
+			return res, err
+		}
+		res.Components, res.Structural = len(g.Components), true
+		writeModel(&res, put, dslPath, g, name)
+	case hasGoMod(opt.RepoDir):
+		// A Go module is rooted here: use the import graph (with edges), falling
+		// back to structural only if it somehow finds nothing.
 		g, err := bootstrap.Discover(opt.RepoDir)
 		if err != nil {
 			return res, err
 		}
-		res.Components, res.Edges = len(g.Components), len(g.Edges)
 		if len(g.Components) == 0 {
-			res.ModelEmpty = true
-			put(dslPath, templateDSL(name))
-		} else {
-			put(dslPath, bootstrap.GenerateDSL(g, name))
+			sg, err := bootstrap.DiscoverStructural(opt.RepoDir,
+				bootstrap.StructuralOptions{ContainerDirs: opt.ComponentDirs})
+			if err != nil {
+				return res, err
+			}
+			if len(sg.Components) > 0 {
+				g, res.Structural = sg, true
+			}
 		}
+		res.Components, res.Edges = len(g.Components), len(g.Edges)
+		writeModel(&res, put, dslPath, g, name)
+	default:
+		// No Go module rooted here (polyglot / non-Go / monorepo root): a
+		// structural directory-layout model is the right default — incidental Go
+		// packages scattered in subtrees would otherwise yield a misleading
+		// Go-only model that ignores the rest of the repo.
+		g, err := bootstrap.DiscoverStructural(opt.RepoDir,
+			bootstrap.StructuralOptions{ContainerDirs: opt.ComponentDirs})
+		if err != nil {
+			return res, err
+		}
+		res.Components, res.Structural = len(g.Components), true
+		writeModel(&res, put, dslPath, g, name)
 	}
 	if ferr != nil {
 		return res, ferr
@@ -136,6 +168,22 @@ func ensureGitignore(res *Result, repoDir string) error {
 	}
 	res.Created = append(res.Created, path)
 	return nil
+}
+
+// writeModel writes the bootstrapped DSL, or a template when no components were
+// found (setting ModelEmpty).
+func writeModel(res *Result, put func(string, string), dslPath string, g bootstrap.Graph, name string) {
+	if len(g.Components) == 0 {
+		res.ModelEmpty = true
+		put(dslPath, templateDSL(name))
+		return
+	}
+	put(dslPath, bootstrap.GenerateDSL(g, name))
+}
+
+func hasGoMod(dir string) bool {
+	_, err := os.Stat(filepath.Join(dir, "go.mod"))
+	return err == nil
 }
 
 func contains(ss []string, s string) bool {

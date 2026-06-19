@@ -95,6 +95,7 @@ workspace "nugit" "Git-native typed knowledge & unified PR view — self-model (
 
             bootstrap -> goimports "reads import graph"
             bootstrap -> mapping "resolves edges like the check does"
+            bootstrap -> gitutil "git-root prefix for globs"
             bootstrap -> model_ "uses types"
 
             scaffold -> bootstrap "generates the model"

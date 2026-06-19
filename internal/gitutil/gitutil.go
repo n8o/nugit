@@ -38,6 +38,28 @@ func (r Repo) MergeBase(base, head string) string {
 	return strings.TrimSpace(out)
 }
 
+// Prefix returns the path of Dir relative to the git toplevel, slash-terminated
+// (e.g. "apps/operator/"), or "" when Dir IS the git root (the common case) or
+// is not inside a git repo. This is the single bridge that lets a nugit root
+// nested inside a larger repo speak git's git-root-relative path coordinates.
+func (r Repo) Prefix() string {
+	out, err := r.git("rev-parse", "--show-prefix")
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(out)
+}
+
+// Toplevel returns the absolute path of the git working-tree root, or Dir if it
+// cannot be determined.
+func (r Repo) Toplevel() string {
+	out, err := r.git("rev-parse", "--show-toplevel")
+	if err != nil {
+		return r.Dir
+	}
+	return strings.TrimSpace(out)
+}
+
 // ShowFile returns the contents of path at ref. A genuinely-absent path yields
 // ("", nil) so callers treat "added" and "removed" symmetrically — but any OTHER
 // error (e.g. a bad ref) is returned, never masked as an empty file.

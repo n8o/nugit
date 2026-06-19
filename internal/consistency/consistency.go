@@ -22,9 +22,12 @@ import (
 
 // Input bundles everything the checks need (all already computed).
 type Input struct {
-	Repo       gitutil.Repo
-	RepoDir    string
-	Head       string // ref whose source the import graph is read from
+	Repo    gitutil.Repo
+	RepoDir string
+	Head    string // ref whose source the import graph is read from
+	// Prefix is the nugit/module root within the git repo ("" when they coincide);
+	// it bridges module-relative import dirs onto the git-root-relative globs.
+	Prefix     string
 	Module     string
 	HeadModel  model.Model
 	Mapper     *mapping.Mapper
@@ -170,7 +173,8 @@ func checkC4Code(in Input) []model.Finding {
 			continue
 		}
 		for _, dir := range dirs {
-			dst := in.Mapper.ResolveDir(dir)
+			// import dirs are module-relative; globs are git-root-relative.
+			dst := in.Mapper.ResolveDir(in.Prefix + dir)
 			if dst == "" || dst == fc.Component {
 				continue
 			}

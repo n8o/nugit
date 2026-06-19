@@ -36,8 +36,9 @@ func C4(repo gitutil.Repo, base, head, dslPath string) (model.C4Delta, model.Mod
 }
 
 // Code computes the diff summary grouped by C4 component. Knowledge files under
-// .nugit/ are excluded — they belong to the knowledge delta, not the code delta.
-func Code(repo gitutil.Repo, base, head string, mp *mapping.Mapper) (model.CodeDelta, error) {
+// the nugit root's .nugit/ are excluded — they belong to the knowledge delta.
+// prefix is the nugit root within the git repo ("" when they coincide).
+func Code(repo gitutil.Repo, base, head string, mp *mapping.Mapper, prefix string) (model.CodeDelta, error) {
 	changes, err := repo.NameStatus(base, head)
 	if err != nil {
 		return model.CodeDelta{}, err
@@ -46,9 +47,10 @@ func Code(repo gitutil.Repo, base, head string, mp *mapping.Mapper) (model.CodeD
 	if err != nil {
 		return model.CodeDelta{}, err
 	}
+	nugitDir := prefix + ".nugit/"
 	d := model.CodeDelta{ByComp: map[string][]model.FileChange{}}
 	for _, fc := range changes {
-		if strings.HasPrefix(fc.Path, ".nugit/") {
+		if strings.HasPrefix(fc.Path, nugitDir) {
 			continue
 		}
 		if c, ok := counts[fc.Path]; ok {
@@ -65,14 +67,16 @@ func Code(repo gitutil.Repo, base, head string, mp *mapping.Mapper) (model.CodeD
 }
 
 // Knowledge computes which durable knowledge objects the PR added/changed/removed.
-func Knowledge(repo gitutil.Repo, base, head string) (model.KnowledgeDelta, error) {
+// prefix is the nugit root within the git repo ("" when they coincide).
+func Knowledge(repo gitutil.Repo, base, head, prefix string) (model.KnowledgeDelta, error) {
 	changes, err := repo.NameStatus(base, head)
 	if err != nil {
 		return model.KnowledgeDelta{}, err
 	}
+	nugitDir := prefix + ".nugit/"
 	var d model.KnowledgeDelta
 	for _, fc := range changes {
-		if !strings.HasPrefix(fc.Path, ".nugit/") || !strings.HasSuffix(fc.Path, ".md") {
+		if !strings.HasPrefix(fc.Path, nugitDir) || !strings.HasSuffix(fc.Path, ".md") {
 			continue
 		}
 		kc := model.KnowledgeChange{Path: fc.Path, Status: fc.Status}

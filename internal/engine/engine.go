@@ -31,18 +31,26 @@ func BuildReport(opt Options) (model.Report, error) {
 	repo := gitutil.Repo{Dir: opt.RepoDir}
 	base := repo.MergeBase(opt.Base, opt.Head)
 
+	// prefix is the nugit root's location within the git repo (e.g.
+	// "apps/operator/"), or "" when the nugit root IS the git root. All git paths
+	// (ShowFile/diff) are git-root-relative; model globs are written git-root-
+	// relative too, so the prefix is the single bridge between the two. When
+	// prefix=="" every path below is byte-identical to before — no regression.
+	prefix := repo.Prefix()
+
 	// Read config at the reviewed ref (like the DSL and import graph), so the
 	// verdict never depends on uncommitted working-tree state.
-	cfgSrc, _ := repo.ShowFile(opt.Head, ".nugit/config.yml")
+	cfgSrc, _ := repo.ShowFile(opt.Head, prefix+".nugit/config.yml")
 	cfg, err := config.LoadBytes([]byte(cfgSrc))
 	if err != nil {
 		return model.Report{}, fmt.Errorf("parsing .nugit/config.yml at %s: %w", opt.Head, err)
 	}
 	if opt.DSLPath == "" {
-		opt.DSLPath = cfg.C4.DSL
-	}
-	if opt.DSLPath == "" {
-		opt.DSLPath = delta.DefaultDSLPath
+		dsl := cfg.C4.DSL
+		if dsl == "" {
+			dsl = delta.DefaultDSLPath
+		}
+		opt.DSLPath = prefix + dsl // git-root-relative
 	}
 
 	c4Delta, _, headModel, err := delta.C4(repo, base, opt.Head, opt.DSLPath)
@@ -51,11 +59,11 @@ func BuildReport(opt Options) (model.Report, error) {
 	}
 	mp := mapping.New(headModel)
 
-	codeDelta, err := delta.Code(repo, base, opt.Head, mp)
+	codeDelta, err := delta.Code(repo, base, opt.Head, mp, prefix)
 	if err != nil {
 		return model.Report{}, err
 	}
-	knowDelta, err := delta.Knowledge(repo, base, opt.Head)
+	knowDelta, err := delta.Knowledge(repo, base, opt.Head, prefix)
 	if err != nil {
 		return model.Report{}, err
 	}
@@ -73,9 +81,9 @@ func BuildReport(opt Options) (model.Report, error) {
 	if err != nil {
 		return model.Report{}, err
 	}
-	// Module path from go.mod at head (fall back to the working tree).
+	// Module path from go.mod at the nugit root (prefix), at head; fall back to disk.
 	module := ""
-	if src, err := repo.ShowFile(opt.Head, "go.mod"); err == nil && src != "" {
+	if src, err := repo.ShowFile(opt.Head, prefix+"go.mod"); err == nil && src != "" {
 		module = goimports.ParseModulePath(src)
 	}
 	if module == "" {
@@ -86,6 +94,7 @@ func BuildReport(opt Options) (model.Report, error) {
 		Repo:       repo,
 		RepoDir:    opt.RepoDir,
 		Head:       opt.Head,
+		Prefix:     prefix,
 		Module:     module,
 		HeadModel:  headModel,
 		Mapper:     mp,

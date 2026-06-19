@@ -8,6 +8,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/n8o/nugit/internal/config"
 	"github.com/n8o/nugit/internal/engine"
@@ -24,10 +25,13 @@ usage:
   nugit version
 
 init flags:
-  -C dir         repo directory (default ".")
-  -mode m        c4 enforcement written to config: warn (default) | enforce
-  -no-model      scaffold only; write a template workspace.dsl instead of bootstrapping
-  -force         overwrite existing .nugit files
+  -C dir            repo directory (default ".")
+  -mode m           c4 enforcement written to config: warn (default) | enforce
+  -layout l         structural model for any codebase: container|toplevel|flat
+                    (default: Go import graph; falls back to structural if no Go)
+  -component-dirs d comma-separated container dirs for structural layout
+  -no-model         scaffold only; write a template workspace.dsl
+  -force            overwrite existing .nugit files
 
 pr-render flags:
   -C dir         repo directory (default ".")
@@ -63,10 +67,22 @@ func cmdInit(args []string) int {
 	mode := fs.String("mode", "warn", "c4 enforcement mode: warn|enforce")
 	noModel := fs.Bool("no-model", false, "scaffold only; don't bootstrap a model")
 	force := fs.Bool("force", false, "overwrite existing .nugit files")
+	layout := fs.String("layout", "", "structural layout for any codebase: container|toplevel|flat (default: Go import graph, else structural)")
+	componentDirs := fs.String("component-dirs", "", "comma-separated container dirs for structural layout (default: apps,libs,services,...)")
 	_ = fs.Parse(args)
+
+	var cdirs []string
+	if *componentDirs != "" {
+		for _, c := range strings.Split(*componentDirs, ",") {
+			if c = strings.TrimSpace(c); c != "" {
+				cdirs = append(cdirs, c)
+			}
+		}
+	}
 
 	res, err := scaffold.Run(scaffold.Options{
 		RepoDir: *dir, Force: *force, NoModel: *noModel, Mode: *mode,
+		Layout: *layout, ComponentDirs: cdirs,
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "nugit init: %v\n", err)
@@ -84,7 +100,11 @@ func cmdInit(args []string) int {
 	case *noModel:
 		fmt.Println("Scaffolded .nugit/ with a template workspace.dsl. Define your components + paths globs, then run `nugit pr-render`.")
 	case res.ModelEmpty:
-		fmt.Println("No Go packages found — wrote a template workspace.dsl. Define your components and paths globs by hand.")
+		fmt.Println("No components found — wrote a template workspace.dsl. Define your components and paths globs by hand.")
+	case res.WroteModel && res.Structural:
+		fmt.Printf("Bootstrapped a STRUCTURAL model: %d component(s) from the directory layout, no relationships derived, in %s mode.\n",
+			res.Components, res.Mode)
+		fmt.Println("Review .nugit/architecture/workspace.dsl — declare relationships by hand, or add a per-language analyzer to enforce them. Then run `nugit pr-render`.")
 	case res.WroteModel:
 		fmt.Printf("Bootstrapped a C4 model: %d component(s), %d dependency edge(s), in %s mode.\n",
 			res.Components, res.Edges, res.Mode)
