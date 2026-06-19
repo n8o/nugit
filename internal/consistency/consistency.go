@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/n8o/nugit/internal/cmake"
 	"github.com/n8o/nugit/internal/gitutil"
 	"github.com/n8o/nugit/internal/goimports"
 	"github.com/n8o/nugit/internal/knowledge"
@@ -48,7 +49,65 @@ type Input struct {
 // significance verdict, which in turn gates decision-coverage — running it
 // separately avoids a dependency cycle.
 func C4CodeFindings(in Input) []model.Finding {
-	return Sort(append(checkC4Code(in), checkModelHealth(in)...))
+	fs := append(checkC4Code(in), checkCMakeCode(in)...)
+	return Sort(append(fs, checkModelHealth(in)...))
+}
+
+// IsUndeclaredEdge reports whether a finding is a genuine code-introduced
+// cross-component dependency the model doesn't declare (Go or CMake), as opposed
+// to a model-health warning.
+func IsUndeclaredEdge(f model.Finding) bool {
+	return f.Check == "c4<->code" || f.Check == "cmake<->code"
+}
+
+// checkCMakeCode is the C++ analogue of checkC4Code: it re-derives the CMake
+// target_link_libraries graph at the reviewed tree and flags any link between
+// two components that workspace.dsl does not declare, for components the PR
+// touched. Components/edges come from the SAME cmake analyzer the model was
+// bootstrapped from, so a synced model is green by construction.
+func checkCMakeCode(in Input) []model.Finding {
+	if in.Mapper.Empty() || in.HeadModel.Structural() || !cmake.Detect(in.RepoDir) {
+		return nil
+	}
+	cg, err := cmake.Discover(in.RepoDir)
+	if err != nil || len(cg.Edges) == 0 {
+		return nil
+	}
+	touched := map[string]bool{}
+	for _, fc := range in.Code.Files {
+		if fc.Component != "" {
+			touched[fc.Component] = true
+		}
+	}
+	sev := model.SevFail
+	if in.C4Warn {
+		sev = model.SevWarn
+	}
+	seen := map[[2]string]bool{}
+	var fs []model.Finding
+	for _, e := range cg.Edges {
+		src := in.Mapper.ResolveDir(in.Prefix + e[0])
+		dst := in.Mapper.ResolveDir(in.Prefix + e[1])
+		if src == "" || dst == "" || src == dst || !touched[src] {
+			continue
+		}
+		if in.HeadModel.HasRelationship(src, dst) {
+			continue
+		}
+		k := [2]string{src, dst}
+		if seen[k] {
+			continue
+		}
+		seen[k] = true
+		fs = append(fs, model.Finding{
+			Check:    "cmake<->code",
+			Severity: sev,
+			Title:    fmt.Sprintf("undeclared dependency %s → %s", src, dst),
+			Detail: fmt.Sprintf("CMake links %s → %s via target_link_libraries, but workspace.dsl declares no such relationship; "+
+				"add the relationship to the model or remove the link", src, dst),
+		})
+	}
+	return fs
 }
 
 // checkModelHealth surfaces authoring errors in workspace.dsl that would

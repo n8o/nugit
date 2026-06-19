@@ -114,7 +114,7 @@ func BuildReport(opt Options) (model.Report, error) {
 	// mode, so adoption doesn't spuriously trip the decision-coverage nag.
 	hasUndeclaredEdge := false
 	for _, f := range c4Findings {
-		if f.Check == "c4<->code" {
+		if consistency.IsUndeclaredEdge(f) {
 			hasUndeclaredEdge = true
 			break
 		}
