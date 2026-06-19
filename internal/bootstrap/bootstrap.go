@@ -15,6 +15,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/n8o/nugit/internal/cmake"
 	"github.com/n8o/nugit/internal/gitutil"
 	"github.com/n8o/nugit/internal/goimports"
 	"github.com/n8o/nugit/internal/mapping"
@@ -168,6 +169,51 @@ func GenerateDSL(g Graph, name string) string {
 	b.WriteString("    }\n  }\n\n")
 	b.WriteString("  views {\n    component sys \"Components\" {\n      include *\n      autolayout lr\n    }\n    theme default\n  }\n}\n")
 	return b.String()
+}
+
+// DetectCMake reports whether rootDir is a CMake project.
+func DetectCMake(rootDir string) bool { return cmake.Detect(rootDir) }
+
+// DiscoverCMake builds a component graph from CMake's target_link_libraries:
+// directory-level components (dirs that define targets) WITH edges (link deps),
+// statically, no configure. The root "." aggregate targets are dropped for a
+// clean first-pass model. This makes a C++/CMake repo's architecture enforceable.
+func DiscoverCMake(repoDir string) (Graph, error) {
+	cg, err := cmake.Discover(repoDir)
+	if err != nil {
+		return Graph{}, err
+	}
+	prefix := gitutil.Repo{Dir: repoDir}.Prefix()
+
+	var dirs []string
+	for _, d := range cg.Dirs {
+		if d != "." {
+			dirs = append(dirs, d)
+		}
+	}
+	idOf := assignIDs(dirs)
+	g := Graph{}
+	for _, d := range dirs {
+		g.Components = append(g.Components, Component{ID: idOf[d], Name: lastSeg(d), Dir: d, Glob: gitRootGlob(prefix, d)})
+	}
+	edgeSet := map[[2]string]bool{}
+	for _, e := range cg.Edges {
+		s, sok := idOf[e[0]]
+		t, tok := idOf[e[1]]
+		if sok && tok && s != t {
+			edgeSet[[2]string{s, t}] = true
+		}
+	}
+	for e := range edgeSet {
+		g.Edges = append(g.Edges, e)
+	}
+	sort.Slice(g.Edges, func(i, j int) bool {
+		if g.Edges[i][0] != g.Edges[j][0] {
+			return g.Edges[i][0] < g.Edges[j][0]
+		}
+		return g.Edges[i][1] < g.Edges[j][1]
+	})
+	return g, nil
 }
 
 // gitRootGlob returns the git-root-relative paths glob for a nugit-root-relative

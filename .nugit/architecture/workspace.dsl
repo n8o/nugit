@@ -20,6 +20,9 @@ workspace "nugit" "Git-native typed knowledge & unified PR view — self-model (
             goimports = component "Go import analyzer" "Maps imports to dirs via go/parser" "Go" {
                 properties { paths "internal/goimports/**" }
             }
+            cmake = component "CMake analyzer" "Static target_link_libraries dependency graph" "Go" {
+                properties { paths "internal/cmake/**" }
+            }
             c4 = component "C4 parser + diff" "Structurizr DSL subset + structural delta" "Go" {
                 properties { paths "internal/c4/**" }
             }
@@ -94,6 +97,7 @@ workspace "nugit" "Git-native typed knowledge & unified PR view — self-model (
             engine -> config "loads config"
 
             bootstrap -> goimports "reads import graph"
+            bootstrap -> cmake "reads CMake dependency graph"
             bootstrap -> mapping "resolves edges like the check does"
             bootstrap -> gitutil "git-root prefix for globs"
             bootstrap -> model_ "uses types"
