@@ -17,6 +17,11 @@ func DiffPlan(repo gitutil.Repo, base, head, prefix string) model.PlanPosition {
 		return h
 	}
 	b := Plan(repo, base, prefix)
+	return diffPlans(b, h)
+}
+
+// diffPlans annotates head with what moved relative to base (pure; testable).
+func diffPlans(b, h model.PlanPosition) model.PlanPosition {
 	if !b.Present {
 		return h // nothing to diff against (plan introduced in this PR)
 	}
