@@ -2,6 +2,9 @@
 /nugit
 /dist/
 
+# local MCP wiring (machine-specific path); .mcp.json.example is the committed template
+/.mcp.json
+
 # rebuildable index + per-agent ephemeral memory (canonical state is git text)
 **/.nugit/.cache/
 .nugit-local/

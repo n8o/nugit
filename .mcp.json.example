@@ -1,0 +1,9 @@
+{
+  "_comment": "Copy to .mcp.json and restart Claude Code to expose nugit's `context` tool. Requires `go install ./cmd/nugit` and ~/go/bin on PATH (or replace \"nugit\" with the absolute binary path).",
+  "mcpServers": {
+    "nugit": {
+      "command": "nugit",
+      "args": ["mcp", "-C", "."]
+    }
+  }
+}
