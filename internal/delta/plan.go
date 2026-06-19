@@ -26,10 +26,14 @@ func diffPlans(b, h model.PlanPosition) model.PlanPosition {
 		return h // nothing to diff against (plan introduced in this PR)
 	}
 	baseDone := set(b.Completed)
+	headDone := set(h.Completed)
 	h.NewlyCompleted = minus(h.Completed, baseDone)
 	if h.Current != "" && h.Current != b.Current && !baseDone[h.Current] {
 		h.NewlyStarted = []string{h.Current}
 	}
+	// Regressions: items that were done at base but are no longer done at head — the
+	// most review-worthy movement, and otherwise invisible (they stay in both sets).
+	h.Regressed = minusSet(baseDone, headDone)
 	headAll := set(append(append(append([]string{}, h.Completed...), h.Current), h.Remaining...))
 	baseAll := set(append(append(append([]string{}, b.Completed...), b.Current), b.Remaining...))
 	h.AddedItems = minusSet(headAll, baseAll)

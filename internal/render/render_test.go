@@ -49,3 +49,18 @@ func TestMarkdownClean(t *testing.T) {
 		t.Errorf("clean report should report no inconsistencies:\n%s", md)
 	}
 }
+
+func TestStructuredJSONExcludesHeadModel(t *testing.T) {
+	rep := model.Report{
+		HeadModel: model.Model{Components: []model.Component{
+			{ID: "secret", Paths: []string{"internal/secret/**"}},
+		}},
+	}
+	out, err := StructuredJSON(rep)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(out), "HeadModel") || strings.Contains(string(out), "internal/secret") {
+		t.Errorf("HeadModel/path globs leaked into structured JSON:\n%s", out)
+	}
+}

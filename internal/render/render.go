@@ -222,6 +222,9 @@ func planSection(p model.PlanPosition) string {
 		if len(p.RemovedItems) > 0 {
 			fmt.Fprintf(&b, "- ➖ removed: %s\n", clean(p.RemovedItems))
 		}
+		if len(p.Regressed) > 0 {
+			fmt.Fprintf(&b, "- ⚠️ reopened: %s\n", clean(p.Regressed))
+		}
 	}
 	if p.Note != "" {
 		fmt.Fprintf(&b, "- _%s_\n", esc(oneLine(p.Note)))

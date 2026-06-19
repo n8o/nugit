@@ -3,6 +3,7 @@ package c4
 import (
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/n8o/nugit/internal/model"
@@ -90,10 +91,16 @@ func MermaidDiff(d model.C4Delta, head model.Model) string {
 		}
 	}
 
+	// Injective original-id -> mermaid-node-id map, so two ids that sanitize to the
+	// same token (e.g. "a.b" vs "a_b") don't merge into one node / a self-loop.
+	nodeID := injectiveIDs(sortedKeys(focus))
+
 	var b strings.Builder
 	b.WriteString("```mermaid\ngraph LR\n")
 	for _, id := range sortedKeys(focus) {
-		fmt.Fprintf(&b, "  %s[%q]%s\n", mermaidID(id), mermaidLabel(name[id]), classOf(state[id]))
+		// literal quotes around the already-escaped label (mermaidLabel is the
+		// canonical escape) — never %q, which would double backslashes/control chars.
+		fmt.Fprintf(&b, "  %s[\"%s\"]%s\n", nodeID[id], mermaidLabel(name[id]), classOf(state[id]))
 	}
 
 	type edge struct {
@@ -107,7 +114,10 @@ func MermaidDiff(d model.C4Delta, head model.Model) string {
 			continue
 		}
 		st := 0
-		if addRel[[2]string{r.Src, r.Dst}] {
+		switch {
+		case remRel[[2]string{r.Src, r.Dst}]: // removed wins over a stale head edge
+			st = 2
+		case addRel[[2]string{r.Src, r.Dst}]:
 			st = 1
 		}
 		edges = append(edges, edge{r.Src, r.Dst, st})
@@ -134,7 +144,7 @@ func MermaidDiff(d model.C4Delta, head model.Model) string {
 		case 2:
 			arrow, red = "-.->", append(red, i)
 		}
-		fmt.Fprintf(&b, "  %s %s %s\n", mermaidID(e.s), arrow, mermaidID(e.d))
+		fmt.Fprintf(&b, "  %s %s %s\n", nodeID[e.s], arrow, nodeID[e.d])
 	}
 
 	b.WriteString("  classDef add fill:#e6ffed,stroke:#1a7f37,color:#000;\n")
@@ -162,9 +172,26 @@ func classOf(state int) string {
 	return ""
 }
 
-// mermaidID sanitizes a component id into a safe Mermaid node id (ids are already
-// [A-Za-z0-9_], but be defensive about anything a hand-edited model might carry).
-func mermaidID(s string) string {
+// injectiveIDs maps each original component id to a unique, Mermaid-safe node id.
+// Ids that sanitize to the same token are disambiguated with a numeric suffix, so
+// distinct components never collapse into one node. Deterministic over sorted ids.
+func injectiveIDs(ids []string) map[string]string {
+	out := make(map[string]string, len(ids))
+	used := map[string]bool{}
+	for _, id := range ids {
+		base := sanitizeID(id)
+		u := base
+		for i := 2; used[u]; i++ {
+			u = base + "_" + strconv.Itoa(i)
+		}
+		used[u] = true
+		out[id] = u
+	}
+	return out
+}
+
+// sanitizeID maps non-[A-Za-z0-9_] runes to '_' (Mermaid node-id charset).
+func sanitizeID(s string) string {
 	var b strings.Builder
 	for _, r := range s {
 		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '_' {

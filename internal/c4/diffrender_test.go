@@ -45,6 +45,41 @@ func TestMermaidDiffStyling(t *testing.T) {
 	}
 }
 
+// Two ids that sanitize to the same token must NOT collapse into one node.
+func TestMermaidDiffIDCollision(t *testing.T) {
+	head := model.Model{
+		Components: []model.Component{{ID: "a.b"}, {ID: "a_b"}},
+		Relationships: []model.Relationship{
+			{Src: "a.b", Dst: "a_b"}, // distinct components -> must NOT be a self-loop
+		},
+	}
+	d := model.C4Delta{AddedRels: []model.Relationship{{Src: "a.b", Dst: "a_b"}}}
+	out := MermaidDiff(d, head)
+	// two distinct node declarations
+	if strings.Count(out, `["`) != 2 {
+		t.Errorf("collision merged the two nodes:\n%s", out)
+	}
+	// the edge must connect two DIFFERENT node ids (no self-loop)
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Contains(line, "==>") {
+			parts := strings.Fields(line)
+			if len(parts) == 3 && parts[0] == parts[2] {
+				t.Errorf("edge collapsed to a self-loop: %q", line)
+			}
+		}
+	}
+}
+
+// A label with a backslash/control char must not be double-escaped (no %q).
+func TestMermaidDiffLabelNotGoQuoted(t *testing.T) {
+	head := model.Model{Components: []model.Component{{ID: "a", Name: `C:\path`}}}
+	d := model.C4Delta{AddedComponents: []model.Component{{ID: "a", Name: `C:\path`}}}
+	out := MermaidDiff(d, head)
+	if strings.Contains(out, `\\`) {
+		t.Errorf("backslash double-escaped (Go %%q leaked into Mermaid):\n%s", out)
+	}
+}
+
 func TestMermaidDiffEmpty(t *testing.T) {
 	if MermaidDiff(model.C4Delta{}, model.Model{}) != "" {
 		t.Error("empty delta must produce no diagram")

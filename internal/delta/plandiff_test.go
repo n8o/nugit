@@ -49,6 +49,19 @@ func TestDiffPlansNoBase(t *testing.T) {
 	}
 }
 
+// A reopened item (done at base, no longer done at head) must surface, not hide.
+func TestDiffPlansRegression(t *testing.T) {
+	base := model.PlanPosition{Present: true, Completed: []string{"e1", "e2"}}
+	head := model.PlanPosition{Present: true, Completed: []string{"e1"}, Remaining: []string{"e2"}}
+	got := diffPlans(base, head)
+	if len(got.Regressed) != 1 || got.Regressed[0] != "e2" {
+		t.Errorf("Regressed = %v, want [e2]", got.Regressed)
+	}
+	if !got.Changed() {
+		t.Error("a reopened item must make Changed() true")
+	}
+}
+
 func TestDiffPlansRemoved(t *testing.T) {
 	base := model.PlanPosition{Present: true, Remaining: []string{"e1", "e2"}}
 	head := model.PlanPosition{Present: true, Remaining: []string{"e1"}}
