@@ -110,7 +110,7 @@ func Discover(repoDir string) (Graph, error) {
 	mcomps := make([]model.Component, 0, len(dirs))
 	for _, d := range dirs {
 		id := idOf[d]
-		glob := gitRootGlob(prefix, d)
+		glob := gitRootGlob(prefix, d, "*.go")
 		g.Components = append(g.Components, Component{ID: id, Name: lastSeg(d), Dir: d, Glob: glob})
 		mcomps = append(mcomps, model.Component{ID: id, Paths: []string{glob}})
 	}
@@ -190,16 +190,14 @@ func DiscoverCMake(repoDir string) (Graph, error) {
 	}
 	prefix := gitutil.Repo{Dir: repoDir}.Prefix()
 
-	var dirs []string
-	for _, d := range cg.Dirs {
-		if d != "." {
-			dirs = append(dirs, d)
-		}
-	}
-	idOf := assignIDs(dirs)
+	// Keep the root "." component (root-defined targets) — dropping it would
+	// silently delete every edge that touches a root target. Its glob is the
+	// root-files glob "*" (single segment), so it owns top-level files without
+	// swallowing deeper components.
+	idOf := assignIDs(cg.Dirs)
 	g := Graph{}
-	for _, d := range dirs {
-		g.Components = append(g.Components, Component{ID: idOf[d], Name: lastSeg(d), Dir: d, Glob: gitRootGlob(prefix, d)})
+	for _, d := range cg.Dirs {
+		g.Components = append(g.Components, Component{ID: idOf[d], Name: lastSeg(d), Dir: d, Glob: gitRootGlob(prefix, d, "*")})
 	}
 	edgeSet := map[[2]string]bool{}
 	for _, e := range cg.Edges {
@@ -222,11 +220,12 @@ func DiscoverCMake(repoDir string) (Graph, error) {
 }
 
 // gitRootGlob returns the git-root-relative paths glob for a nugit-root-relative
-// dir, carrying the nested-module prefix (e.g. "apps/operator/"). When prefix=""
-// it is byte-identical to the old repo-root-relative behavior.
-func gitRootGlob(prefix, dir string) string {
+// dir, carrying the nested-module prefix (e.g. "apps/operator/"). rootGlob is the
+// glob for the repo-root component (dir=="."): "*.go" for Go, "*" (top-level
+// files of any type) otherwise.
+func gitRootGlob(prefix, dir, rootGlob string) string {
 	if dir == "." || dir == "" {
-		return prefix + "*.go" // root files of the nugit root only (never the whole tree)
+		return prefix + rootGlob // root files only (single segment — never the whole tree)
 	}
 	return prefix + dir + "/**"
 }

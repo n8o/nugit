@@ -8,6 +8,7 @@ package consistency
 
 import (
 	"fmt"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -66,11 +67,17 @@ func IsUndeclaredEdge(f model.Finding) bool {
 // touched. Components/edges come from the SAME cmake analyzer the model was
 // bootstrapped from, so a synced model is green by construction.
 func checkCMakeCode(in Input) []model.Finding {
-	if in.Mapper.Empty() || in.HeadModel.Structural() || !cmake.Detect(in.RepoDir) {
+	if in.Mapper.Empty() || in.HeadModel.Structural() {
 		return nil
 	}
-	cg, err := cmake.Discover(in.RepoDir)
-	if err != nil || len(cg.Edges) == 0 {
+	// Read CMakeLists.txt at the REVIEWED ref (not the working tree), like the Go
+	// check — so the C++ graph matches base..head.
+	files := cmakeFilesAt(in.Repo, in.Head, in.Prefix)
+	if len(files) == 0 {
+		return nil // not a CMake project at this ref
+	}
+	cg := cmake.DiscoverFiles(files)
+	if len(cg.Edges) == 0 {
 		return nil
 	}
 	touched := map[string]bool{}
@@ -256,6 +263,36 @@ func checkC4Code(in Input) []model.Finding {
 		}
 	}
 	return fs
+}
+
+// cmakeFilesAt reads every CMakeLists.txt under the nugit root (prefix) at ref,
+// returning them with nugit-root-relative directories.
+func cmakeFilesAt(repo gitutil.Repo, ref, prefix string) []cmake.File {
+	paths, err := repo.ListTree(ref)
+	if err != nil {
+		return nil
+	}
+	nugitRoot := strings.TrimSuffix(prefix, "/") // "" or e.g. "apps/op"
+	var files []cmake.File
+	for _, p := range paths {
+		if path.Base(p) != "CMakeLists.txt" {
+			continue
+		}
+		dir := path.Dir(p) // git-root-relative
+		if nugitRoot != "" && dir != nugitRoot && !strings.HasPrefix(dir, nugitRoot+"/") {
+			continue
+		}
+		rel := dir
+		if nugitRoot != "" {
+			rel = strings.TrimPrefix(strings.TrimPrefix(dir, nugitRoot), "/")
+		}
+		if rel == "" {
+			rel = "."
+		}
+		src, _ := repo.ShowFile(ref, p)
+		files = append(files, cmake.File{Dir: rel, Text: src})
+	}
+	return files
 }
 
 // checkStaleKnowledge: the PR changes code governed by a superseded/invalidated

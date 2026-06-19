@@ -155,6 +155,17 @@ func (r Repo) Numstat(base, head string) (map[string][2]int, error) {
 	return counts, nil
 }
 
+// ListTree returns every file path tracked at ref (git-root-relative), so a
+// language analyzer can read build files at the reviewed ref instead of the disk
+// working tree.
+func (r Repo) ListTree(ref string) ([]string, error) {
+	out, err := r.git("ls-tree", "-r", "--name-only", "-z", ref)
+	if err != nil {
+		return nil, err
+	}
+	return splitNUL(out), nil
+}
+
 // RawDiff returns the unified text diff between base and head, optionally
 // limited to the given paths.
 func (r Repo) RawDiff(base, head string, paths ...string) (string, error) {

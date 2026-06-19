@@ -83,7 +83,7 @@ func DiscoverStructural(rootDir string, opt StructuralOptions) (Graph, error) {
 	idOf := assignIDs(compDirs)
 	g := Graph{Structural: true}
 	for _, d := range compDirs {
-		glob := gitRootGlob(prefix, d)
+		glob := gitRootGlob(prefix, d, "*")
 		if opt.Layout == "flat" {
 			glob = prefix + "**"
 		}

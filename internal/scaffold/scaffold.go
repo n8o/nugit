@@ -104,7 +104,19 @@ func Run(opt Options) (Result, error) {
 		}
 		switch {
 		case len(g.Components) == 0:
-			if len(sg.Components) > 0 {
+			// Empty Go model: prefer CMake (edged) over an edge-free structural
+			// model, so a repo with an incidental root go.mod but a real CMake
+			// architecture still gets enforceable edges.
+			if bootstrap.DetectCMake(opt.RepoDir) {
+				cg, err := bootstrap.DiscoverCMake(opt.RepoDir)
+				if err != nil {
+					return res, err
+				}
+				if len(cg.Components) > 0 {
+					g, res.CMake = cg, true
+				}
+			}
+			if !res.CMake && len(sg.Components) > 0 {
 				g, res.Structural = sg, true
 			}
 		case len(sg.Components) > len(g.Components):
