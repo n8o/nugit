@@ -258,7 +258,7 @@ func cmdC4(args []string) int {
 				return 1
 			}
 			fmt.Printf("Wrote IcePanel import payload to %s (%d objects, %d connections).\n",
-				*out, len(m.Components)+1, len(m.Relationships))
+				*out, len(m.Components)+3, len(m.Relationships))
 			return 0
 		}
 		fmt.Println(string(data))
