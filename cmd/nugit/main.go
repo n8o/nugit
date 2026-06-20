@@ -18,6 +18,7 @@ import (
 	"github.com/n8o/nugit/internal/distill"
 	"github.com/n8o/nugit/internal/doctor"
 	"github.com/n8o/nugit/internal/engine"
+	"github.com/n8o/nugit/internal/icepanel"
 	"github.com/n8o/nugit/internal/localmem"
 	"github.com/n8o/nugit/internal/mcp"
 	"github.com/n8o/nugit/internal/model"
@@ -207,15 +208,15 @@ func cmdInit(args []string) int {
 // cmdDistill promotes commit-trailer decisions/lessons into durable .nugit/ objects.
 // cmdC4 renders the C4 model. `nugit c4 render -format mermaid`.
 func cmdC4(args []string) int {
-	if len(args) < 1 || (args[0] != "render" && args[0] != "gen-rules") {
-		fmt.Fprintln(os.Stderr, "nugit c4: usage: nugit c4 (render|gen-rules) [-C dir] [flags]")
+	if len(args) < 1 || (args[0] != "render" && args[0] != "gen-rules" && args[0] != "export") {
+		fmt.Fprintln(os.Stderr, "nugit c4: usage: nugit c4 (render|gen-rules|export) [-C dir] [flags]")
 		return 2
 	}
 	sub := args[0]
 	fs := flag.NewFlagSet("c4 "+sub, flag.ExitOnError)
 	dir := fs.String("C", ".", "repo directory")
-	format := fs.String("format", "mermaid", "render output: mermaid")
-	out := fs.String("o", "", "gen-rules: write to this file instead of stdout")
+	format := fs.String("format", "mermaid", "render: mermaid | export: icepanel")
+	out := fs.String("o", "", "write to this file instead of stdout (gen-rules/export)")
 	_ = fs.Parse(args[1:])
 	cfg, _ := config.Load(*dir)
 	dslPath := cfg.C4.DSL
@@ -239,6 +240,28 @@ func cmdC4(args []string) int {
 			return 0
 		}
 		fmt.Print(cfgYML)
+		return 0
+	}
+	if sub == "export" {
+		if *format != "icepanel" {
+			fmt.Fprintf(os.Stderr, "nugit c4 export: unknown format %q (want: icepanel)\n", *format)
+			return 2
+		}
+		data, err := json.MarshalIndent(icepanel.Transform(m), "", "  ")
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "nugit c4 export: %v\n", err)
+			return 1
+		}
+		if *out != "" {
+			if err := os.WriteFile(*out, append(data, '\n'), 0o644); err != nil {
+				fmt.Fprintf(os.Stderr, "nugit c4 export: %v\n", err)
+				return 1
+			}
+			fmt.Printf("Wrote IcePanel import payload to %s (%d objects, %d connections).\n",
+				*out, len(m.Components)+1, len(m.Relationships))
+			return 0
+		}
+		fmt.Println(string(data))
 		return 0
 	}
 	switch *format {

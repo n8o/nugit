@@ -47,6 +47,9 @@ workspace "nugit" "Git-native typed knowledge & unified PR view — self-model (
             beads = component "Beads adapter" "Reads .beads/*.jsonl for plan position" "Go" {
                 properties { paths "internal/beads/**" }
             }
+            icepanel = component "IcePanel projection" "Transforms the C4 model to IcePanel import data (outbound)" "Go" {
+                properties { paths "internal/icepanel/**" }
+            }
             consistency = component "Consistency checks" "Cross-artifact verification" "Go" {
                 properties { paths "internal/consistency/**" }
             }
@@ -175,6 +178,9 @@ workspace "nugit" "Git-native typed knowledge & unified PR view — self-model (
             cli -> c4 "c4 render command"
             cli -> consistency "explain command"
             cli -> doctor "doctor command"
+            cli -> icepanel "c4 export command"
+
+            icepanel -> model_ "uses types"
 
             doctor -> config "checks config"
             doctor -> c4 "checks the model parses"
