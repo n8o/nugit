@@ -4,15 +4,26 @@
 // the CI job POSTs it with prune=true (full replace) so git deterministically
 // overwrites IcePanel on every push and drift cannot accumulate.
 //
-// Schema note: the shapes below follow IcePanel's documented LandscapeImportData
-// (modelObjects / modelConnections / tags). The exact object `type` and parenting
-// must be validated against api.icepanel.io/v1/schemas/LandscapeImportData before
-// the live push — see the Phase-1 open questions. Stable ids (the component handle)
-// keep imports idempotent: re-importing an unchanged model produces no churn.
+// Schema validated live against the IcePanel API (2026-06-19):
+//   - modelConnections REQUIRE `direction` ("outgoing"|"bidirectional") + name/
+//     originId/targetId/id; modelObjects REQUIRE id/name/type (type ∈ actor|app|
+//     component|group|store|system — "root" is NOT importable).
+//   - the paths globs ride in `description` (objects have tagIds/technologyIds
+//     references, not free-string tags).
+//
+// Stable ids (the component handle) keep imports idempotent (no churn on re-import).
+//
+// PUSH-TIME requirement discovered live (not encodable in this pure transform):
+// the landscape's root object is system-managed and not importable, so the push
+// step must GET the root id and remap the system's ParentID to it before POSTing.
+// On a FREE/trial plan the import endpoint returns 200 but the async apply does
+// not populate the model — import is a paid feature; full apply/diagram/snapshot
+// validation needs a paid IcePanel plan.
 package icepanel
 
 import (
 	"sort"
+	"strings"
 
 	"github.com/n8o/nugit/internal/model"
 )
@@ -23,23 +34,26 @@ type LandscapeImportData struct {
 	ModelConnections []ModelConnection `json:"modelConnections"`
 }
 
-// ModelObject is one node (a system or component) in the IcePanel model.
+// ModelObject is one node (a system or component) in the IcePanel model. Fields
+// match IcePanel's ModelObjectImport schema (id/name/type required; type ∈
+// actor|app|component|group|root|store|system). The paths globs ride in
+// description so the file→component binding survives the projection.
 type ModelObject struct {
-	ID       string   `json:"id"`                 // stable: nugit component handle (or "system")
-	Handle   string   `json:"handle"`             // human id
-	Name     string   `json:"name"`               // label
-	Type     string   `json:"type"`               // "system" | "component"
-	ParentID string   `json:"parentId,omitempty"` // components hang under the system
-	Tech     string   `json:"tech,omitempty"`
-	Tags     []string `json:"tags,omitempty"` // carries the paths globs so the binding survives
+	ID          string `json:"id"` // stable: nugit component handle (or the system id)
+	Name        string `json:"name"`
+	Type        string `json:"type"`
+	ParentID    string `json:"parentId,omitempty"` // components hang under the system
+	Description string `json:"description,omitempty"`
 }
 
-// ModelConnection is one directed dependency between objects.
+// ModelConnection is one directed dependency. Fields match ModelConnectionImport
+// (id/name/originId/targetId/direction required; direction ∈ outgoing|bidirectional).
 type ModelConnection struct {
-	ID       string `json:"id"` // stable: "src->dst"
-	OriginID string `json:"originId"`
-	TargetID string `json:"targetId"`
-	Name     string `json:"name,omitempty"`
+	ID        string `json:"id"` // stable: "src->dst"
+	Name      string `json:"name"`
+	OriginID  string `json:"originId"`
+	TargetID  string `json:"targetId"`
+	Direction string `json:"direction"` // "outgoing" for a directed dependency
 }
 
 // rootID is the synthetic system object every component is parented to.
@@ -53,7 +67,7 @@ func Transform(m model.Model) LandscapeImportData {
 		name = "system"
 	}
 	out := LandscapeImportData{
-		ModelObjects: []ModelObject{{ID: rootID, Handle: rootID, Name: name, Type: "system"}},
+		ModelObjects: []ModelObject{{ID: rootID, Name: name, Type: "system"}},
 	}
 
 	comps := append([]model.Component(nil), m.Components...)
@@ -63,14 +77,16 @@ func Transform(m model.Model) LandscapeImportData {
 		if label == "" {
 			label = c.ID
 		}
+		desc := strings.Join(c.Paths, ", ") // keep the file->component binding visible
+		if c.Tech != "" {
+			desc = c.Tech + " — " + desc
+		}
 		out.ModelObjects = append(out.ModelObjects, ModelObject{
-			ID:       c.ID,
-			Handle:   c.ID,
-			Name:     label,
-			Type:     "component",
-			ParentID: rootID,
-			Tech:     c.Tech,
-			Tags:     append([]string(nil), c.Paths...), // keep the file->component binding visible
+			ID:          c.ID,
+			Name:        label,
+			Type:        "component",
+			ParentID:    rootID,
+			Description: desc,
 		})
 	}
 
@@ -88,8 +104,12 @@ func Transform(m model.Model) LandscapeImportData {
 			continue
 		}
 		seen[id] = true
+		name := r.Desc
+		if name == "" {
+			name = "depends on" // name is required + must be meaningful
+		}
 		out.ModelConnections = append(out.ModelConnections, ModelConnection{
-			ID: id, OriginID: r.Src, TargetID: r.Dst, Name: r.Desc,
+			ID: id, Name: name, OriginID: r.Src, TargetID: r.Dst, Direction: "outgoing",
 		})
 	}
 	return out

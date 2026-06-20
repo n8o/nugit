@@ -25,20 +25,21 @@ func TestTransform(t *testing.T) {
 	if d.ModelObjects[0].Type != "system" || d.ModelObjects[0].Name != "nugit" {
 		t.Errorf("first object should be the system root: %+v", d.ModelObjects[0])
 	}
-	// components sorted, parented to the system, ids = handles (idempotent)
-	if d.ModelObjects[1].ID != "c4" || d.ModelObjects[1].ParentID != rootID {
+	// components sorted, typed, parented to the system, ids = handles (idempotent)
+	if d.ModelObjects[1].ID != "c4" || d.ModelObjects[1].Type != "component" || d.ModelObjects[1].ParentID != rootID {
 		t.Errorf("component object wrong: %+v", d.ModelObjects[1])
 	}
-	// paths carried as tags (binding survives)
-	if !reflect.DeepEqual(d.ModelObjects[2].Tags, []string{"internal/render/**"}) {
-		t.Errorf("paths not carried as tags: %+v", d.ModelObjects[2])
+	// paths carried in description (binding survives; tech prefixed)
+	if d.ModelObjects[2].Description != "Go — internal/render/**" {
+		t.Errorf("paths not carried in description: %q", d.ModelObjects[2].Description)
 	}
-	// one connection with a stable id
-	if len(d.ModelConnections) != 1 || d.ModelConnections[0].ID != "render->c4" {
+	// one connection: stable id, required direction, name from desc
+	c := d.ModelConnections[0]
+	if len(d.ModelConnections) != 1 || c.ID != "render->c4" || c.Direction != "outgoing" {
 		t.Fatalf("connection wrong: %+v", d.ModelConnections)
 	}
-	if d.ModelConnections[0].OriginID != "render" || d.ModelConnections[0].TargetID != "c4" {
-		t.Errorf("connection endpoints wrong: %+v", d.ModelConnections[0])
+	if c.OriginID != "render" || c.TargetID != "c4" || c.Name != "renders diagrams" {
+		t.Errorf("connection fields wrong: %+v", c)
 	}
 
 	// idempotent + deterministic: same input -> identical output
