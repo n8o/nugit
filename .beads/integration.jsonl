@@ -1,5 +1,5 @@
-{"id":"PHASE-0","title":"Foundations — single-writer-per-fact decision (ADR-0011) + contract (SPEC-002)","issue_type":"epic","status":"in_progress"}
-{"id":"PHASE-1","title":"IcePanel outbound projection — workspace.dsl → import?prune=true + commit-SHA snapshot","issue_type":"epic","status":"open"}
+{"id":"PHASE-0","title":"Foundations — single-writer-per-fact decision (ADR-0011) + contract (SPEC-002)","issue_type":"epic","status":"closed"}
+{"id":"PHASE-1","title":"IcePanel outbound projection — workspace.dsl → import?prune=true + commit-SHA snapshot","issue_type":"epic","status":"in_progress"}
 {"id":"PHASE-2","title":"Notion outbound projection — knowledge corpus, idempotent via nugit_git_id","issue_type":"epic","status":"open"}
 {"id":"PHASE-3","title":"Linear plan-position read adapter — behind the PlanPosition contract, never gates","issue_type":"epic","status":"open"}
 {"id":"PHASE-4","title":"Inbound-as-proposal harvesters — IcePanel/Notion export → reviewed PR (deferred)","issue_type":"epic","status":"open"}
