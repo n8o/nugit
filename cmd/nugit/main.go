@@ -22,6 +22,7 @@ import (
 	"github.com/n8o/nugit/internal/localmem"
 	"github.com/n8o/nugit/internal/mcp"
 	"github.com/n8o/nugit/internal/model"
+	"github.com/n8o/nugit/internal/notion"
 	"github.com/n8o/nugit/internal/render"
 	"github.com/n8o/nugit/internal/retrieval"
 	"github.com/n8o/nugit/internal/scaffold"
@@ -76,6 +77,8 @@ func main() {
 		os.Exit(cmdContext(os.Args[2:]))
 	case "mcp":
 		os.Exit(cmdMCP(os.Args[2:]))
+	case "notion":
+		os.Exit(cmdNotion(os.Args[2:]))
 	case "remember":
 		os.Exit(cmdRemember(os.Args[2:]))
 	case "hook":
@@ -421,6 +424,54 @@ func cmdHook(args []string) int {
 		fmt.Fprintf(os.Stderr, "nugit hook: unknown hook %q\n", args[0])
 		return 2
 	}
+}
+
+// cmdNotion publishes the knowledge corpus OUTBOUND to a Notion database (ADR-0011).
+// -dry-run (or a missing NOTION_TOKEN) prints the request bodies instead of POSTing.
+func cmdNotion(args []string) int {
+	if len(args) < 1 || args[0] != "publish" {
+		fmt.Fprintln(os.Stderr, "nugit notion: usage: nugit notion publish -database <id> [-dry-run] [-C dir]")
+		return 2
+	}
+	fs := flag.NewFlagSet("notion publish", flag.ExitOnError)
+	dir := fs.String("C", ".", "repo directory")
+	database := fs.String("database", "", "target Notion database id (required)")
+	dry := fs.Bool("dry-run", false, "print the request bodies instead of publishing")
+	_ = fs.Parse(args[1:])
+	if *database == "" {
+		fmt.Fprintln(os.Stderr, "nugit notion publish: -database is required")
+		return 2
+	}
+	docs, err := notion.CollectDocs(*dir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "nugit notion publish: %v\n", err)
+		return 1
+	}
+	token := os.Getenv("NOTION_TOKEN")
+	if *dry || token == "" {
+		if token == "" && !*dry {
+			fmt.Fprintln(os.Stderr, "NOTION_TOKEN not set — dry run (request bodies only):")
+		}
+		for _, d := range docs {
+			body, _ := json.MarshalIndent(notion.CreateBody(*database, d), "", "  ")
+			fmt.Printf("# %s — POST /v1/pages\n%s\n\n", d.GitID, string(body))
+		}
+		fmt.Printf("(%d knowledge object(s) would be upserted into database %s)\n", len(docs), *database)
+		return 0
+	}
+	res, err := notion.Publish(token, *database, docs)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "nugit notion publish: %v\n", err)
+		return 1
+	}
+	fmt.Printf("Published to Notion: %d created, %d updated.\n", res.Created, res.Updated)
+	for _, e := range res.Errors {
+		fmt.Fprintf(os.Stderr, "  error: %s\n", e)
+	}
+	if len(res.Errors) > 0 {
+		return 1
+	}
+	return 0
 }
 
 func cmdMCP(args []string) int {
