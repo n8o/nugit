@@ -13,12 +13,15 @@
 //
 // Stable ids (the component handle) keep imports idempotent (no churn on re-import).
 //
-// PUSH-TIME requirement discovered live (not encodable in this pure transform):
-// the landscape's root object is system-managed and not importable, so the push
-// step must GET the root id and remap the system's ParentID to it before POSTing.
-// On a FREE/trial plan the import endpoint returns 200 but the async apply does
-// not populate the model — import is a paid feature; full apply/diagram/snapshot
-// validation needs a paid IcePanel plan.
+// Validated live: this payload is ACCEPTED (HTTP 200) and follows IcePanel's
+// documented parent rules. But the import APPLY (async) proved opaque over raw HTTP
+// — a hierarchy-correct payload still did not fully populate (the imported top-level
+// domain collapses into a duplicate root and deeper objects are dropped), and the
+// import-job error endpoint is unavailable to diagnose. CONCLUSION: nugit's job ends
+// at producing this validated export; the PUSH should use IcePanel's OFFICIAL SDK /
+// GitHub Action (which owns the async import lifecycle), not a hand-rolled HTTP push.
+// (An earlier "import is paid-gated on the trial" note was WRONG — it's the apply
+// lifecycle, not a plan limit.)
 package icepanel
 
 import (
@@ -56,19 +59,28 @@ type ModelConnection struct {
 	Direction string `json:"direction"` // "outgoing" for a directed dependency
 }
 
-// rootID is the synthetic system object every component is parented to.
-const rootID = "nugit-system"
+// IcePanel parent rules (validated against the live API reference): domain → system
+// → app/store → component (a domain is the only top-level type; a component must
+// hang under an app, never directly under a system). nugit is one binary, so it maps
+// to a domain→system→app spine, with its packages as components under the app.
+const (
+	domainID = "nugit-domain"
+	systemID = "nugit-system"
+	appID    = "nugit-app"
+)
 
 // Transform maps a parsed C4 model to a LandscapeImportData payload. Deterministic
 // (sorted) and idempotent (handle-stable ids) so prune=true re-imports don't churn.
 func Transform(m model.Model) LandscapeImportData {
 	name := m.Name
 	if name == "" {
-		name = "system"
+		name = "nugit"
 	}
-	out := LandscapeImportData{
-		ModelObjects: []ModelObject{{ID: rootID, Name: name, Type: "system"}},
-	}
+	out := LandscapeImportData{ModelObjects: []ModelObject{
+		{ID: domainID, Name: name, Type: "domain"}, // top-level (no parent)
+		{ID: systemID, Name: name, Type: "system", ParentID: domainID},
+		{ID: appID, Name: name, Type: "app", ParentID: systemID}, // the binary; components hang here
+	}}
 
 	comps := append([]model.Component(nil), m.Components...)
 	sort.Slice(comps, func(i, j int) bool { return comps[i].ID < comps[j].ID })
@@ -85,7 +97,7 @@ func Transform(m model.Model) LandscapeImportData {
 			ID:          c.ID,
 			Name:        label,
 			Type:        "component",
-			ParentID:    rootID,
+			ParentID:    appID,
 			Description: desc,
 		})
 	}
