@@ -71,6 +71,7 @@ go build -o nugit ./cmd/nugit
 ./nugit remember -text "watch out for X" -scope foo             # ephemeral working memory
 ./nugit distill -base main -head HEAD                           # promote trailers → ADRs/lessons
 ./nugit c4 render | ./nugit c4 gen-rules                        # Mermaid / go-arch-lint config
+./nugit c4 preview                                             # live C4 diagrams via local Structurizr Lite (Docker)
 ./nugit explain c4'<->'code                                     # finding rationale
 ```
 
