@@ -50,6 +50,9 @@ workspace "nugit" "Git-native typed knowledge & unified PR view — self-model (
             icepanel = component "IcePanel projection" "Transforms the C4 model to IcePanel import data (outbound)" "Go" {
                 properties { paths "internal/icepanel/**" }
             }
+            notion = component "Notion projection" "Publishes the knowledge corpus to a Notion database (outbound)" "Go" {
+                properties { paths "internal/notion/**" }
+            }
             consistency = component "Consistency checks" "Cross-artifact verification" "Go" {
                 properties { paths "internal/consistency/**" }
             }
@@ -182,8 +185,12 @@ workspace "nugit" "Git-native typed knowledge & unified PR view — self-model (
             cli -> consistency "explain command"
             cli -> doctor "doctor command"
             cli -> icepanel "c4 export command"
+            cli -> notion "notion publish command"
 
             icepanel -> model_ "uses types"
+
+            notion -> model_ "uses types"
+            notion -> knowledge "loads the corpus"
 
             doctor -> config "checks config"
             doctor -> c4 "checks the model parses"

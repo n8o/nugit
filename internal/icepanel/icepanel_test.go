@@ -18,20 +18,26 @@ func TestTransform(t *testing.T) {
 	}
 	d := Transform(m)
 
-	// one system root + 2 components
-	if len(d.ModelObjects) != 3 {
-		t.Fatalf("want 3 objects (system + 2), got %d", len(d.ModelObjects))
+	// domain → system → app spine + 2 components = 5 objects
+	if len(d.ModelObjects) != 5 {
+		t.Fatalf("want 5 objects (domain+system+app + 2 components), got %d", len(d.ModelObjects))
 	}
-	if d.ModelObjects[0].Type != "system" || d.ModelObjects[0].Name != "nugit" {
-		t.Errorf("first object should be the system root: %+v", d.ModelObjects[0])
+	if d.ModelObjects[0].Type != "domain" || d.ModelObjects[0].ParentID != "" {
+		t.Errorf("object[0] must be a top-level domain: %+v", d.ModelObjects[0])
 	}
-	// components sorted, typed, parented to the system, ids = handles (idempotent)
-	if d.ModelObjects[1].ID != "c4" || d.ModelObjects[1].Type != "component" || d.ModelObjects[1].ParentID != rootID {
-		t.Errorf("component object wrong: %+v", d.ModelObjects[1])
+	if d.ModelObjects[1].Type != "system" || d.ModelObjects[1].ParentID != domainID {
+		t.Errorf("object[1] must be a system under the domain: %+v", d.ModelObjects[1])
+	}
+	if d.ModelObjects[2].Type != "app" || d.ModelObjects[2].ParentID != systemID {
+		t.Errorf("object[2] must be an app under the system: %+v", d.ModelObjects[2])
+	}
+	// components sorted, parented to the APP (not the system), ids = handles
+	if d.ModelObjects[3].ID != "c4" || d.ModelObjects[3].Type != "component" || d.ModelObjects[3].ParentID != appID {
+		t.Errorf("component must hang under the app: %+v", d.ModelObjects[3])
 	}
 	// paths carried in description (binding survives; tech prefixed)
-	if d.ModelObjects[2].Description != "Go — internal/render/**" {
-		t.Errorf("paths not carried in description: %q", d.ModelObjects[2].Description)
+	if d.ModelObjects[4].Description != "Go — internal/render/**" {
+		t.Errorf("paths not carried in description: %q", d.ModelObjects[4].Description)
 	}
 	// one connection: stable id, required direction, name from desc
 	c := d.ModelConnections[0]
