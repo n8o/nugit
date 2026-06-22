@@ -22,6 +22,7 @@ import (
 	"github.com/n8o/nugit/internal/localmem"
 	"github.com/n8o/nugit/internal/mcp"
 	"github.com/n8o/nugit/internal/model"
+	"github.com/n8o/nugit/internal/obsidian"
 	"github.com/n8o/nugit/internal/render"
 	"github.com/n8o/nugit/internal/retrieval"
 	"github.com/n8o/nugit/internal/scaffold"
@@ -88,6 +89,8 @@ func main() {
 		os.Exit(cmdExplain(os.Args[2:]))
 	case "doctor":
 		os.Exit(cmdDoctor(os.Args[2:]))
+	case "obsidian":
+		os.Exit(cmdObsidian(os.Args[2:]))
 	case "pr-render":
 		os.Exit(cmdPRRender(os.Args[2:]))
 	case "version":
@@ -271,6 +274,26 @@ func cmdC4(args []string) int {
 		fmt.Fprintf(os.Stderr, "nugit c4 render: unknown format %q\n", *format)
 		return 2
 	}
+	return 0
+}
+
+// cmdObsidian (re)generates .nugit/INDEX.md so the corpus opens cleanly as an
+// Obsidian vault — the no-sync editing surface for the knowledge layer.
+func cmdObsidian(args []string) int {
+	fs := flag.NewFlagSet("obsidian", flag.ExitOnError)
+	dir := fs.String("C", ".", "repo directory")
+	_ = fs.Parse(args)
+	md, err := obsidian.Generate(*dir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "nugit obsidian: %v\n", err)
+		return 1
+	}
+	out := *dir + "/.nugit/INDEX.md"
+	if err := os.WriteFile(out, []byte(md), 0o644); err != nil {
+		fmt.Fprintf(os.Stderr, "nugit obsidian: %v\n", err)
+		return 1
+	}
+	fmt.Printf("Wrote %s. Open the repo folder in Obsidian and start at INDEX.\n", out)
 	return 0
 }
 

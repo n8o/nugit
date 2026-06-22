@@ -89,6 +89,9 @@ workspace "nugit" "Git-native typed knowledge & unified PR view — self-model (
             doctor = component "Doctor" "Setup pre-flight health checks" "Go" {
                 properties { paths "internal/doctor/**" }
             }
+            obsidian = component "Obsidian vault" "Generates the knowledge index for the .nugit Obsidian vault" "Go" {
+                properties { paths "internal/obsidian/**" }
+            }
             cli = component "CLI" "nugit command entrypoint" "Go" {
                 properties { paths "cmd/nugit/**" }
             }
@@ -187,6 +190,10 @@ workspace "nugit" "Git-native typed knowledge & unified PR view — self-model (
             doctor -> gitutil "checks the hook"
             doctor -> bootstrap "detects the backend"
             doctor -> knowledge "checks the store"
+
+            cli -> obsidian "obsidian command"
+            obsidian -> knowledge "loads the corpus"
+            obsidian -> model_ "uses types"
         }
     }
 
