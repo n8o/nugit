@@ -18,3 +18,7 @@
 .DS_Store
 .idea/
 .vscode/
+
+# Structurizr Lite local render cache / autosaved layout
+**/.structurizr/
+.nugit/architecture/workspace.json

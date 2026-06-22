@@ -9,6 +9,8 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"runtime/debug"
 	"strings"
 
@@ -37,6 +39,7 @@ usage:
   nugit mcp [flags]           run the MCP stdio server (exposes context() to agents)
   nugit distill [flags]       promote commit-trailer decisions/lessons to durable knowledge
   nugit c4 render [flags]      render the C4 model as Mermaid
+  nugit c4 preview [flags]     live C4 diagrams via local Structurizr Lite (Docker)
   nugit explain [check]       rationale + remediation for a consistency check
   nugit pr-render [flags]      compute & render the unified PR view
   nugit version
@@ -211,8 +214,8 @@ func cmdInit(args []string) int {
 // cmdDistill promotes commit-trailer decisions/lessons into durable .nugit/ objects.
 // cmdC4 renders the C4 model. `nugit c4 render -format mermaid`.
 func cmdC4(args []string) int {
-	if len(args) < 1 || (args[0] != "render" && args[0] != "gen-rules" && args[0] != "export") {
-		fmt.Fprintln(os.Stderr, "nugit c4: usage: nugit c4 (render|gen-rules|export) [-C dir] [flags]")
+	if len(args) < 1 || (args[0] != "render" && args[0] != "gen-rules" && args[0] != "export" && args[0] != "preview") {
+		fmt.Fprintln(os.Stderr, "nugit c4: usage: nugit c4 (render|gen-rules|export|preview) [-C dir] [flags]")
 		return 2
 	}
 	sub := args[0]
@@ -220,11 +223,15 @@ func cmdC4(args []string) int {
 	dir := fs.String("C", ".", "repo directory")
 	format := fs.String("format", "mermaid", "render: mermaid | export: icepanel")
 	out := fs.String("o", "", "write to this file instead of stdout (gen-rules/export)")
+	port := fs.String("port", "8080", "preview: localhost port for Structurizr Lite")
 	_ = fs.Parse(args[1:])
 	cfg, _ := config.Load(*dir)
 	dslPath := cfg.C4.DSL
 	if dslPath == "" {
 		dslPath = ".nugit/architecture/workspace.dsl"
+	}
+	if sub == "preview" {
+		return c4Preview(*dir, dslPath, *port)
 	}
 	src, err := os.ReadFile(*dir + "/" + dslPath)
 	if err != nil {
@@ -315,6 +322,33 @@ func cmdDoctor(args []string) int {
 		return 1
 	}
 	fmt.Println("\nnugit is set up correctly here.")
+	return 0
+}
+
+// c4Preview launches Structurizr Lite (the free, local renderer) against the model
+// directory — a git-native C4 viewer: it renders workspace.dsl live, no cloud, no
+// sync. Falls back to printing the command when Docker isn't installed.
+func c4Preview(dir, dslPath, port string) int {
+	modelDir, err := filepath.Abs(filepath.Join(dir, filepath.Dir(dslPath)))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "nugit c4 preview: %v\n", err)
+		return 1
+	}
+	// Structurizr Lite serves the directory that contains workspace.dsl.
+	dockerArgs := []string{"run", "--rm", "-p", port + ":8080", "-v", modelDir + ":/usr/local/structurizr", "structurizr/lite"}
+	if _, err := exec.LookPath("docker"); err != nil {
+		fmt.Println("Docker not found. Start Structurizr Lite manually:")
+		fmt.Printf("  docker %s\n", strings.Join(dockerArgs, " "))
+		fmt.Println("…then open http://localhost:" + port + "  (or the jar: https://structurizr.com/help/lite)")
+		return 0
+	}
+	fmt.Printf("Starting Structurizr Lite → http://localhost:%s  (Ctrl-C to stop)\n", port)
+	c := exec.Command("docker", dockerArgs...)
+	c.Stdin, c.Stdout, c.Stderr = os.Stdin, os.Stdout, os.Stderr
+	if err := c.Run(); err != nil {
+		fmt.Fprintf(os.Stderr, "nugit c4 preview: %v\n", err)
+		return 1
+	}
 	return 0
 }
 
