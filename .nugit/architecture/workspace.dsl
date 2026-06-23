@@ -159,6 +159,11 @@ workspace "nugit" "Git-native typed knowledge & unified PR view — self-model (
                     "paths" "internal/deploy/**"
                 }
             }
+            modelfacts = component "Model facts" "Grounding bundle for the ADR-0012 bootstrap agent (inventory + edges + libs)" "Go" {
+                properties {
+                    "paths" "internal/modelfacts/**"
+                }
+            }
             cli = component "CLI" "nugit command entrypoint" "Go" {
                 properties {
                     "paths" "cmd/nugit/**"
@@ -266,6 +271,10 @@ workspace "nugit" "Git-native typed knowledge & unified PR view — self-model (
 
             cli -> obsidian "obsidian command"
             cli -> deploy "deploy command"
+            cli -> modelfacts "model facts command"
+
+            modelfacts -> deploy "reads the container inventory"
+            modelfacts -> cmake "reads the dependency edges"
             obsidian -> knowledge "loads the corpus"
             obsidian -> model_ "uses types"
           }
