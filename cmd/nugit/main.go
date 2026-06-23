@@ -40,7 +40,7 @@ usage:
   nugit mcp [flags]           run the MCP stdio server (exposes context() to agents)
   nugit distill [flags]       promote commit-trailer decisions/lessons to durable knowledge
   nugit c4 render [flags]      render the C4 model as Mermaid
-  nugit c4 preview [flags]     live C4 diagrams via local Structurizr Lite (Docker)
+  nugit c4 preview [flags]     live C4 diagrams via local Structurizr renderer (Docker)
   nugit explain [check]       rationale + remediation for a consistency check
   nugit pr-render [flags]      compute & render the unified PR view
   nugit version
@@ -328,24 +328,29 @@ func cmdDoctor(args []string) int {
 	return 0
 }
 
-// c4Preview launches Structurizr Lite (the free, local renderer) against the model
-// directory — a git-native C4 viewer: it renders workspace.dsl live, no cloud, no
-// sync. Falls back to printing the command when Docker isn't installed.
+// c4Preview launches Structurizr's local renderer against the model directory — a
+// git-native C4 viewer: it renders workspace.dsl live, no cloud, no sync. Uses the
+// maintained `structurizr/structurizr local` image (the old `structurizr/lite` is
+// EOL). Falls back to printing the command when Docker isn't installed.
 func c4Preview(dir, dslPath, port string) int {
 	modelDir, err := filepath.Abs(filepath.Join(dir, filepath.Dir(dslPath)))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "nugit c4 preview: %v\n", err)
 		return 1
 	}
-	// Structurizr Lite serves the directory that contains workspace.dsl.
-	dockerArgs := []string{"run", "--rm", "-p", port + ":8080", "-v", modelDir + ":/usr/local/structurizr", "structurizr/lite"}
+	if _, err := os.Stat(filepath.Join(modelDir, filepath.Base(dslPath))); err != nil {
+		fmt.Fprintf(os.Stderr, "nugit c4 preview: no %s under %s — run from the nugit root or pass -C\n", filepath.Base(dslPath), modelDir)
+		return 1
+	}
+	// The renderer serves the directory that contains workspace.dsl.
+	dockerArgs := []string{"run", "--rm", "-p", port + ":8080", "-v", modelDir + ":/usr/local/structurizr", "structurizr/structurizr", "local"}
 	if _, err := exec.LookPath("docker"); err != nil {
-		fmt.Println("Docker not found. Start Structurizr Lite manually:")
+		fmt.Println("Docker not found. Start the Structurizr local renderer manually:")
 		fmt.Printf("  docker %s\n", strings.Join(dockerArgs, " "))
-		fmt.Println("…then open http://localhost:" + port + "  (or the jar: https://structurizr.com/help/lite)")
+		fmt.Println("…then open http://localhost:" + port + "  (binaries: https://docs.structurizr.com/local)")
 		return 0
 	}
-	fmt.Printf("Starting Structurizr Lite → http://localhost:%s  (Ctrl-C to stop)\n", port)
+	fmt.Printf("Starting Structurizr (local) → http://localhost:%s  (Ctrl-C to stop)\n", port)
 	c := exec.Command("docker", dockerArgs...)
 	c.Stdin, c.Stdout, c.Stderr = os.Stdin, os.Stdout, os.Stderr
 	if err := c.Run(); err != nil {
