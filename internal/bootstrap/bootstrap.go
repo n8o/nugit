@@ -157,24 +157,30 @@ func GenerateDSL(g Graph, name string) string {
 		b.WriteString("    // by hand, or add a per-language analyzer to enforce them. c4<->code\n")
 		b.WriteString("    // stays silent here, so a clean run is NOT an architecture guarantee.\n\n")
 	}
-	fmt.Fprintf(&b, "    sys = softwareSystem %q {\n\n", name)
+	fmt.Fprintf(&b, "    sys = softwareSystem %q {\n", name)
+	// Components live inside a container (C4: system → container → component);
+	// emitting them directly under the system is invalid Structurizr DSL.
+	fmt.Fprintf(&b, "      app = container %q {\n\n", name)
 	if g.Structural {
 		// Parseable marker (survives c4.Parse, unlike a comment): keeps the
 		// c4<->code import check silent for an edges-free structural model.
-		b.WriteString("      properties { nugit_structural \"true\" }\n\n")
+		b.WriteString("        properties {\n          \"nugit_structural\" \"true\"\n        }\n\n")
 	}
 	for _, c := range g.Components {
-		fmt.Fprintf(&b, "      %s = component %q {\n        properties { paths %q }\n      }\n",
+		// Property keys are quoted and the block is multi-line: Structurizr's
+		// line-oriented DSL parser rejects bare keys and inline `{ ... }` blocks
+		// (it consumes the component's closing brace as the properties close).
+		fmt.Fprintf(&b, "        %s = component %q {\n          properties {\n            \"paths\" %q\n          }\n        }\n",
 			c.ID, c.Name, c.Glob)
 	}
 	if len(g.Edges) > 0 {
 		b.WriteString("\n")
 		for _, e := range g.Edges {
-			fmt.Fprintf(&b, "      %s -> %s\n", e[0], e[1])
+			fmt.Fprintf(&b, "        %s -> %s\n", e[0], e[1])
 		}
 	}
-	b.WriteString("    }\n  }\n\n")
-	b.WriteString("  views {\n    component sys \"Components\" {\n      include *\n      autolayout lr\n    }\n    theme default\n  }\n}\n")
+	b.WriteString("      }\n    }\n  }\n\n")
+	b.WriteString("  views {\n    component app \"Components\" {\n      include *\n      autolayout lr\n    }\n    theme default\n  }\n}\n")
 	return b.String()
 }
 

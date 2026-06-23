@@ -134,8 +134,13 @@ func (p *parser) next() (token, bool) {
 	return t, ok
 }
 
+// Only `component` carries a path binding and is recorded. `container` is a
+// transparent C4 grouping (system → container → component): like softwareSystem,
+// the parser descends into it and records the components inside, but the container
+// element itself is not a nugit component. Emitting components inside a container
+// is what makes the DSL valid Structurizr (components can't sit under a system).
 var elementKeywords = map[string]bool{
-	"component": true, "container": true,
+	"component": true,
 }
 
 func (p *parser) parse() model.Model {
@@ -276,7 +281,7 @@ func (p *parser) parseModelProperties() {
 		if !ok || k.kind == tRBrace {
 			return
 		}
-		if k.kind != tWord {
+		if k.kind != tWord && k.kind != tStr {
 			continue
 		}
 		v, ok := p.peek()
@@ -302,7 +307,9 @@ func (p *parser) parseProperties(comp *model.Component) {
 		if !ok || k.kind == tRBrace {
 			return
 		}
-		if k.kind != tWord {
+		// Structurizr requires quoted property keys (`"paths" "..."`); nugit also
+		// accepts the bare key it historically emitted (`paths "..."`).
+		if k.kind != tWord && k.kind != tStr {
 			continue
 		}
 		v, ok := p.peek()
