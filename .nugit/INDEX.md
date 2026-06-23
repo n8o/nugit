@@ -22,6 +22,7 @@
 - [[0009-git-root-coordinates-and-structural-mode|ADR-0009 — Git-root-relative coordinates + language-agnostic structural mode]]
 - [[0010-a-dedicated-doctor-pre-flight-separate-from-pr-ren|ADR-0010 — a dedicated doctor pre-flight separate from pr-render]]
 - [[0011-external-tool-integration-single-writer|ADR-0011 — External-tool integration: single-writer-per-fact, one-way flows]]
+- [[0012-ai-drafts-model-code-enforces|ADR-0012 — Model bootstrap: AI drafts (grounded), humans ratify, code enforces]]
 
 ## Lessons
 
