@@ -25,6 +25,7 @@ import (
 	"github.com/n8o/nugit/internal/localmem"
 	"github.com/n8o/nugit/internal/mcp"
 	"github.com/n8o/nugit/internal/model"
+	"github.com/n8o/nugit/internal/modelfacts"
 	"github.com/n8o/nugit/internal/notion"
 	"github.com/n8o/nugit/internal/obsidian"
 	"github.com/n8o/nugit/internal/render"
@@ -99,6 +100,8 @@ func main() {
 		os.Exit(cmdDoctor(os.Args[2:]))
 	case "deploy":
 		os.Exit(cmdDeploy(os.Args[2:]))
+	case "model":
+		os.Exit(cmdModel(os.Args[2:]))
 	case "obsidian":
 		os.Exit(cmdObsidian(os.Args[2:]))
 	case "pr-render":
@@ -351,6 +354,35 @@ func cmdDeploy(args []string) int {
 		fmt.Printf("\n_deployed first-party but not detected (agent's queue): %s_\n",
 			strings.Join(sum.DeployedNotDetected, ", "))
 	}
+	return 0
+}
+
+// cmdModel emits the deterministic grounding the ADR-0012 bootstrap agent reasons over.
+// `nugit model facts` — the deployable inventory + dependency edges + shared libs, as
+// the ground truth the agent must not contradict when drafting workspace.dsl.
+func cmdModel(args []string) int {
+	if len(args) < 1 || args[0] != "facts" {
+		fmt.Fprintln(os.Stderr, "nugit model: usage: nugit model facts [-C dir] [-format json|markdown]")
+		return 2
+	}
+	fs := flag.NewFlagSet("model facts", flag.ExitOnError)
+	dir := fs.String("C", ".", "repo directory")
+	format := fs.String("format", "json", "output: json | markdown")
+	_ = fs.Parse(args[1:])
+	b, err := modelfacts.Facts(*dir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "nugit model facts: %v\n", err)
+		return 1
+	}
+	if *format == "markdown" {
+		fmt.Printf("# Model grounding for %s\n\n", b.Repo)
+		fmt.Printf("%d containers (%d×HIGH-3, %d×HIGH-2, %d×NEEDS-AGENT), %d dependency edges, %d shared libs.\n\n",
+			b.Summary.Containers, b.Summary.High3, b.Summary.High2, b.Summary.NeedsAgent, len(b.Edges), len(b.Libs))
+		fmt.Printf("_Agent: %s_\n", b.Instruction)
+		return 0
+	}
+	out, _ := json.MarshalIndent(b, "", "  ")
+	fmt.Println(string(out))
 	return 0
 }
 
