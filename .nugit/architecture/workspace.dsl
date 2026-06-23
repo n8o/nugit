@@ -154,6 +154,11 @@ workspace "nugit" "Git-native typed knowledge & unified PR view — self-model (
                     "paths" "internal/obsidian/**"
                 }
             }
+            deploy = component "Deployable detector" "Derives the container inventory from Dockerfiles + CMake install (SPEC-003)" "Go" {
+                properties {
+                    "paths" "internal/deploy/**"
+                }
+            }
             cli = component "CLI" "nugit command entrypoint" "Go" {
                 properties {
                     "paths" "cmd/nugit/**"
@@ -260,6 +265,7 @@ workspace "nugit" "Git-native typed knowledge & unified PR view — self-model (
             doctor -> knowledge "checks the store"
 
             cli -> obsidian "obsidian command"
+            cli -> deploy "deploy command"
             obsidian -> knowledge "loads the corpus"
             obsidian -> model_ "uses types"
           }

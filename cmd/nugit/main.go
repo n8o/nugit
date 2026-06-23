@@ -17,6 +17,7 @@ import (
 	"github.com/n8o/nugit/internal/c4"
 	"github.com/n8o/nugit/internal/config"
 	"github.com/n8o/nugit/internal/consistency"
+	"github.com/n8o/nugit/internal/deploy"
 	"github.com/n8o/nugit/internal/distill"
 	"github.com/n8o/nugit/internal/doctor"
 	"github.com/n8o/nugit/internal/engine"
@@ -41,6 +42,7 @@ usage:
   nugit distill [flags]       promote commit-trailer decisions/lessons to durable knowledge
   nugit c4 render [flags]      render the C4 model as Mermaid
   nugit c4 preview [flags]     live C4 diagrams via local Structurizr renderer (Docker)
+  nugit deploy [flags]        deterministic deployable-container inventory (Dockerfiles + CMake)
   nugit explain [check]       rationale + remediation for a consistency check
   nugit pr-render [flags]      compute & render the unified PR view
   nugit version
@@ -95,6 +97,8 @@ func main() {
 		os.Exit(cmdExplain(os.Args[2:]))
 	case "doctor":
 		os.Exit(cmdDoctor(os.Args[2:]))
+	case "deploy":
+		os.Exit(cmdDeploy(os.Args[2:]))
 	case "obsidian":
 		os.Exit(cmdObsidian(os.Args[2:]))
 	case "pr-render":
@@ -304,6 +308,36 @@ func cmdObsidian(args []string) int {
 		return 1
 	}
 	fmt.Printf("Wrote %s. Open the repo folder in Obsidian and start at INDEX.\n", out)
+	return 0
+}
+
+// cmdDeploy runs the deterministic deployable-detector (SPEC-003): the container
+// inventory derived from Dockerfiles + CMake install(RUNTIME), with confidence tiers
+// and evidence — the ground truth the ADR-0012 bootstrap agent may not contradict.
+func cmdDeploy(args []string) int {
+	fs := flag.NewFlagSet("deploy", flag.ExitOnError)
+	dir := fs.String("C", ".", "repo directory")
+	format := fs.String("format", "markdown", "output: markdown | json")
+	_ = fs.Parse(args)
+	containers, sum, err := deploy.Detect(*dir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "nugit deploy: %v\n", err)
+		return 1
+	}
+	if *format == "json" {
+		b, _ := json.MarshalIndent(map[string]any{"summary": sum, "containers": containers}, "", "  ")
+		fmt.Println(string(b))
+		return 0
+	}
+	fmt.Printf("# Deployable containers: %d  (%d×HIGH-3, %d×HIGH-2, %d×NEEDS-AGENT)\n",
+		sum.Containers, sum.High3, sum.High2, sum.NeedsAgent)
+	fmt.Printf("_scanned %d Dockerfiles; excluded %d base/test images_\n\n", sum.Dockerfiles, sum.BaseOrTest)
+	fmt.Println("| container | lang | source | confidence | evidence |")
+	fmt.Println("|---|---|---|---|---|")
+	for _, c := range containers {
+		fmt.Printf("| %s | %s | %s | %s | %s |\n",
+			c.Name, c.Language, c.SourceDir, c.Confidence, strings.Join(c.Evidence, "; "))
+	}
 	return 0
 }
 
