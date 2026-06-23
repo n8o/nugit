@@ -331,12 +331,25 @@ func cmdDeploy(args []string) int {
 	}
 	fmt.Printf("# Deployable containers: %d  (%d×HIGH-3, %d×HIGH-2, %d×NEEDS-AGENT)\n",
 		sum.Containers, sum.High3, sum.High2, sum.NeedsAgent)
-	fmt.Printf("_scanned %d Dockerfiles; excluded %d base/test images_\n\n", sum.Dockerfiles, sum.BaseOrTest)
-	fmt.Println("| container | lang | source | confidence | evidence |")
-	fmt.Println("|---|---|---|---|---|")
+	fmt.Printf("_scanned %d Dockerfiles; excluded %d base/test; %d deploy-confirmed",
+		sum.Dockerfiles, sum.BaseOrTest, sum.DeployConfirmed)
+	if sum.FirstPartyRegistry != "" {
+		fmt.Printf(" against %s (%d infra images excluded)", sum.FirstPartyRegistry, sum.InfraImages)
+	}
+	fmt.Print("_\n\n")
+	fmt.Println("| container | lang | source | confidence | deployed | evidence |")
+	fmt.Println("|---|---|---|---|---|---|")
 	for _, c := range containers {
-		fmt.Printf("| %s | %s | %s | %s | %s |\n",
-			c.Name, c.Language, c.SourceDir, c.Confidence, strings.Join(c.Evidence, "; "))
+		dep := ""
+		if c.DeployConfirmed {
+			dep = "✓"
+		}
+		fmt.Printf("| %s | %s | %s | %s | %s | %s |\n",
+			c.Name, c.Language, c.SourceDir, c.Confidence, dep, strings.Join(c.Evidence, "; "))
+	}
+	if len(sum.DeployedNotDetected) > 0 {
+		fmt.Printf("\n_deployed first-party but not detected (agent's queue): %s_\n",
+			strings.Join(sum.DeployedNotDetected, ", "))
 	}
 	return 0
 }

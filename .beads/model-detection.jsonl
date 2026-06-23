@@ -1,6 +1,6 @@
 {"id":"DETECT-0","title":"Derive a services-as-containers C4 model (ADR-0012 / SPEC-003)","issue_type":"epic","status":"in_progress"}
 {"id":"DETECT-1","title":"Prune pass — exclude worktrees/vendored/build dirs (raw counts inflate 7-20x)","issue_type":"task","status":"closed"}
 {"id":"DETECT-2","title":"DockerfileDetector (spine) + CMake install(RUNTIME) cross-check -> container inventory with confidence tiers + evidence","issue_type":"task","status":"closed"}
-{"id":"DETECT-3","title":"K8sImageDetector — first-party image gate + deploy confirm (helm render)","issue_type":"task","status":"open"}
+{"id":"DETECT-3","title":"K8sImageDetector — first-party image gate + deploy confirm (helm render)","issue_type":"task","status":"closed"}
 {"id":"DETECT-4","title":"Grounded-agent bootstrap — subsystem grouping/naming + resolve the NEEDS-AGENT long tail","issue_type":"task","status":"open"}
 {"id":"DETECT-5","title":"Extend c4<->code enforcement to span container + component levels","issue_type":"task","status":"open"}

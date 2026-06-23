@@ -40,8 +40,15 @@ func TestDetect(t *testing.T) {
 	// Base image: excluded.
 	write(t, root, "docker/Dockerfile.base", "FROM ubuntu\nRUN apt-get update\n")
 
+	// Dev-variant Dockerfile: excluded (non-production).
+	write(t, root, "apps/router_service/Dockerfile.dev", "FROM cpp\nRUN make dev\n")
+
 	// Pruned: a decoy Dockerfile in node_modules must never count.
 	write(t, root, "apps/web/node_modules/pkg/Dockerfile", "FROM node\nCOPY . /app\n")
+
+	// k8s manifest: deploy-confirms router-service (first-party); postgres is infra.
+	write(t, root, "k8s/router.yaml",
+		"kind: Deployment\nspec:\n  template:\n    spec:\n      containers:\n        - image: registry.acme.com/app/router-service:GOLDEN\n        - image: postgres:16-alpine\n")
 
 	got, sum, err := Detect(root)
 	if err != nil {
@@ -67,8 +74,21 @@ func TestDetect(t *testing.T) {
 	if _, ok := by["base"]; ok {
 		t.Error("base image must be excluded")
 	}
+	if _, ok := by["dev"]; ok {
+		t.Error("Dockerfile.dev variant must be excluded")
+	}
 	if sum.High3 != 1 || sum.High2 != 1 {
 		t.Errorf("tiers = %+v, want High3=1 High2=1", sum)
+	}
+	// DETECT-3 gate.
+	if sum.FirstPartyRegistry != "registry.acme.com" {
+		t.Errorf("first-party registry = %q, want registry.acme.com", sum.FirstPartyRegistry)
+	}
+	if !by["router-service"].DeployConfirmed || sum.DeployConfirmed != 1 {
+		t.Errorf("router-service should be deploy-confirmed (sum=%d): %+v", sum.DeployConfirmed, by["router-service"])
+	}
+	if sum.InfraImages != 1 {
+		t.Errorf("infra images = %d, want 1 (postgres)", sum.InfraImages)
 	}
 }
 

@@ -28,6 +28,9 @@ var baseOrTestImage = regexp.MustCompile(`(?i)(^|[.\-_])(base|builder|build|sdk|
 // benchName flags benchmark/test targets that pass every container signal but aren't services.
 var benchName = regexp.MustCompile(`(?i)(^|[_\-])(bench|test|unit)([_\-]|$)`)
 
+// devVariant images are non-production build variants (Dockerfile.dev), not services.
+var devVariant = map[string]bool{"dev": true, "local": true, "debug": true}
+
 var (
 	copyFromBin = regexp.MustCompile(`(?im)^\s*COPY\s+--from=\S+\s+\S*?/([A-Za-z0-9_.\-]+)\s+(?:/usr/local/bin|/usr/bin|/app)`)
 	cpBuildBin  = regexp.MustCompile(`build/apps/([A-Za-z0-9_.\-]+)/([A-Za-z0-9_.\-]+)`)
@@ -47,23 +50,28 @@ type Dockerfile struct {
 
 // Container is a detected deployable unit with confidence + evidence (SPEC-003 §7).
 type Container struct {
-	Name       string   `json:"name"`
-	SourceDir  string   `json:"source_dir,omitempty"`
-	Language   string   `json:"language"`
-	Dockerfile string   `json:"dockerfile"`
-	Binary     string   `json:"binary,omitempty"`
-	Confidence string   `json:"confidence"` // HIGH-3 | HIGH-2 | NEEDS-AGENT
-	Evidence   []string `json:"evidence"`
+	Name            string   `json:"name"`
+	SourceDir       string   `json:"source_dir,omitempty"`
+	Language        string   `json:"language"`
+	Dockerfile      string   `json:"dockerfile"`
+	Binary          string   `json:"binary,omitempty"`
+	Confidence      string   `json:"confidence"` // HIGH-3 | HIGH-2 | NEEDS-AGENT
+	DeployConfirmed bool     `json:"deploy_confirmed,omitempty"`
+	Evidence        []string `json:"evidence"`
 }
 
 // Summary counts the inventory by tier.
 type Summary struct {
-	Dockerfiles int `json:"dockerfiles_scanned"`
-	BaseOrTest  int `json:"excluded_base_or_test"`
-	Containers  int `json:"containers"`
-	High3       int `json:"high_3_signal"`
-	High2       int `json:"high_2_signal"`
-	NeedsAgent  int `json:"needs_agent"`
+	Dockerfiles         int      `json:"dockerfiles_scanned"`
+	BaseOrTest          int      `json:"excluded_base_or_test"`
+	Containers          int      `json:"containers"`
+	High3               int      `json:"high_3_signal"`
+	High2               int      `json:"high_2_signal"`
+	NeedsAgent          int      `json:"needs_agent"`
+	FirstPartyRegistry  string   `json:"first_party_registry,omitempty"`
+	DeployConfirmed     int      `json:"deploy_confirmed"`
+	InfraImages         int      `json:"infra_images_excluded"`
+	DeployedNotDetected []string `json:"deployed_not_detected,omitempty"`
 }
 
 // Detect returns the container inventory for repoDir (SPEC-003).
@@ -73,16 +81,18 @@ func Detect(repoDir string) ([]Container, Summary, error) {
 		return nil, Summary{}, err
 	}
 	install := InstallRuntimeTargets(repoDir) // dir(rel) -> installed runtime target
-	sum := Summary{Dockerfiles: len(dfs)}
+	gate := ScanK8s(repoDir)                  // DETECT-3: deploy-confirmation + first-party gate
+	sum := Summary{Dockerfiles: len(dfs), FirstPartyRegistry: gate.Registry, InfraImages: gate.InfraImages}
 
 	var out []Container
+	matched := map[string]bool{} // first-party gate keys claimed by a container
 	for _, d := range dfs {
 		if d.IsBaseOrTest {
 			sum.BaseOrTest++
 			continue
 		}
-		if benchName.MatchString(d.Image) {
-			continue // §3: name blocklist wins over every positive signal
+		if benchName.MatchString(d.Image) || devVariant[d.Image] {
+			continue // §3: bench/test/dev-variant images are not first-party services
 		}
 		c := Container{
 			Name:       normalize(d.Image),
@@ -113,11 +123,20 @@ func Detect(repoDir string) ([]Container, Summary, error) {
 			c.Confidence = "NEEDS-AGENT"
 			c.Evidence = append(c.Evidence, "nested Dockerfile in a multi-deployable subsystem")
 		}
+		// DETECT-3: confirm against a real first-party k8s workload image.
+		if img, key := gate.match(c); img != "" {
+			c.DeployConfirmed = true
+			c.Evidence = append(c.Evidence, "deploy-confirmed: "+img)
+			matched[key] = true
+		}
 		out = append(out, c)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	for _, c := range out {
 		sum.Containers++
+		if c.DeployConfirmed {
+			sum.DeployConfirmed++
+		}
 		switch c.Confidence {
 		case "HIGH-3":
 			sum.High3++
@@ -127,6 +146,14 @@ func Detect(repoDir string) ([]Container, Summary, error) {
 			sum.NeedsAgent++
 		}
 	}
+	// Gaps: first-party images deployed but matched by no detected container — the
+	// agent's "deployed, not yet modelled" queue (base/init images filtered out).
+	for k, img := range gate.FirstParty {
+		if !matched[k] && !baseOrTestImage.MatchString(k) {
+			sum.DeployedNotDetected = append(sum.DeployedNotDetected, img)
+		}
+	}
+	sort.Strings(sum.DeployedNotDetected)
 	return out, sum, nil
 }
 
