@@ -2,6 +2,7 @@ workspace "nugit" "Git-native typed knowledge & unified PR view — self-model (
 
     model {
         nugit = softwareSystem "nugit" "The engine + CLI" {
+          app = container "nugit" "The engine + CLI binary" "Go" {
 
             // Each component binds to physical files via properties { paths },
             // which is how the file->component mapping is computed (the review's
@@ -9,94 +10,154 @@ workspace "nugit" "Git-native typed knowledge & unified PR view — self-model (
             // internal import graph — `nugit pr-render` validates code against it.
 
             model_ = component "Domain model" "Shared dependency-free types" "Go" {
-                properties { paths "internal/model/**" }
+                properties {
+                    "paths" "internal/model/**"
+                }
             }
             gitutil = component "Git plumbing" "Shells out to git" "Go" {
-                properties { paths "internal/gitutil/**" }
+                properties {
+                    "paths" "internal/gitutil/**"
+                }
             }
             trailers = component "Trailer parser" "Parses commit-trailer convention" "Go" {
-                properties { paths "internal/trailers/**" }
+                properties {
+                    "paths" "internal/trailers/**"
+                }
             }
             goimports = component "Go import analyzer" "Maps imports to dirs via go/parser" "Go" {
-                properties { paths "internal/goimports/**" }
+                properties {
+                    "paths" "internal/goimports/**"
+                }
             }
             cmake = component "CMake analyzer" "Static target_link_libraries dependency graph" "Go" {
-                properties { paths "internal/cmake/**" }
+                properties {
+                    "paths" "internal/cmake/**"
+                }
             }
             pyimports = component "Python analyzer" "Python import graph (pure Go)" "Go" {
-                properties { paths "internal/pyimports/**" }
+                properties {
+                    "paths" "internal/pyimports/**"
+                }
             }
             tsdeps = component "TS analyzer" "TypeScript graph via dependency-cruiser" "Go" {
-                properties { paths "internal/tsdeps/**" }
+                properties {
+                    "paths" "internal/tsdeps/**"
+                }
             }
             c4 = component "C4 parser + diff" "Structurizr DSL subset + structural delta" "Go" {
-                properties { paths "internal/c4/**" }
+                properties {
+                    "paths" "internal/c4/**"
+                }
             }
             mapping = component "File->component mapper" "Glob resolution of paths to components" "Go" {
-                properties { paths "internal/mapping/**" }
+                properties {
+                    "paths" "internal/mapping/**"
+                }
             }
             knowledge = component "Knowledge reader" "Reads .nugit/** objects + supersede graph" "Go" {
-                properties { paths "internal/knowledge/**" }
+                properties {
+                    "paths" "internal/knowledge/**"
+                }
             }
             localmem = component "Working memory" "Ephemeral .nugit-local per-agent notes" "Go" {
-                properties { paths "internal/localmem/**" }
+                properties {
+                    "paths" "internal/localmem/**"
+                }
             }
             delta = component "Delta engine" "Computes the four deterministic deltas" "Go" {
-                properties { paths "internal/delta/**" }
+                properties {
+                    "paths" "internal/delta/**"
+                }
             }
             beads = component "Beads adapter" "Reads .beads/*.jsonl for plan position" "Go" {
-                properties { paths "internal/beads/**" }
+                properties {
+                    "paths" "internal/beads/**"
+                }
             }
             icepanel = component "IcePanel projection" "Transforms the C4 model to IcePanel import data (outbound)" "Go" {
-                properties { paths "internal/icepanel/**" }
+                properties {
+                    "paths" "internal/icepanel/**"
+                }
             }
             notion = component "Notion projection" "Publishes the knowledge corpus to a Notion database (outbound)" "Go" {
-                properties { paths "internal/notion/**" }
+                properties {
+                    "paths" "internal/notion/**"
+                }
             }
             consistency = component "Consistency checks" "Cross-artifact verification" "Go" {
-                properties { paths "internal/consistency/**" }
+                properties {
+                    "paths" "internal/consistency/**"
+                }
             }
             significance = component "Significance classifier" "Heuristic disclosure tier" "Go" {
-                properties { paths "internal/significance/**" }
+                properties {
+                    "paths" "internal/significance/**"
+                }
             }
             render = component "Renderer" "Markdown / check-run / structured JSON" "Go" {
-                properties { paths "internal/render/**" }
+                properties {
+                    "paths" "internal/render/**"
+                }
             }
             narrative = component "LLM narrative" "Opt-in cached prose summary" "Go" {
-                properties { paths "internal/narrative/**" }
+                properties {
+                    "paths" "internal/narrative/**"
+                }
             }
             engine = component "Engine" "Orchestrates the pr-render pipeline" "Go" {
-                properties { paths "internal/engine/**" }
+                properties {
+                    "paths" "internal/engine/**"
+                }
             }
             config = component "Config" "Reads .nugit/config.yml" "Go" {
-                properties { paths "internal/config/**" }
+                properties {
+                    "paths" "internal/config/**"
+                }
             }
             bootstrap = component "Bootstrap" "Reverse-engineers a C4 model from the import graph" "Go" {
-                properties { paths "internal/bootstrap/**" }
+                properties {
+                    "paths" "internal/bootstrap/**"
+                }
             }
             scaffold = component "Scaffold" "nugit init: writes the .nugit/ tree" "Go" {
-                properties { paths "internal/scaffold/**" }
+                properties {
+                    "paths" "internal/scaffold/**"
+                }
             }
             distill = component "Distiller" "Promotes commit trailers to durable knowledge" "Go" {
-                properties { paths "internal/distill/**" }
+                properties {
+                    "paths" "internal/distill/**"
+                }
             }
             eval = component "Eval" "Labeled corpus measuring heuristic accuracy" "Go" {
-                properties { paths "internal/eval/**" }
+                properties {
+                    "paths" "internal/eval/**"
+                }
             }
             retrieval = component "Retrieval" "context(path): scoped typed knowledge bundle" "Go" {
-                properties { paths "internal/retrieval/**" }
+                properties {
+                    "paths" "internal/retrieval/**"
+                }
             }
             mcp = component "MCP server" "Exposes context() as an MCP stdio tool" "Go" {
-                properties { paths "internal/mcp/**" }
+                properties {
+                    "paths" "internal/mcp/**"
+                }
             }
             doctor = component "Doctor" "Setup pre-flight health checks" "Go" {
-                properties { paths "internal/doctor/**" }
+                properties {
+                    "paths" "internal/doctor/**"
+                }
             }
             obsidian = component "Obsidian vault" "Generates the knowledge index for the .nugit Obsidian vault" "Go" {
-                properties { paths "internal/obsidian/**" }
+                properties {
+                    "paths" "internal/obsidian/**"
+                }
             }
             cli = component "CLI" "nugit command entrypoint" "Go" {
-                properties { paths "cmd/nugit/**" }
+                properties {
+                    "paths" "cmd/nugit/**"
+                }
             }
 
             // --- real dependency edges (kept in sync with the import graph) ---
@@ -201,11 +262,12 @@ workspace "nugit" "Git-native typed knowledge & unified PR view — self-model (
             cli -> obsidian "obsidian command"
             obsidian -> knowledge "loads the corpus"
             obsidian -> model_ "uses types"
+          }
         }
     }
 
     views {
-        component nugit "Components" {
+        component app "Components" {
             include *
             autolayout lr
         }

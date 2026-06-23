@@ -2,6 +2,53 @@ package c4
 
 import "testing"
 
+// A `container` is a transparent C4 grouping: the parser must descend into it and
+// record the components inside (with paths + relationships), but NOT record the
+// container itself. This is what lets nugit emit valid Structurizr DSL
+// (system → container → component) while keeping its component-centric model.
+func TestContainerIsTransparent(t *testing.T) {
+	// The quoted-key, multi-line properties form is exactly what nugit emits for
+	// Structurizr compatibility — the parser must read paths out of it.
+	src := `workspace "x" {
+	  model {
+	    s = softwareSystem "S" {
+	      app = container "App" {
+	        a = component "A" {
+	          properties {
+	            "paths" "a/**"
+	          }
+	        }
+	        b = component "B" {
+	          properties {
+	            "paths" "b/**"
+	          }
+	        }
+	        a -> b
+	      }
+	    }
+	  }
+	}`
+	m := Parse(src)
+	if len(m.Components) != 2 {
+		t.Fatalf("container not transparent: want 2 components, got %d (%+v)", len(m.Components), m.Components)
+	}
+	var a *struct{ paths []string }
+	for _, c := range m.Components {
+		if c.ID == "a" {
+			a = &struct{ paths []string }{c.Paths}
+		}
+		if c.ID == "app" {
+			t.Errorf("container element 'app' must not be recorded as a component")
+		}
+	}
+	if a == nil || len(a.paths) != 1 || a.paths[0] != "a/**" {
+		t.Errorf("paths not preserved through container nesting: %+v", m.Components)
+	}
+	if len(m.Relationships) != 1 || m.Relationships[0].Src != "a" || m.Relationships[0].Dst != "b" {
+		t.Errorf("relationship not parsed through container: %+v", m.Relationships)
+	}
+}
+
 // Regression: arrows and element refs inside a views block must not leak into
 // the model as phantom relationships/components.
 func TestViewsBlockDoesNotLeak(t *testing.T) {
