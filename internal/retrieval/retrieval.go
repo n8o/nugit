@@ -57,6 +57,7 @@ type Bundle struct {
 	Decisions       []Item   `json:"decisions"`
 	Spec            *Item    `json:"spec,omitempty"`
 	Lessons         []Item   `json:"lessons"`
+	References      []Item   `json:"references,omitempty"` // distilled external sources
 	Glossary        []string `json:"glossary"`
 	WorkingMemory   []string `json:"working_memory,omitempty"` // ephemeral .nugit-local notes
 	Truncated       bool     `json:"truncated"`
@@ -106,7 +107,7 @@ func Context(opt Options) (Bundle, error) {
 	// In-scope objects: scope == component or "global". Nearer scope (component)
 	// is preferred when both a global and a component-scoped object would fill the
 	// same slot (handled by stable sort: component-scoped first).
-	var decisions, lessons []Item
+	var decisions, lessons, references []Item
 	var spec *Item
 	var glossary []string
 	pulled := map[string]bool{}
@@ -134,6 +135,13 @@ func Context(opt Options) (Bundle, error) {
 		case model.KindLesson:
 			if len(kw) == 0 || matches(o, kw) {
 				lessons = append(lessons, toItem(o, ""))
+				pulled[o.ID] = true
+			}
+		case model.KindReference:
+			// Same rule as lessons: keyword-matched when a task is given, all
+			// in-scope otherwise (the budget truncates, never silently).
+			if len(kw) == 0 || matches(o, kw) {
+				references = append(references, toItem(o, ""))
 				pulled[o.ID] = true
 			}
 		case model.KindGlossary:
@@ -169,16 +177,41 @@ func Context(opt Options) (Bundle, error) {
 				decisions = append(decisions, toItem(tgt, via))
 			} else if tgt.Type == model.KindLesson {
 				lessons = append(lessons, toItem(tgt, via))
+			} else if tgt.Type == model.KindReference {
+				references = append(references, toItem(tgt, via))
+			}
+		}
+	}
+
+	// Reverse informs: pass — a reference declares `informs:<id>` on ITSELF (the
+	// decision it grounds is immutable and predates it), so forward traversal
+	// can't find it. Pull any live reference that informs an object already in
+	// the bundle.
+	for i := range objs {
+		o := &objs[i]
+		if o.Type != model.KindReference || pulled[o.ID] {
+			continue
+		}
+		if st := effectiveStatus(o); st == model.StatusSuperseded || st == model.StatusInvalidated {
+			continue
+		}
+		for _, e := range o.RelatesTo {
+			edge := knowledge.ParseEdge(e)
+			if edge.Relation == "informs" && pulled[edge.Target] {
+				references = append(references, toItem(o, "informs:"+edge.Target))
+				pulled[o.ID] = true
+				break
 			}
 		}
 	}
 
 	sortItems(decisions)
 	sortItems(lessons)
+	sortItems(references)
 	sort.Strings(glossary)
 	glossary = dedup(glossary)
 
-	b.Decisions, b.Spec, b.Lessons, b.Glossary = decisions, spec, lessons, glossary
+	b.Decisions, b.Spec, b.Lessons, b.References, b.Glossary = decisions, spec, lessons, references, glossary
 	b.WorkingMemory = workingMemory(opt.RepoDir, comp, kw)
 	truncate(&b, budget)
 	return b, nil
@@ -215,8 +248,8 @@ func hasKeyword(e localmem.Entry, kw map[string]bool) bool {
 }
 
 // truncate enforces the token budget by type priority (c4 > spec > decisions >
-// lessons > glossary), dropping lowest-priority items first and recording each
-// drop — never a silent cut.
+// lessons > references > glossary), dropping lowest-priority items first and
+// recording each drop — never a silent cut.
 func truncate(b *Bundle, budget int) {
 	used := tokensOf(b.C4.Component) + 20
 	if b.Spec != nil {
@@ -243,6 +276,7 @@ func truncate(b *Bundle, budget int) {
 	}
 	b.Decisions = add(b.Decisions, "decision")
 	b.Lessons = add(b.Lessons, "lesson")
+	b.References = add(b.References, "reference")
 	// glossary is lowest priority
 	var g []string
 	for _, t := range b.Glossary {

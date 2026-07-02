@@ -16,8 +16,8 @@ external datastore:
 
 1. **C4 delta** — structural diff of `.nugit/architecture/workspace.dsl`.
 2. **Code delta** — `git diff` grouped by C4 component via `properties { paths }`.
-3. **Knowledge delta** — added/changed/superseded decisions, specs, lessons, with
-   each decision's `Rejected` rationale.
+3. **Knowledge delta** — added/changed/superseded decisions, specs, lessons,
+   references, with each decision's `Rejected` rationale.
 4. **Plan position** — live from a **Beads** store (`.beads/*.jsonl`), degrading to
    `.nugit/plan.yml`.
 
@@ -40,11 +40,17 @@ than present:
 
 **Agent memory** — `nugit context -path <file>` returns a scoped, typed,
 budget-bounded knowledge bundle (architecture slice + in-scope decisions/spec/lessons
-+ glossary + ephemeral notes); `nugit mcp` serves it as an MCP tool so Claude Code
-can call it. Every served call is appended to a local, gitignored usage log
-(`.nugit/.cache/usage.jsonl`; opt out with `usage: {log: off}`), and `nugit stats`
++ references + glossary + ephemeral notes); `nugit mcp` serves it as an MCP tool so
+Claude Code can call it. Every served call is appended to a local, gitignored usage
+log (`.nugit/.cache/usage.jsonl`; opt out with `usage: {log: off}`), and `nugit stats`
 aggregates it — calls by source, top components, truncation rate, plus the two gap
 signals: unresolved paths (model coverage) and empty bundles (capture coverage).
+
+**External research has a typed home** — `.nugit/references/` holds *distilled*
+external sources (papers, vendor docs, standards, benchmarks): common front-matter
+plus `source:`, scoped + keyworded for retrieval, linked to the decisions they
+ground via `informs:<id>` edges (ADR-0014). Distill the claims, link the document —
+never paste the paper.
 
 **The store fills itself** — `nugit init` installs a commit-msg hook that validates
 trailer blocks; `nugit remember` jots ephemeral working memory; `nugit distill`

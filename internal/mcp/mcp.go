@@ -82,7 +82,7 @@ func handle(repoDir string, req request) response {
 func contextTool() map[string]interface{} {
 	return map[string]interface{}{
 		"name":        "context",
-		"description": "Scoped, typed knowledge bundle for a file/dir path: the C4 architecture slice, in-scope decisions (with their rejected rationale), the active spec, matched lessons, and glossary — bounded by a token budget.",
+		"description": "Scoped, typed knowledge bundle for a file/dir path: the C4 architecture slice, in-scope decisions (with their rejected rationale), the active spec, matched lessons, matched references (distilled external sources), and glossary — bounded by a token budget.",
 		"inputSchema": map[string]interface{}{
 			"type": "object",
 			"properties": map[string]interface{}{

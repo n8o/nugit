@@ -25,11 +25,16 @@
 - [[0011-external-tool-integration-single-writer|ADR-0011 — External-tool integration: single-writer-per-fact, one-way flows]]
 - [[0012-ai-drafts-model-code-enforces|ADR-0012 — Model bootstrap: AI drafts (grounded), humans ratify, code enforces]]
 - [[0013-local-usage-log|ADR-0013 — Local, gitignored usage log for context(); `nugit stats`]]
+- [[0014-reference-type|ADR-0014 — `reference`: a fifth durable type for distilled external knowledge]]
 
 ## Lessons
 
 - [[dogfooding-a-health-check-finds-real-gaps-nugit-s|LESSON-dogfooding-a-health-check-finds-real-gaps-nugit-s — Lesson — dogfooding a health-check finds real gaps (nugit's own repo was missing the comm…]]
 - [[read-from-reviewed-ref|LESSON-read-from-reviewed-ref — Lesson — a PR-time analyzer must read every artifact from the reviewed ref]]
+
+## References
+
+- [[structurizr-dsl-subset|REF-structurizr-dsl-subset — Structurizr DSL — the subset nugit parses, and the renderer's stricter rules]]
 
 ## Glossary
 

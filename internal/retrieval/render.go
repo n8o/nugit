@@ -48,6 +48,14 @@ func (b Bundle) Markdown() string {
 		w.WriteString("\n")
 	}
 
+	if len(b.References) > 0 {
+		w.WriteString("**References** _(distilled external sources)_\n")
+		for _, r := range b.References {
+			fmt.Fprintf(&w, "- `%s` — %s%s\n", r.ID, r.Summary, viaSuffix(r.Via))
+		}
+		w.WriteString("\n")
+	}
+
 	if len(b.Glossary) > 0 {
 		w.WriteString("**Glossary**\n")
 		for _, g := range b.Glossary {
