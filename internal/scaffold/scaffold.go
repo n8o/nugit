@@ -53,7 +53,7 @@ func Run(opt Options) (Result, error) {
 
 	// Re-running on an existing .nugit is safe: writeFile tops up missing files
 	// but never overwrites unless Force is set, so init is idempotent.
-	for _, d := range []string{"architecture", "decisions", "specs", "lessons"} {
+	for _, d := range []string{"architecture", "decisions", "specs", "lessons", "references"} {
 		if err := os.MkdirAll(filepath.Join(nugitDir, d), 0o755); err != nil {
 			return res, err
 		}
@@ -65,7 +65,7 @@ func Run(opt Options) (Result, error) {
 			ferr = writeFile(&res, path, content, opt.Force)
 		}
 	}
-	for _, d := range []string{"decisions", "specs", "lessons"} {
+	for _, d := range []string{"decisions", "specs", "lessons", "references"} {
 		put(filepath.Join(nugitDir, d, ".gitkeep"), "")
 	}
 	put(filepath.Join(nugitDir, "config.yml"), configYML(opt.Mode))

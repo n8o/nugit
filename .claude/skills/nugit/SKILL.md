@@ -5,9 +5,9 @@ description: Use when working on this codebase (or any repo with a .nugit/ store
 
 # nugit — typed memory for this codebase
 
-This repo carries its architecture, decisions, lessons, and glossary as typed
-files under `.nugit/`, validated on every PR. Use them as memory instead of
-re-deriving context each session.
+This repo carries its architecture, decisions, lessons, references (distilled
+external sources), and glossary as typed files under `.nugit/`, validated on
+every PR. Use them as memory instead of re-deriving context each session.
 
 ## Before editing a file — load context
 
@@ -19,8 +19,14 @@ nugit context -path <file> -task "<what you're about to do>"
 
 It returns a scoped, budget-bounded bundle: the file's C4 component + its
 dependencies, the in-scope decisions (with their **rejected** alternatives — do
-not re-propose those), the active spec, matched lessons, glossary, and any
-ephemeral working-memory notes. Read it before proposing a change.
+not re-propose those), the active spec, matched lessons, matched references,
+glossary, and any ephemeral working-memory notes. Read it before proposing a
+change.
+
+To feed external research in (papers, vendor docs, standards): distill the
+project-relevant claims into `.nugit/references/<slug>.md` (front-matter with
+`type: reference`, `source:` URL, scope + keywords; `relates_to: [informs:<ADR>]`
+for the decision it grounds) and land it as a PR — never paste the full document.
 
 ## While working — respect the architecture
 

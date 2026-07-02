@@ -17,6 +17,12 @@ const (
 	KindDecision Kind = "decision"
 	KindSpec     Kind = "spec"
 	KindGlossary Kind = "glossary"
+	// KindReference is distilled EXTERNAL knowledge (papers, vendor docs, specs,
+	// benchmarks) scoped and keyworded for retrieval. The body carries the claims
+	// relevant to this project — never the full document; provenance.citation and
+	// the `source` front-matter link out. Enters via reviewed PR (ADR-0011's
+	// inbound-proposal path); see .nugit/decisions/0014-reference-type.md.
+	KindReference Kind = "reference"
 )
 
 // Status is the lifecycle marker carried in a knowledge object's front-matter.
@@ -67,6 +73,9 @@ type FrontMatter struct {
 	RelatesTo     []string   `yaml:"relates_to,omitempty"`
 	Provenance    Provenance `yaml:"provenance"`
 	Confidence    Confidence `yaml:"confidence,omitempty"`
+	// Source is the external origin of a reference object (URL/DOI/standard id).
+	// The body holds distilled claims; Source links to the full document.
+	Source string `yaml:"source,omitempty"`
 }
 
 // KnowledgeObject is one parsed durable record (a markdown file under .nugit/**).

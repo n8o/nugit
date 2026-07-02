@@ -48,7 +48,7 @@ func CollectDocs(repoDir string) ([]Doc, error) {
 	for i := range objs {
 		o := objs[i]
 		switch o.Type {
-		case model.KindDecision, model.KindSpec, model.KindLesson:
+		case model.KindDecision, model.KindSpec, model.KindLesson, model.KindReference:
 			docs = append(docs, Doc{GitID: o.ID, Title: titleOf(o), Markdown: o.Body})
 		}
 	}
