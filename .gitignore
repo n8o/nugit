@@ -22,3 +22,6 @@
 # Structurizr Lite local render cache / autosaved layout
 **/.structurizr/
 .nugit/architecture/workspace.json
+
+# agent-ab eval outputs (worktrees, transcripts, results)
+/evals/agent-ab/results/

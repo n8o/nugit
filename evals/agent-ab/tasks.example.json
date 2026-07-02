@@ -1,0 +1,16 @@
+[
+  {
+    "id": "example-add-endpoint",
+    "prompt": "Add a read-only HTTP endpoint GET /api/medianodes/:name/health to the orchestrator backend that reports the node's NMOS registration status. Follow the existing route patterns. Commit your work when done.",
+    "path": "apps/jeket-orchestrator/apps/backend/src/routes/medianodes.ts",
+    "base": "origin/master",
+    "verify": "cd apps/jeket-orchestrator && npx vitest run apps/backend/src/routes/medianodes.test.ts"
+  },
+  {
+    "id": "example-transport-change",
+    "prompt": "The compositor needs to receive a second program input. Wire it up using the project's standard inter-service media transport. Commit your work when done.",
+    "path": "apps/compositor_service/src/compositor_service.cpp",
+    "base": "origin/master",
+    "verify": ""
+  }
+]
