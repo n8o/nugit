@@ -8,6 +8,7 @@
 
 - [[SPEC-001-thin-keystone|SPEC-001 — Thin keystone: `nugit pr-render`]]
 - [[SPEC-002-integration-contract|SPEC-002 — External tool integration contract]]
+- [[SPEC-003-deployable-detector|SPEC-003 — Deployable detector contract]]
 
 ## Decisions
 
@@ -23,6 +24,7 @@
 - [[0010-a-dedicated-doctor-pre-flight-separate-from-pr-ren|ADR-0010 — a dedicated doctor pre-flight separate from pr-render]]
 - [[0011-external-tool-integration-single-writer|ADR-0011 — External-tool integration: single-writer-per-fact, one-way flows]]
 - [[0012-ai-drafts-model-code-enforces|ADR-0012 — Model bootstrap: AI drafts (grounded), humans ratify, code enforces]]
+- [[0013-local-usage-log|ADR-0013 — Local, gitignored usage log for context(); `nugit stats`]]
 
 ## Lessons
 

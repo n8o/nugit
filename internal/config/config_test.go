@@ -72,3 +72,17 @@ func TestLoadReadsFile(t *testing.T) {
 		t.Errorf("Load should read the file and parse warn; got %+v err=%v", c.C4, err)
 	}
 }
+
+func TestUsageLogKnob(t *testing.T) {
+	if c := Default(); c.Usage.Log != "on" {
+		t.Errorf("default usage.log should be on, got %q", c.Usage.Log)
+	}
+	c, err := LoadBytes([]byte("usage:\n  log: OFF\n"))
+	if err != nil || c.Usage.Log != "off" {
+		t.Errorf("usage.log OFF should normalize to off; got %q err=%v", c.Usage.Log, err)
+	}
+	c, err = LoadBytes([]byte("usage:\n  log: bogus\n"))
+	if err != nil || c.Usage.Log != "on" {
+		t.Errorf("unknown usage.log should default to on; got %q err=%v", c.Usage.Log, err)
+	}
+}

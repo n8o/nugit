@@ -34,6 +34,9 @@ type Config struct {
 		Enabled bool   `yaml:"enabled"` // opt-in LLM prose; default false (off)
 		Model   string `yaml:"model"`
 	} `yaml:"narrative"`
+	Usage struct {
+		Log string `yaml:"log"` // on (default) | off — local .nugit/.cache/usage.jsonl only
+	} `yaml:"usage"`
 }
 
 // Default returns the built-in defaults used when config.yml is absent or a key
@@ -48,6 +51,7 @@ func Default() Config {
 	c.Significance.TrivialMaxChurn = 20
 	c.PRRender.FailOn = "fail"
 	c.Capture.CommitMsg = "warn"
+	c.Usage.Log = "on"
 	return c
 }
 
@@ -95,6 +99,10 @@ func LoadBytes(b []byte) (Config, error) {
 	c.Capture.CommitMsg = strings.ToLower(strings.TrimSpace(c.Capture.CommitMsg))
 	if c.Capture.CommitMsg != "block" && c.Capture.CommitMsg != "off" {
 		c.Capture.CommitMsg = "warn"
+	}
+	c.Usage.Log = strings.ToLower(strings.TrimSpace(c.Usage.Log))
+	if c.Usage.Log != "off" {
+		c.Usage.Log = "on"
 	}
 	return c, nil
 }
