@@ -139,6 +139,11 @@ workspace "nugit" "Git-native typed knowledge & unified PR view — self-model (
                     "paths" "internal/retrieval/**"
                 }
             }
+            usage = component "Usage log" "Local gitignored context() call log + stats aggregation" "Go" {
+                properties {
+                    "paths" "internal/usage/**"
+                }
+            }
             mcp = component "MCP server" "Exposes context() as an MCP stdio tool" "Go" {
                 properties {
                     "paths" "internal/mcp/**"
@@ -236,6 +241,10 @@ workspace "nugit" "Git-native typed knowledge & unified PR view — self-model (
             retrieval -> localmem "pulls ephemeral notes"
 
             mcp -> retrieval "serves context()"
+            mcp -> usage "logs served bundles"
+
+            usage -> retrieval "summarizes bundles"
+            usage -> config "honors the usage.log knob"
 
             cli -> model_ "uses types"
             cli -> engine "builds report"
@@ -244,6 +253,7 @@ workspace "nugit" "Git-native typed knowledge & unified PR view — self-model (
             cli -> config "reads fail-on default"
             cli -> retrieval "context command"
             cli -> mcp "mcp command"
+            cli -> usage "logs context calls; stats command"
             cli -> distill "distill command"
             cli -> localmem "remember command"
             cli -> trailers "commit-msg hook validation"

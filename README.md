@@ -41,7 +41,10 @@ than present:
 **Agent memory** — `nugit context -path <file>` returns a scoped, typed,
 budget-bounded knowledge bundle (architecture slice + in-scope decisions/spec/lessons
 + glossary + ephemeral notes); `nugit mcp` serves it as an MCP tool so Claude Code
-can call it.
+can call it. Every served call is appended to a local, gitignored usage log
+(`.nugit/.cache/usage.jsonl`; opt out with `usage: {log: off}`), and `nugit stats`
+aggregates it — calls by source, top components, truncation rate, plus the two gap
+signals: unresolved paths (model coverage) and empty bundles (capture coverage).
 
 **The store fills itself** — `nugit init` installs a commit-msg hook that validates
 trailer blocks; `nugit remember` jots ephemeral working memory; `nugit distill`
@@ -66,6 +69,7 @@ go build -o nugit ./cmd/nugit
 # agent memory
 ./nugit context -path internal/foo/bar.go -task "add caching"   # scoped knowledge bundle
 ./nugit mcp                                                      # MCP stdio server
+./nugit stats -since 168h                                        # is retrieval being used? (local log)
 
 # capture + presentation
 ./nugit remember -text "watch out for X" -scope foo             # ephemeral working memory

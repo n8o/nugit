@@ -10,6 +10,7 @@ import (
 	"io"
 
 	"github.com/n8o/nugit/internal/retrieval"
+	"github.com/n8o/nugit/internal/usage"
 )
 
 const protocolVersion = "2024-11-05"
@@ -115,6 +116,8 @@ func callTool(repoDir string, params json.RawMessage) (interface{}, *rpcError) {
 	if err != nil {
 		return toolError(err.Error()), nil
 	}
+	// Best-effort local usage log; a logging failure must never fail the tool call.
+	_ = usage.Log(repoDir, "mcp", p.Arguments.Task, b)
 	js, _ := json.Marshal(b)
 	return map[string]interface{}{
 		"content": []interface{}{

@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"runtime/debug"
 	"strings"
+	"time"
 
 	"github.com/n8o/nugit/internal/c4"
 	"github.com/n8o/nugit/internal/config"
@@ -31,6 +32,7 @@ import (
 	"github.com/n8o/nugit/internal/retrieval"
 	"github.com/n8o/nugit/internal/scaffold"
 	"github.com/n8o/nugit/internal/trailers"
+	usagelog "github.com/n8o/nugit/internal/usage"
 )
 
 const usage = `nugit — git-native PR view (thin keystone)
@@ -39,6 +41,7 @@ usage:
   nugit init [flags]          scaffold .nugit/ and bootstrap a C4 model
   nugit context [flags]       scoped, typed knowledge bundle for a path (for agents)
   nugit mcp [flags]           run the MCP stdio server (exposes context() to agents)
+  nugit stats [flags]         aggregate the local context() usage log
   nugit distill [flags]       promote commit-trailer decisions/lessons to durable knowledge
   nugit c4 render [flags]      render the C4 model as Mermaid
   nugit c4 preview [flags]     live C4 diagrams via local Structurizr renderer (Docker)
@@ -83,6 +86,8 @@ func main() {
 		os.Exit(cmdContext(os.Args[2:]))
 	case "mcp":
 		os.Exit(cmdMCP(os.Args[2:]))
+	case "stats":
+		os.Exit(cmdStats(os.Args[2:]))
 	case "notion":
 		os.Exit(cmdNotion(os.Args[2:]))
 	case "remember":
@@ -613,6 +618,8 @@ func cmdContext(args []string) int {
 		fmt.Fprintf(os.Stderr, "nugit context: %v\n", err)
 		return 1
 	}
+	// Best-effort local usage log; a logging failure must never fail retrieval.
+	_ = usagelog.Log(*dir, "cli", *task, b)
 	switch *format {
 	case "json":
 		out, err := json.MarshalIndent(b, "", "  ")
@@ -623,6 +630,44 @@ func cmdContext(args []string) int {
 		fmt.Println(string(out))
 	default:
 		fmt.Print(b.Markdown())
+	}
+	return 0
+}
+
+func cmdStats(args []string) int {
+	fs := flag.NewFlagSet("stats", flag.ExitOnError)
+	dir := fs.String("C", ".", "repo directory")
+	since := fs.String("since", "", "window: a duration (e.g. 168h) or a date (YYYY-MM-DD); default all")
+	format := fs.String("format", "markdown", "output: markdown|json")
+	_ = fs.Parse(args)
+
+	var cutoff time.Time
+	if *since != "" {
+		if d, err := time.ParseDuration(*since); err == nil {
+			cutoff = time.Now().UTC().Add(-d)
+		} else if t, err := time.Parse("2006-01-02", *since); err == nil {
+			cutoff = t
+		} else {
+			fmt.Fprintf(os.Stderr, "nugit stats: -since must be a duration (168h) or date (YYYY-MM-DD), got %q\n", *since)
+			return 2
+		}
+	}
+	records, err := usagelog.Read(*dir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "nugit stats: %v\n", err)
+		return 1
+	}
+	s := usagelog.Aggregate(records, cutoff)
+	switch *format {
+	case "json":
+		out, err := json.MarshalIndent(s, "", "  ")
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "nugit stats: %v\n", err)
+			return 1
+		}
+		fmt.Println(string(out))
+	default:
+		fmt.Print(s.Markdown())
 	}
 	return 0
 }
