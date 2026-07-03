@@ -10,6 +10,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/n8o/nugit/internal/model"
@@ -52,6 +53,7 @@ func Load(repoDir string) ([]model.KnowledgeObject, error) {
 		return nil, err
 	}
 	ResolveEffectiveStatus(objs)
+	ResolveAmendedBy(objs)
 	return objs, nil
 }
 
@@ -139,6 +141,31 @@ func ResolveEffectiveStatus(objs []model.KnowledgeObject) {
 		}
 		if superseded[objs[i].ID] && objs[i].EffectiveStatus != model.StatusInvalidated {
 			objs[i].EffectiveStatus = model.StatusSuperseded
+		}
+	}
+}
+
+// ResolveAmendedBy computes each object's AmendedBy from reverse `amends:`
+// edges, in place on the slice (ADR-0015). Unlike supersession this never
+// changes the target's status — an amended record stays live, annotated so it
+// is read together with what overrides part of it. Superseded/invalidated
+// amenders don't annotate (a dead amendment amends nothing).
+func ResolveAmendedBy(objs []model.KnowledgeObject) {
+	amenders := map[string][]string{}
+	for _, o := range objs {
+		if o.ID == "" || o.EffectiveStatus == model.StatusSuperseded || o.EffectiveStatus == model.StatusInvalidated {
+			continue
+		}
+		for _, e := range o.RelatesTo {
+			if edge := ParseEdge(e); edge.Relation == "amends" && edge.Target != "" {
+				amenders[edge.Target] = append(amenders[edge.Target], o.ID)
+			}
+		}
+	}
+	for i := range objs {
+		if ids := amenders[objs[i].ID]; len(ids) > 0 {
+			sort.Strings(ids)
+			objs[i].AmendedBy = ids
 		}
 	}
 }

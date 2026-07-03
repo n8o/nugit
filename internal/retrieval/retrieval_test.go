@@ -211,3 +211,36 @@ func TestTruncateDropsReferencesBeforeLessons(t *testing.T) {
 		t.Errorf("drop must be recorded, got %v", b.Dropped)
 	}
 }
+
+func TestAmendedDecisionStaysLiveAndAnnotated(t *testing.T) {
+	dir := setup(t)
+	wf(t, dir, ".nugit/decisions/amender.md",
+		obj("ADR-AMEND", "decision", "render", "overrides part of ADR-R", "amends:ADR-R"))
+	b, err := Context(Options{RepoDir: dir, Path: "internal/render/render.go"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var amended *Item
+	for i := range b.Decisions {
+		if b.Decisions[i].ID == "ADR-R" {
+			amended = &b.Decisions[i]
+		}
+	}
+	if amended == nil {
+		t.Fatal("amended decision must still surface as live context (not suppressed like supersession)")
+	}
+	if amended.Status != "accepted" {
+		t.Errorf("amended status = %q, want accepted", amended.Status)
+	}
+	if len(amended.AmendedBy) != 1 || amended.AmendedBy[0] != "ADR-AMEND" {
+		t.Errorf("AmendedBy = %v, want [ADR-AMEND]", amended.AmendedBy)
+	}
+	if !ids(b.Decisions)["ADR-AMEND"] {
+		t.Error("the amending decision must be in the bundle too")
+	}
+	md := b.Markdown()
+	if !strings.Contains(md, "accepted, amended by ADR-AMEND") ||
+		!strings.Contains(md, "read together with ADR-AMEND") {
+		t.Errorf("markdown must annotate the amendment:\n%s", md)
+	}
+}

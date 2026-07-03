@@ -39,7 +39,10 @@ type Item struct {
 	Summary  string `json:"summary"`
 	Rejected string `json:"rejected,omitempty"` // the anti-hallucination field
 	Via      string `json:"via,omitempty"`      // relates_to edge that pulled it in (one-hop)
-	tokens   int
+	// AmendedBy: this object is live but PARTIALLY overridden — read it together
+	// with these ids (ADR-0015).
+	AmendedBy []string `json:"amended_by,omitempty"`
+	tokens    int
 }
 
 // C4Slice is the component + its immediate relationships.

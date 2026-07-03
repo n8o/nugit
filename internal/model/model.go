@@ -88,6 +88,10 @@ type KnowledgeObject struct {
 	// EffectiveStatus is computed at load time from the supersedes graph; it
 	// overrides FrontMatter.Status when a newer record supersedes this one.
 	EffectiveStatus Status
+	// AmendedBy is computed at load time from reverse `amends:` edges: ids of
+	// records that override PART of this one. The record stays live (unlike
+	// supersession) but must be read together with its amendments (ADR-0015).
+	AmendedBy []string
 	// Rejected is the extracted "Rejected" rationale (decisions/lessons), the
 	// anti-hallucination field. Computed once at parse time so the renderer never
 	// re-implements the extraction.
