@@ -32,9 +32,12 @@ func (b Bundle) Markdown() string {
 	if len(b.Decisions) > 0 {
 		w.WriteString("**Decisions**\n")
 		for _, d := range b.Decisions {
-			fmt.Fprintf(&w, "- `%s` (%s) — %s%s\n", d.ID, d.Status, d.Summary, viaSuffix(d.Via))
+			fmt.Fprintf(&w, "- `%s` (%s) — %s%s\n", d.ID, statusLabel(d), d.Summary, viaSuffix(d.Via))
 			if d.Rejected != "" {
 				fmt.Fprintf(&w, "  - 🚫 rejected: %s\n", oneLine(d.Rejected))
+			}
+			if len(d.AmendedBy) > 0 {
+				fmt.Fprintf(&w, "  - ⚠ partially overridden — read together with %s\n", strings.Join(d.AmendedBy, ", "))
 			}
 		}
 		w.WriteString("\n")
@@ -78,6 +81,15 @@ func (b Bundle) Markdown() string {
 	}
 	w.WriteString("_\n")
 	return w.String()
+}
+
+// statusLabel renders an item's status, annotated when the object is live but
+// partially overridden by amendments (ADR-0015).
+func statusLabel(it Item) string {
+	if len(it.AmendedBy) == 0 {
+		return it.Status
+	}
+	return it.Status + ", amended by " + strings.Join(it.AmendedBy, ", ")
 }
 
 func viaSuffix(via string) string {

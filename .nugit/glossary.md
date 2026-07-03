@@ -19,6 +19,9 @@ confidence: high
   review found missing. See [[0002-file-to-component-binding]].
 - **effective status** — a knowledge object's status DERIVED from the supersedes graph
   at read time, never mutated in place. See [[0003-supersede-without-mutation]].
+- **amends** — a `relates_to` edge meaning "this decision overrides PART of the target;
+  the rest stands." The target stays live, annotated `amended by <id>` at read time —
+  partial supersession without mutation or section anchors. See [[0015-partial-supersession-amends]].
 - **delta** — a deterministic diff computed from two git refs and committed artifacts:
   one of C4, code, knowledge, plan.
 - **consistency check** — a set/graph operation over committed text that makes the PR

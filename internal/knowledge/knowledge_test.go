@@ -74,3 +74,30 @@ func TestParseEdge(t *testing.T) {
 		t.Error("bare target should have empty relation")
 	}
 }
+
+func TestResolveAmendedBy(t *testing.T) {
+	objs := []model.KnowledgeObject{
+		{FrontMatter: model.FrontMatter{ID: "ADR-1", Status: model.StatusAccepted}},
+		{FrontMatter: model.FrontMatter{ID: "ADR-2", Status: model.StatusAccepted,
+			RelatesTo: []string{"amends:ADR-1"}}},
+		{FrontMatter: model.FrontMatter{ID: "ADR-3", Status: model.StatusAccepted,
+			RelatesTo: []string{"amends:ADR-1"}}},
+		// A superseded amender must not annotate.
+		{FrontMatter: model.FrontMatter{ID: "ADR-4", Status: model.StatusAccepted,
+			RelatesTo: []string{"amends:ADR-1"}}},
+		{FrontMatter: model.FrontMatter{ID: "ADR-5", Status: model.StatusAccepted,
+			Supersedes: "ADR-4"}},
+	}
+	ResolveEffectiveStatus(objs)
+	ResolveAmendedBy(objs)
+	got := objs[0].AmendedBy
+	if len(got) != 2 || got[0] != "ADR-2" || got[1] != "ADR-3" {
+		t.Fatalf("AmendedBy = %v, want [ADR-2 ADR-3] (sorted, superseded amender excluded)", got)
+	}
+	if objs[0].EffectiveStatus != model.StatusAccepted {
+		t.Errorf("amended object must stay live, got %s", objs[0].EffectiveStatus)
+	}
+	if objs[1].AmendedBy != nil {
+		t.Errorf("amender itself must not be marked amended: %v", objs[1].AmendedBy)
+	}
+}

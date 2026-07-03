@@ -3,7 +3,7 @@ schema_version: 1
 id: ADR-0015
 type: decision
 scope: global
-status: proposed
+status: accepted
 created: 2026-07-02T00:00:00Z
 relates_to:
   - elaborates:ADR-0003
@@ -15,7 +15,7 @@ provenance:
 confidence: medium
 ---
 
-# ADR-0015 — Partial supersession via an `amends:` edge (proposed)
+# ADR-0015 — Partial supersession via an `amends:` edge
 
 ## Context
 
@@ -32,7 +32,7 @@ author must pick between two wrong outcomes:
 - **Don't declare it** — the target surfaces fully accepted with no hint that
   part of it is overturned, and agents follow the dead part.
 
-## Decision (proposed)
+## Decision
 
 1. **New relation `amends:<id>`** in `relates_to` — no schema change; it is an
    edge like `constrains:`/`informs:`. Semantics: "this decision overrides part
@@ -72,6 +72,6 @@ author must pick between two wrong outcomes:
 - Loader: compute `AmendedBy` from reverse `amends:` edges (mirrors the
   supersedes pass). Retrieval + render: annotate. Small, additive.
 - `stale-knowledge` check gains a sharper trigger: touching code governed by an
-  *amended* object should point at both the object and its amendment.
-- Until ratified and implemented, nothing changes at read time — this document
-  is the proposal.
+  *amended* object should point at both the object and its amendment. Deferred
+  until the annotation proves insufficient (thin-keystone, ADR-0004).
+- Ratified 2026-07-02; `AmendedBy` implemented in the same change.

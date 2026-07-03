@@ -26,7 +26,7 @@
 - [[0012-ai-drafts-model-code-enforces|ADR-0012 — Model bootstrap: AI drafts (grounded), humans ratify, code enforces]]
 - [[0013-local-usage-log|ADR-0013 — Local, gitignored usage log for context(); `nugit stats`]]
 - [[0014-reference-type|ADR-0014 — `reference`: a fifth durable type for distilled external knowledge]]
-- [[0015-partial-supersession-amends|ADR-0015 — Partial supersession via an `amends:` edge (proposed)]]
+- [[0015-partial-supersession-amends|ADR-0015 — Partial supersession via an `amends:` edge]]
 
 ## Lessons
 
