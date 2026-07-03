@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/n8o/nugit/internal/bootstrap"
 	"github.com/n8o/nugit/internal/c4"
@@ -70,7 +71,56 @@ func Run(repoDir string) Report {
 	objs, kerr := knowledge.Load(repoDir)
 	add("knowledge store loads", kerr == nil, fmt.Sprintf("%d object(s)", len(objs)))
 
+	bad := untypedObjects(repoDir)
+	add("knowledge objects are typed", len(bad) == 0, untypedDetail(bad))
+
 	return r
+}
+
+// untypedObjects finds knowledge files that would silently vanish from
+// retrieval: a front-matter block that fails to parse (e.g. `supersedes:` as a
+// YAML list — the schema is a single string) or parses without id/type. Found
+// in the wild on JBS, where a list-form supersedes made an ADR invisible to
+// every context() bundle.
+func untypedObjects(repoDir string) []string {
+	var bad []string
+	check := func(rel string) {
+		b, err := os.ReadFile(filepath.Join(repoDir, rel))
+		if err != nil {
+			return
+		}
+		obj, ok := knowledge.ParseObject(rel, string(b))
+		switch {
+		case !ok:
+			bad = append(bad, rel+" (no front-matter block)")
+		case obj.ID == "" || obj.Type == "":
+			bad = append(bad, rel+" (front-matter fails the schema — e.g. supersedes must be a single string, not a list)")
+		}
+	}
+	for _, d := range []string{"decisions", "lessons", "specs", "references"} {
+		entries, err := os.ReadDir(filepath.Join(repoDir, ".nugit", d))
+		if err != nil {
+			continue
+		}
+		for _, e := range entries {
+			if !e.IsDir() && filepath.Ext(e.Name()) == ".md" {
+				check(filepath.Join(".nugit", d, e.Name()))
+			}
+		}
+	}
+	check(filepath.Join(".nugit", "glossary.md"))
+	return bad
+}
+
+func untypedDetail(bad []string) string {
+	if len(bad) == 0 {
+		return "every object carries valid typed front-matter"
+	}
+	shown := bad
+	if len(shown) > 3 {
+		shown = append(append([]string{}, shown[:3]...), fmt.Sprintf("… %d more", len(bad)-3))
+	}
+	return fmt.Sprintf("%d file(s) invisible to retrieval: %s", len(bad), strings.Join(shown, "; "))
 }
 
 // backend names the analyzer nugit init would use here (matches the auto-detect order).
