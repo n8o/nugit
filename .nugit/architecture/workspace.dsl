@@ -129,6 +129,11 @@ workspace "nugit" "Git-native typed knowledge & unified PR view — self-model (
                     "paths" "internal/distill/**"
                 }
             }
+            ratify = component "Ratifier" "Promotes proposed knowledge to the ratified corpus (ADR-0016)" "Go" {
+                properties {
+                    "paths" "internal/ratify/**"
+                }
+            }
             eval = component "Eval" "Labeled corpus measuring heuristic accuracy" "Go" {
                 properties {
                     "paths" "internal/eval/**"
@@ -266,6 +271,9 @@ workspace "nugit" "Git-native typed knowledge & unified PR view — self-model (
             cli -> mcp "mcp command"
             cli -> usage "logs context calls; stats command"
             cli -> distill "distill command"
+            cli -> ratify "ratify command"
+            ratify -> model_ "uses types"
+            ratify -> knowledge "loads + resolves objects"
             cli -> localmem "remember command"
             cli -> trailers "commit-msg hook validation"
             cli -> c4 "c4 render command"
@@ -284,6 +292,7 @@ workspace "nugit" "Git-native typed knowledge & unified PR view — self-model (
             doctor -> gitutil "checks the hook"
             doctor -> bootstrap "detects the backend"
             doctor -> knowledge "checks the store"
+            doctor -> model_ "uses types"
 
             cli -> obsidian "obsidian command"
             cli -> deploy "deploy command"
