@@ -11,7 +11,7 @@ relates_to:
   - constrains:retrieval
 provenance:
   commit: seed
-  citation: JBS ADR-JBS-0006 supersedes ADR-JBS-0003 §3 (pilot, 2026-07-02)
+  citation: pilot ADR-P-0006 supersedes ADR-P-0003 §3 (pilot, 2026-07-02)
 confidence: medium
 ---
 
@@ -20,14 +20,14 @@ confidence: medium
 ## Context
 
 Supersession is whole-object: `supersedes: <id>` derives the entire target to
-`superseded` at read time (ADR-0003). Real decisions age in pieces. The JBS
-pilot produced the concrete case: ADR-JBS-0006 (one MXL domain per node)
-overturns **only §3** of ADR-JBS-0003 (domain-UUID mapping) while the rest of
-0003 (BCP-007-03 conformance surface) remains the live constraint. Today the
+`superseded` at read time (ADR-0003). Real decisions age in pieces. The pilot-model
+pilot produced the concrete case: ADR-P-0006 (one transport domain per node)
+overturns **only §3** of ADR-P-0003 (domain-UUID mapping) while the rest of
+0003 (protocol-conformance surface) remains the live constraint. Today the
 author must pick between two wrong outcomes:
 
 - **Declare `supersedes:`** — the whole target derives superseded, so retrieval
-  *suppresses its still-valid guidance* as dead context (JBS's current state:
+  *suppresses its still-valid guidance* as dead context (the pilot's state at the time:
   0003's conformance rules no longer surface to agents).
 - **Don't declare it** — the target surfaces fully accepted with no hint that
   part of it is overturned, and agents follow the dead part.
@@ -39,19 +39,19 @@ author must pick between two wrong outcomes:
    of the target; the rest of the target stands."
 2. **Derived, not mutated** (ADR-0003 preserved): the amended target keeps its
    own status, but knowledge loading computes an `AmendedBy: [ids]` marker, and
-   retrieval/pr-render annotate it — e.g. `ADR-JBS-0003 (accepted, amended by
-   ADR-JBS-0006)` — so both objects surface together and the reader resolves
+   retrieval/pr-render annotate it — e.g. `ADR-P-0003 (accepted, amended by
+   ADR-P-0006)` — so both objects surface together and the reader resolves
    precedence by recency, exactly as case law does.
 3. **No section anchors.** `amends:ADR-0003#3` was considered and dropped:
    heading numbers are not stable identifiers, and the annotation's job is to
    force the newer document into view, not to machine-resolve which paragraph
    died. The amending ADR's Context must say in prose what it overrides.
 4. **Convention, enforced socially not mechanically: one decision per ADR.**
-   Composites like JBS-0003 (transport conformance + domain mapping + filtering
+   Composites like P-0003 (transport conformance + domain mapping + filtering
    in one object) are what make partial supersession necessary; reviewers
    should split them at authoring time so future supersession can be total.
-5. JBS remediation once ratified: change ADR-JBS-0006 `supersedes: ADR-JBS-0003`
-   → `relates_to: [amends:ADR-JBS-0003]`, restoring 0003's live guidance.
+5. Pilot remediation once ratified: change ADR-P-0006 `supersedes: ADR-P-0003`
+   → `relates_to: [amends:ADR-P-0003]`, restoring 0003's live guidance.
 
 ## Rejected
 
@@ -64,7 +64,7 @@ author must pick between two wrong outcomes:
 - **Full supersession + a restating ADR** (supersede 0003 entirely; write a new
   ADR restating the surviving 90%) — works, but duplicates ratified text at
   every partial change and breaks inbound references to the original id.
-- **Status quo** — forces the lose-lose above; the JBS store is already paying
+- **Status quo** — forces the lose-lose above; the pilot store is already paying
   it.
 
 ## Consequences

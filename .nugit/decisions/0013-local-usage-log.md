@@ -12,7 +12,7 @@ relates_to:
   - elaborates:ADR-0004
 provenance:
   commit: seed
-  citation: internal/usage/usage.go; JBS pilot review 2026-07-02
+  citation: internal/usage/usage.go; pilot review 2026-07-02
 confidence: high
 ---
 
@@ -21,7 +21,7 @@ confidence: high
 ## Context
 
 The thesis' retrieval half claims `context()` helps agents, but nothing recorded
-whether it was even *called*. The JBS pilot made the gap concrete: a well-fed
+whether it was even *called*. The pilot made the gap concrete: a well-fed
 store (8 ADRs, 16 lessons) with no way to tell if any agent ever read from it.
 Measurement has rungs — use, then usefulness — and rung one is observability of
 calls. It must not compromise nugit's commitments: deterministic output, no
@@ -45,7 +45,7 @@ external datastore, canonical state as git text, no phone-home.
 ## Rejected
 
 - **No logging (status quo)** — leaves "does this help agents?" permanently
-  unanswerable; adoption decisions (e.g. JBS flipping enforce, tightening
+  unanswerable; adoption decisions (e.g. the pilot flipping enforce, tightening
   gates) stay vibes-based.
 - **Remote/centralized telemetry** — violates the git-native, repo-local
   philosophy and adds a consent/privacy surface nugit doesn't need; the repo

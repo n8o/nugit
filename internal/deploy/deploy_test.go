@@ -32,10 +32,10 @@ func TestDetect(t *testing.T) {
 		"FROM python:3.12\nCOPY apps/ai_processor/src /app\nRUN pip install -r requirements.txt\n")
 
 	// Bench false-positive: every container signal fires, but the name blocklist wins.
-	write(t, root, "apps/mxl_bridge_bench/CMakeLists.txt",
-		"add_executable(mxl_bridge_bench b.cpp)\ninstall(TARGETS mxl_bridge_bench RUNTIME DESTINATION bin)\n")
-	write(t, root, "docker/Dockerfile.mxl_bridge_bench",
-		"FROM runtime\nCOPY --from=builder build/apps/mxl_bridge_bench/mxl_bridge_bench /usr/local/bin/\n")
+	write(t, root, "apps/sample_bench/CMakeLists.txt",
+		"add_executable(sample_bench b.cpp)\ninstall(TARGETS sample_bench RUNTIME DESTINATION bin)\n")
+	write(t, root, "docker/Dockerfile.sample_bench",
+		"FROM runtime\nCOPY --from=builder build/apps/sample_bench/sample_bench /usr/local/bin/\n")
 
 	// Base image: excluded.
 	write(t, root, "docker/Dockerfile.base", "FROM ubuntu\nRUN apt-get update\n")
@@ -68,8 +68,8 @@ func TestDetect(t *testing.T) {
 	if c := by["ai-processor"]; c.Confidence != "HIGH-2" || c.Language != "python" {
 		t.Errorf("ai-processor = %+v, want HIGH-2 python", c)
 	}
-	if _, ok := by["mxl-bridge-bench"]; ok {
-		t.Error("mxl_bridge_bench is a bench — must be excluded despite every positive signal")
+	if _, ok := by["sample-bench"]; ok {
+		t.Error("sample_bench is a bench — must be excluded despite every positive signal")
 	}
 	if _, ok := by["base"]; ok {
 		t.Error("base image must be excluded")

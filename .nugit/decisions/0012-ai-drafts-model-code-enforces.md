@@ -21,7 +21,7 @@ nugit must turn an arbitrary git repo into a C4 model. The bootstrap today
 ([[0008-brownfield-bootstrap]]) is purely deterministic: each per-language analyzer
 (Go imports, CMake `target_link_libraries`, Python/TS) yields a **flat** graph where
 every package/target becomes a "component" of equal status. It cannot tell a deployable
-service from a library, so on a 48-service on-prem-k8s monorepo (JBS) it collapsed every
+service from a library, so on a 48-service on-prem-k8s pilot monorepo it collapsed every
 service and lib into a single synthetic container — structurally valid, architecturally
 useless.
 
@@ -75,7 +75,7 @@ elaborate heuristics, on both accuracy and maintenance cost.
 ## Rejected
 
 - **Pure deterministic bootstrap for any repo.** Extracts facts but not the abstraction;
-  an unbounded-convention treadmill that still yields mediocre, illegible models. The JBS
+  an unbounded-convention treadmill that still yields mediocre, illegible models. The pilot-model
   flattening is the demonstration.
 - **AI in the enforcement gate.** Non-deterministic, expensive, non-reproducible — it
   destroys the property (same inputs → same verdict) that makes the gate worth having.

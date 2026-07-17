@@ -264,7 +264,7 @@ func pendingDetail(objs []model.KnowledgeObject) string {
 // untypedObjects finds knowledge files that would silently vanish from
 // retrieval: a front-matter block that fails to parse (e.g. `supersedes:` as a
 // YAML list — the schema is a single string) or parses without id/type. Found
-// in the wild on JBS, where a list-form supersedes made an ADR invisible to
+// in the wild on a pilot repo, where a list-form supersedes made an ADR invisible to
 // every context() bundle.
 func untypedObjects(repoDir string) []string {
 	var bad []string
