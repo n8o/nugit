@@ -43,6 +43,31 @@ const (
 	StatusInvalidated Status = "invalidated"
 )
 
+// Evidence is the derived trust tier of a knowledge object — how much of it
+// nugit mechanically verifies. Derived at read time (never authored, never
+// persisted) from the object's status plus the governance substrate: whether
+// the components it governs are path-bound in the model and whether the edge
+// checks enforce them. "Enforced" claims the SUBSTRATE is verified, not the
+// object's prose constraint. Tier strings never carry path globs, so they are
+// safe in structured JSON output.
+type Evidence string
+
+const (
+	// EvidenceEnforced: every governed component is path-bound and the
+	// architecture edges touching them are mechanically enforced (fail
+	// severity) at PR time.
+	EvidenceEnforced Evidence = "enforced"
+	// EvidenceChecked: at least one governed component is path-bound, but
+	// enforcement is off (warn mode, no backend, or structural model).
+	EvidenceChecked Evidence = "checked"
+	// EvidenceDeclared: written down; nothing binds it to code.
+	EvidenceDeclared Evidence = "declared"
+	// EvidenceProposed: candidate lane (ADR-0016), awaiting ratification.
+	EvidenceProposed Evidence = "proposed"
+	// EvidenceStale: superseded or invalidated.
+	EvidenceStale Evidence = "stale"
+)
+
 // Confidence is a coarse self-rating attached to a knowledge object.
 type Confidence string
 
@@ -96,6 +121,9 @@ type KnowledgeObject struct {
 	// anti-hallucination field. Computed once at parse time so the renderer never
 	// re-implements the extraction.
 	Rejected string
+	// Evidence is the derived trust tier (see the Evidence type). Populated by
+	// evidence.Annotate; empty when no derivation ran (e.g. untyped objects).
+	Evidence Evidence
 }
 
 // Edge is a parsed typed cross-reference from a relates_to entry, e.g.

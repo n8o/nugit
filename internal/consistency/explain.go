@@ -26,10 +26,36 @@ var explanations = map[string]string{
 		"Fix: rename/merge the duplicate, or correct the glob.",
 }
 
-// Explain returns the rationale + remediation for a check id.
+// topics documents cross-cutting concepts that are not check ids (kept apart
+// from explanations so AllChecks stays a list of checks).
+var topics = map[string]string{
+	"evidence-tiers": "Every knowledge object carries a derived trust tier — how much of it nugit mechanically verifies:\n" +
+		"  enforced — every governed component is path-bound AND the c4<->code edge checks fail on violations (enforce mode, backend active).\n" +
+		"  checked  — at least one governed component is path-bound, but enforcement is off (warn mode, no backend, or structural model).\n" +
+		"  declared — written down; no scope/constrains edge binds it to code.\n" +
+		"  proposed — candidate lane (ADR-0016), awaiting `nugit ratify`.\n" +
+		"  stale    — superseded or invalidated.\n" +
+		"Honesty caveat: \"enforced\" claims the governance SUBSTRATE is verified — undeclared dependencies touching the object's\n" +
+		"components fail the PR. It does not claim the object's prose constraint is itself proven.",
+}
+
+// Explain returns the rationale + remediation for a check id or topic.
 func Explain(check string) (string, bool) {
-	s, ok := explanations[check]
+	if s, ok := explanations[check]; ok {
+		return s, ok
+	}
+	s, ok := topics[check]
 	return s, ok
+}
+
+// AllTopics returns every documented topic id, sorted.
+func AllTopics() []string {
+	out := make([]string, 0, len(topics))
+	for k := range topics {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // AllChecks returns every known check id, sorted.

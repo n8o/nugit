@@ -180,7 +180,11 @@ func knowledgeSection(d model.KnowledgeDelta) string {
 			continue
 		}
 		o := kc.Object
-		fmt.Fprintf(&b, "- %s **%s** `%s` (%s, %s)\n", statusWord(kc.Status), o.Type, idOr(o), o.Scope, effectiveStatus(o))
+		if o.Evidence != "" {
+			fmt.Fprintf(&b, "- %s **%s** `%s` (%s, %s, %s)\n", statusWord(kc.Status), o.Type, idOr(o), o.Scope, effectiveStatus(o), o.Evidence)
+		} else {
+			fmt.Fprintf(&b, "- %s **%s** `%s` (%s, %s)\n", statusWord(kc.Status), o.Type, idOr(o), o.Scope, effectiveStatus(o))
+		}
 		if o.Rejected != "" {
 			fmt.Fprintf(&b, "  - 🚫 rejected: %s\n", esc(oneLine(o.Rejected)))
 		}

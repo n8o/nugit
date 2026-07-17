@@ -519,6 +519,10 @@ func cmdExplain(args []string) int {
 		for _, c := range consistency.AllChecks() {
 			fmt.Printf("  %s\n", c)
 		}
+		fmt.Println("topics:")
+		for _, tp := range consistency.AllTopics() {
+			fmt.Printf("  %s\n", tp)
+		}
 		return 0
 	}
 	s, ok := consistency.Explain(args[0])

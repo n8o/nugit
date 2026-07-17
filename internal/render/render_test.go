@@ -51,9 +51,14 @@ func TestMarkdownClean(t *testing.T) {
 }
 
 func TestStructuredJSONExcludesHeadModel(t *testing.T) {
+	tiered := model.KnowledgeObject{FrontMatter: model.FrontMatter{ID: "ADR-1", Type: model.KindDecision, Scope: "secret"}}
+	tiered.Evidence = model.EvidenceEnforced
 	rep := model.Report{
 		HeadModel: model.Model{Components: []model.Component{
 			{ID: "secret", Paths: []string{"internal/secret/**"}},
+		}},
+		Knowledge: model.KnowledgeDelta{Changes: []model.KnowledgeChange{
+			{Path: ".nugit/decisions/1.md", Status: "A", Object: &tiered},
 		}},
 	}
 	out, err := StructuredJSON(rep)
@@ -62,5 +67,26 @@ func TestStructuredJSONExcludesHeadModel(t *testing.T) {
 	}
 	if strings.Contains(string(out), "HeadModel") || strings.Contains(string(out), "internal/secret") {
 		t.Errorf("HeadModel/path globs leaked into structured JSON:\n%s", out)
+	}
+	// The evidence tier is a bare label — it must appear WITHOUT dragging any
+	// model/glob data along.
+	if !strings.Contains(string(out), "enforced") {
+		t.Errorf("evidence tier missing from structured JSON:\n%s", out)
+	}
+}
+
+// The knowledge bullet carries the tier when the object is annotated.
+func TestMarkdownKnowledgeTier(t *testing.T) {
+	o := model.KnowledgeObject{FrontMatter: model.FrontMatter{ID: "ADR-1", Type: model.KindDecision, Scope: "a", Status: model.StatusAccepted}}
+	o.EffectiveStatus = model.StatusAccepted
+	o.Evidence = model.EvidenceChecked
+	rep := model.Report{
+		Code:         model.CodeDelta{ByComp: map[string][]model.FileChange{}},
+		Knowledge:    model.KnowledgeDelta{Changes: []model.KnowledgeChange{{Path: "x.md", Status: "A", Object: &o}}},
+		Significance: model.Significance{Tier: model.TierFeature, Reasons: []string{"knowledge changed"}},
+	}
+	md := Markdown(rep)
+	if !strings.Contains(md, "(a, accepted, checked)") {
+		t.Errorf("knowledge bullet missing tier:\n%s", md)
 	}
 }
