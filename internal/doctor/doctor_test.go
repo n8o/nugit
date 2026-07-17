@@ -63,3 +63,28 @@ func TestUntypedObjectsCheckInRun(t *testing.T) {
 		t.Fatal("knowledge-objects-typed check missing from doctor report")
 	}
 }
+
+// ADR-0016: the pending-ratification line is informational — it names the
+// proposed objects but never fails the pre-flight.
+func TestPendingRatificationIsInformational(t *testing.T) {
+	dir := t.TempDir()
+	write(t, dir, ".nugit/decisions/p.md",
+		"---\nschema_version: 1\nid: ADR-P\ntype: decision\nscope: a\nstatus: proposed\n---\n\n# p\n")
+
+	rep := Run(dir)
+	var found *Check
+	for i := range rep.Checks {
+		if rep.Checks[i].Name == "proposed objects pending ratification" {
+			found = &rep.Checks[i]
+		}
+	}
+	if found == nil {
+		t.Fatal("pending-ratification check missing from doctor report")
+	}
+	if !found.OK {
+		t.Error("pending ratification must never fail the pre-flight")
+	}
+	if !strings.Contains(found.Detail, "ADR-P") || !strings.Contains(found.Detail, "ratify -list") {
+		t.Errorf("detail must name the pending id and the remedy, got %q", found.Detail)
+	}
+}
