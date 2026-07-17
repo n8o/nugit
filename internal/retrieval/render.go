@@ -48,7 +48,7 @@ func (b Bundle) Markdown() string {
 	if len(b.Lessons) > 0 {
 		w.WriteString("**Lessons**\n")
 		for _, l := range b.Lessons {
-			fmt.Fprintf(&w, "- `%s`%s — %s%s\n", l.ID, proposedSuffix(l), l.Summary, viaSuffix(l.Via))
+			fmt.Fprintf(&w, "- `%s`%s — %s%s\n", l.ID, tierSuffix(l), l.Summary, viaSuffix(l.Via))
 		}
 		w.WriteString("\n")
 	}
@@ -56,7 +56,7 @@ func (b Bundle) Markdown() string {
 	if len(b.References) > 0 {
 		w.WriteString("**References** _(distilled external sources)_\n")
 		for _, r := range b.References {
-			fmt.Fprintf(&w, "- `%s`%s — %s%s\n", r.ID, proposedSuffix(r), r.Summary, viaSuffix(r.Via))
+			fmt.Fprintf(&w, "- `%s`%s — %s%s\n", r.ID, tierSuffix(r), r.Summary, viaSuffix(r.Via))
 		}
 		w.WriteString("\n")
 	}
@@ -85,22 +85,34 @@ func (b Bundle) Markdown() string {
 	return w.String()
 }
 
-// proposedSuffix marks candidate-lane items on lines that don't carry a full
-// status label (lessons, references — ADR-0016).
-func proposedSuffix(it Item) string {
-	if it.Status == string(model.StatusProposed) {
-		return " (proposed)"
+// tierWord renders an item's trust tier for humans; the proposed tier reads
+// "unratified" so a proposed item never prints "proposed · proposed". Falls
+// back to a plain proposed marker when no tier derivation ran.
+func tierWord(it Item) string {
+	if it.Tier == string(model.EvidenceProposed) {
+		return "unratified"
+	}
+	if it.Tier == "" && it.Status == string(model.StatusProposed) {
+		return "unratified"
+	}
+	return it.Tier
+}
+
+// tierSuffix marks items on lines that don't carry a full status label
+// (lessons, references) with their trust tier.
+func tierSuffix(it Item) string {
+	if t := tierWord(it); t != "" {
+		return " _[" + t + "]_"
 	}
 	return ""
 }
 
-// statusLabel renders an item's status, annotated when the object is live but
-// partially overridden by amendments (ADR-0015), and flagged when it is a
-// candidate awaiting ratification (ADR-0016).
+// statusLabel renders an item's status · trust tier, annotated when the
+// object is live but partially overridden by amendments (ADR-0015).
 func statusLabel(it Item) string {
 	s := it.Status
-	if s == string(model.StatusProposed) {
-		s += " — unratified"
+	if t := tierWord(it); t != "" {
+		s += " · " + t
 	}
 	if len(it.AmendedBy) == 0 {
 		return s

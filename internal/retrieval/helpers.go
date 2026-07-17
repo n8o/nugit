@@ -67,6 +67,7 @@ func toItem(o *model.KnowledgeObject, via string) Item {
 		Type:      string(o.Type),
 		Scope:     o.Scope,
 		Status:    string(effectiveStatus(o)),
+		Tier:      string(o.Evidence),
 		Path:      o.Path,
 		Summary:   summary(o),
 		Rejected:  o.Rejected,
