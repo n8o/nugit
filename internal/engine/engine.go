@@ -8,6 +8,7 @@ import (
 	"github.com/n8o/nugit/internal/config"
 	"github.com/n8o/nugit/internal/consistency"
 	"github.com/n8o/nugit/internal/delta"
+	"github.com/n8o/nugit/internal/evidence"
 	"github.com/n8o/nugit/internal/gitutil"
 	"github.com/n8o/nugit/internal/goimports"
 	"github.com/n8o/nugit/internal/knowledge"
@@ -90,6 +91,16 @@ func BuildReport(opt Options) (model.Report, error) {
 	if module == "" {
 		module, _ = goimports.ModulePath(opt.RepoDir)
 	}
+
+	// Evidence tiers: derived read-time trust labels (never authored). The
+	// delta's standalone-parsed objects copy from the resolved head set.
+	esig := evidence.Signals{
+		Model:   headModel,
+		Enforce: !cfg.C4Warn(),
+		Backend: module != "" || evidence.BackendActive(opt.RepoDir),
+	}
+	evidence.Annotate(allObjs, esig)
+	evidence.AnnotateDelta(&knowDelta, evidence.Tiers(allObjs), esig)
 
 	in := consistency.Input{
 		Repo:       repo,

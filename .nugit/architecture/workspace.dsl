@@ -129,6 +129,16 @@ workspace "nugit" "Git-native typed knowledge & unified PR view — self-model (
                     "paths" "internal/distill/**"
                 }
             }
+            ratify = component "Ratifier" "Promotes proposed knowledge to the ratified corpus (ADR-0016)" "Go" {
+                properties {
+                    "paths" "internal/ratify/**"
+                }
+            }
+            evidence = component "Evidence tiers" "Derives the per-object trust tier (enforced/checked/declared/proposed/stale)" "Go" {
+                properties {
+                    "paths" "internal/evidence/**"
+                }
+            }
             eval = component "Eval" "Labeled corpus measuring heuristic accuracy" "Go" {
                 properties {
                     "paths" "internal/eval/**"
@@ -266,6 +276,15 @@ workspace "nugit" "Git-native typed knowledge & unified PR view — self-model (
             cli -> mcp "mcp command"
             cli -> usage "logs context calls; stats command"
             cli -> distill "distill command"
+            cli -> ratify "ratify command"
+            ratify -> model_ "uses types"
+            ratify -> knowledge "loads + resolves objects"
+            evidence -> model_ "uses types"
+            evidence -> knowledge "parses relates_to edges"
+            evidence -> bootstrap "detects edge-check backends"
+            evidence -> tsdeps "checks dependency-cruiser availability"
+            consistency -> evidence "governed-components resolver"
+            engine -> evidence "annotates trust tiers"
             cli -> localmem "remember command"
             cli -> trailers "commit-msg hook validation"
             cli -> c4 "c4 render command"
@@ -284,6 +303,7 @@ workspace "nugit" "Git-native typed knowledge & unified PR view — self-model (
             doctor -> gitutil "checks the hook"
             doctor -> bootstrap "detects the backend"
             doctor -> knowledge "checks the store"
+            doctor -> model_ "uses types"
 
             cli -> obsidian "obsidian command"
             cli -> deploy "deploy command"

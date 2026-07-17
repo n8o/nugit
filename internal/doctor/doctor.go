@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/n8o/nugit/internal/bootstrap"
@@ -15,6 +16,7 @@ import (
 	"github.com/n8o/nugit/internal/config"
 	"github.com/n8o/nugit/internal/gitutil"
 	"github.com/n8o/nugit/internal/knowledge"
+	"github.com/n8o/nugit/internal/model"
 )
 
 // Check is one health probe.
@@ -74,7 +76,39 @@ func Run(repoDir string) Report {
 	bad := untypedObjects(repoDir)
 	add("knowledge objects are typed", len(bad) == 0, untypedDetail(bad))
 
+	// Informational, never a pre-flight failure (OK is always true): proposed
+	// objects are a healthy candidate lane (ADR-0016), just one awaiting review.
+	add("proposed objects pending ratification", true, pendingDetail(objs))
+
 	return r
+}
+
+// pendingDetail summarizes the candidate lane: proposed objects that are still
+// live (not superseded/invalidated) and awaiting `nugit ratify`.
+func pendingDetail(objs []model.KnowledgeObject) string {
+	var ids []string
+	for _, o := range objs {
+		if o.ID == "" || o.Status != model.StatusProposed {
+			continue
+		}
+		if o.EffectiveStatus == model.StatusSuperseded || o.EffectiveStatus == model.StatusInvalidated {
+			continue
+		}
+		ids = append(ids, o.ID)
+	}
+	if len(ids) == 0 {
+		return "none"
+	}
+	sort.Strings(ids)
+	shown := ids
+	if len(shown) > 5 {
+		shown = shown[:5]
+	}
+	s := fmt.Sprintf("%d pending: %s", len(ids), strings.Join(shown, ", "))
+	if len(ids) > len(shown) {
+		s += fmt.Sprintf(" (+%d more)", len(ids)-len(shown))
+	}
+	return s + " — run 'nugit ratify -list'"
 }
 
 // untypedObjects finds knowledge files that would silently vanish from

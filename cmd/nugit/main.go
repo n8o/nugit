@@ -30,6 +30,7 @@ import (
 	"github.com/n8o/nugit/internal/modelfacts"
 	"github.com/n8o/nugit/internal/notion"
 	"github.com/n8o/nugit/internal/obsidian"
+	"github.com/n8o/nugit/internal/ratify"
 	"github.com/n8o/nugit/internal/render"
 	"github.com/n8o/nugit/internal/retrieval"
 	"github.com/n8o/nugit/internal/scaffold"
@@ -46,7 +47,8 @@ usage:
   nugit mcp [flags]           run the MCP stdio server (exposes context() to agents)
   nugit stats [flags]         aggregate the local context() usage log
   nugit remember [flags]      jot ephemeral working memory (.nugit-local/, gitignored)
-  nugit distill [flags]       promote commit-trailer decisions/lessons to durable knowledge
+  nugit distill [flags]       promote commit-trailer decisions/lessons to durable knowledge (as proposed)
+  nugit ratify [flags] <id>…  promote proposed knowledge objects to the ratified corpus (ADR-0016)
   nugit hook commit-msg <f>   git hook entrypoint: validate the commit-trailer block
   nugit c4 render [flags]      render the C4 model as Mermaid
   nugit c4 preview [flags]     live C4 diagrams via local Structurizr renderer (Docker)
@@ -114,6 +116,8 @@ func main() {
 		os.Exit(cmdHook(os.Args[2:]))
 	case "distill":
 		os.Exit(cmdDistill(os.Args[2:]))
+	case "ratify":
+		os.Exit(cmdRatify(os.Args[2:]))
 	case "c4":
 		os.Exit(cmdC4(os.Args[2:]))
 	case "explain":
@@ -515,6 +519,10 @@ func cmdExplain(args []string) int {
 		for _, c := range consistency.AllChecks() {
 			fmt.Printf("  %s\n", c)
 		}
+		fmt.Println("topics:")
+		for _, tp := range consistency.AllTopics() {
+			fmt.Printf("  %s\n", tp)
+		}
 		return 0
 	}
 	s, ok := consistency.Explain(args[0])
@@ -553,6 +561,50 @@ func cmdDistill(args []string) int {
 		fmt.Printf("\nPromoted %d decision(s), %d lesson(s) as proposed. Review, commit with the PR, then ratify with 'nugit ratify <id>'.\n", len(res.Decisions), len(res.Lessons))
 	}
 	return 0
+}
+
+// cmdRatify promotes proposed knowledge objects into the ratified corpus
+// (ADR-0016): a surgical one-line status edit per object, or -list to show
+// what's pending.
+func cmdRatify(args []string) int {
+	fs := flag.NewFlagSet("ratify", flag.ExitOnError)
+	dir := fs.String("C", ".", "repo directory")
+	list := fs.Bool("list", false, "list proposed objects pending ratification")
+	_ = fs.Parse(args)
+	if *list {
+		pending, err := ratify.Pending(*dir)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "nugit ratify: %v\n", err)
+			return 1
+		}
+		if len(pending) == 0 {
+			fmt.Println("Nothing pending — no proposed objects in the store.")
+			return 0
+		}
+		for _, o := range pending {
+			fmt.Printf("  %-14s %-9s %s  %s\n", o.ID, o.Type, o.Created.Format("2006-01-02"), o.Path)
+		}
+		return 0
+	}
+	ids := fs.Args()
+	if len(ids) == 0 {
+		fmt.Fprintln(os.Stderr, "nugit ratify: usage: nugit ratify [-C dir] (-list | <id>...)")
+		return 2
+	}
+	code := 0
+	for _, id := range ids {
+		res, err := ratify.Ratify(*dir, id)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "nugit ratify: %v\n", err)
+			code = 1
+			continue
+		}
+		fmt.Printf("  ratified %s  %s -> %s  (%s)\n", res.ID, res.From, res.To, res.Path)
+	}
+	if code == 0 && len(ids) > 0 {
+		fmt.Println("\nCommit the change with the PR — ratification lands via review (ADR-0011).")
+	}
+	return code
 }
 
 // cmdRemember writes (or lists) ephemeral working-memory notes in .nugit-local/.

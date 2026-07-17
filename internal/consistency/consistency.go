@@ -14,9 +14,9 @@ import (
 	"strings"
 
 	"github.com/n8o/nugit/internal/cmake"
+	"github.com/n8o/nugit/internal/evidence"
 	"github.com/n8o/nugit/internal/gitutil"
 	"github.com/n8o/nugit/internal/goimports"
-	"github.com/n8o/nugit/internal/knowledge"
 	"github.com/n8o/nugit/internal/mapping"
 	"github.com/n8o/nugit/internal/model"
 	"github.com/n8o/nugit/internal/pyimports"
@@ -358,7 +358,7 @@ func checkStaleKnowledge(in Input) []model.Finding {
 		if o.EffectiveStatus != model.StatusSuperseded && o.EffectiveStatus != model.StatusInvalidated {
 			continue
 		}
-		for _, comp := range governedComponents(o) {
+		for _, comp := range evidence.GovernedComponents(o) {
 			governing[comp] = append(governing[comp], o)
 		}
 	}
@@ -397,28 +397,6 @@ func checkStaleKnowledge(in Input) []model.Finding {
 		}
 	}
 	return fs
-}
-
-// governedComponents returns the C4 component ids an object governs, via its
-// scope and via constrains:/affects:/governs: edges.
-func governedComponents(o model.KnowledgeObject) []string {
-	set := map[string]bool{}
-	if o.Scope != "" && o.Scope != "global" {
-		set[o.Scope] = true
-	}
-	for _, e := range o.RelatesTo {
-		edge := knowledge.ParseEdge(e)
-		switch edge.Relation {
-		case "constrains", "affects", "governs":
-			set[edge.Target] = true
-		}
-	}
-	var out []string
-	for c := range set {
-		out = append(out, c)
-	}
-	sort.Strings(out)
-	return out
 }
 
 // checkDecisionCoverage: an architecturally-significant change with no
