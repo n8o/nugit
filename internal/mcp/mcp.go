@@ -8,12 +8,25 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
+	"runtime/debug"
 
 	"github.com/n8o/nugit/internal/retrieval"
 	"github.com/n8o/nugit/internal/usage"
 )
 
 const protocolVersion = "2024-11-05"
+
+// serverVersion reports the module's build version so serverInfo matches
+// `nugit version` instead of a hand-maintained constant that drifts on every
+// release (it said 0.1.0 while v0.2.0 shipped).
+func serverVersion() string {
+	if info, ok := debug.ReadBuildInfo(); ok {
+		if v := info.Main.Version; v != "" && v != "(devel)" {
+			return v
+		}
+	}
+	return "devel"
+}
 
 type request struct {
 	JSONRPC string          `json:"jsonrpc"`
@@ -67,7 +80,7 @@ func handle(repoDir string, req request) response {
 		resp.Result = map[string]interface{}{
 			"protocolVersion": protocolVersion,
 			"capabilities":    map[string]interface{}{"tools": map[string]interface{}{}},
-			"serverInfo":      map[string]interface{}{"name": "nugit", "version": "0.1.0"},
+			"serverInfo":      map[string]interface{}{"name": "nugit", "version": serverVersion()},
 		}
 	case "tools/list":
 		resp.Result = map[string]interface{}{"tools": []interface{}{contextTool()}}
