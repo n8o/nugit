@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/n8o/nugit/internal/config"
+	"github.com/n8o/nugit/internal/gitutil"
 	"github.com/n8o/nugit/internal/retrieval"
 )
 
@@ -29,6 +30,7 @@ const LogPath = ".nugit/.cache/usage.jsonl"
 type Record struct {
 	Time            time.Time `json:"time"`
 	Source          string    `json:"source"` // cli | mcp
+	Branch          string    `json:"branch,omitempty"`
 	Path            string    `json:"path"`
 	Task            string    `json:"task,omitempty"`
 	Component       string    `json:"component"` // "" = path resolved to no component
@@ -37,6 +39,7 @@ type Record struct {
 	Truncated       bool      `json:"truncated"`
 	Decisions       int       `json:"decisions"`
 	Lessons         int       `json:"lessons"`
+	References      int       `json:"references"`
 	Glossary        int       `json:"glossary"`
 	WorkingMemory   int       `json:"working_memory"`
 	Spec            bool      `json:"spec"`
@@ -56,6 +59,7 @@ func FromBundle(source, task string, b retrieval.Bundle) Record {
 		Truncated:       b.Truncated,
 		Decisions:       len(b.Decisions),
 		Lessons:         len(b.Lessons),
+		References:      len(b.References),
 		Glossary:        len(b.Glossary),
 		WorkingMemory:   len(b.WorkingMemory),
 		Spec:            b.Spec != nil,
@@ -70,7 +74,12 @@ func Log(repoDir, source, task string, b retrieval.Bundle) error {
 	if cfg.Usage.Log == "off" {
 		return nil
 	}
-	return Append(repoDir, FromBundle(source, task, b))
+	r := FromBundle(source, task, b)
+	// Best-effort branch stamp: it is what lets per-branch usage be joined
+	// against per-branch outcomes (pr-render findings). "" (not a git repo)
+	// and "HEAD" (detached) are both acceptable — never an error.
+	r.Branch = gitutil.Repo{Dir: repoDir}.CurrentBranch()
+	return Append(repoDir, r)
 }
 
 // Append writes one record to the log, creating .nugit/.cache/ if needed.
@@ -122,6 +131,7 @@ type Stats struct {
 	Last         time.Time      `json:"last,omitempty"`
 	BySource     map[string]int `json:"by_source"`
 	ByComponent  map[string]int `json:"by_component"`
+	ByBranch     map[string]int `json:"by_branch"`
 	Unresolved   int            `json:"unresolved"`    // no component matched: model coverage gap
 	EmptyBundles int            `json:"empty_bundles"` // no decisions/spec/lessons matched: capture gap
 	Truncated    int            `json:"truncated"`
@@ -130,7 +140,7 @@ type Stats struct {
 
 // Aggregate computes Stats over records at or after since (zero = all).
 func Aggregate(records []Record, since time.Time) Stats {
-	s := Stats{BySource: map[string]int{}, ByComponent: map[string]int{}}
+	s := Stats{BySource: map[string]int{}, ByComponent: map[string]int{}, ByBranch: map[string]int{}}
 	tokens := 0
 	for _, r := range records {
 		if !since.IsZero() && r.Time.Before(since) {
@@ -148,6 +158,9 @@ func Aggregate(records []Record, since time.Time) Stats {
 			s.Unresolved++
 		} else {
 			s.ByComponent[r.Component]++
+		}
+		if r.Branch != "" {
+			s.ByBranch[r.Branch]++
 		}
 		if r.Decisions == 0 && r.Lessons == 0 && !r.Spec {
 			s.EmptyBundles++
@@ -183,28 +196,40 @@ func (s Stats) Markdown() string {
 	fmt.Fprintf(&b, "- **empty bundles** (no decision/spec/lesson matched — capture gap): %d\n", s.EmptyBundles)
 	if len(s.ByComponent) > 0 {
 		b.WriteString("- **top components**:\n")
-		type kv struct {
-			k string
-			v int
+		for _, t := range topN(s.ByComponent, 10) {
+			fmt.Fprintf(&b, "  - %s: %d\n", t.k, t.v)
 		}
-		var top []kv
-		for k, v := range s.ByComponent {
-			top = append(top, kv{k, v})
-		}
-		sort.Slice(top, func(i, j int) bool {
-			if top[i].v != top[j].v {
-				return top[i].v > top[j].v
-			}
-			return top[i].k < top[j].k
-		})
-		if len(top) > 10 {
-			top = top[:10]
-		}
-		for _, t := range top {
+	}
+	if len(s.ByBranch) > 0 {
+		b.WriteString("- **by branch**:\n")
+		for _, t := range topN(s.ByBranch, 10) {
 			fmt.Fprintf(&b, "  - %s: %d\n", t.k, t.v)
 		}
 	}
 	return b.String()
+}
+
+type kv struct {
+	k string
+	v int
+}
+
+// topN returns the n highest-count entries of m, ties broken alphabetically.
+func topN(m map[string]int, n int) []kv {
+	var top []kv
+	for k, v := range m {
+		top = append(top, kv{k, v})
+	}
+	sort.Slice(top, func(i, j int) bool {
+		if top[i].v != top[j].v {
+			return top[i].v > top[j].v
+		}
+		return top[i].k < top[j].k
+	})
+	if len(top) > n {
+		top = top[:n]
+	}
+	return top
 }
 
 func sortedKeys(m map[string]int) []string {

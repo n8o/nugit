@@ -250,6 +250,7 @@ workspace "nugit" "Git-native typed knowledge & unified PR view — self-model (
 
             usage -> retrieval "summarizes bundles"
             usage -> config "honors the usage.log knob"
+            usage -> gitutil "stamps the current branch on records"
 
             cli -> model_ "uses types"
             cli -> engine "builds report"
