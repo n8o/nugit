@@ -90,10 +90,10 @@ func flagDirEdges(in Input, check, detailFmt string, edges [][2]string) []model.
 	for _, e := range edges {
 		src := in.Mapper.ResolveDir(in.Prefix + e[0])
 		dst := in.Mapper.ResolveDir(in.Prefix + e[1])
-		if src == "" || dst == "" || src == dst || !touched[src] {
+		if src == "" || dst == "" || in.HeadModel.SameLineage(src, dst) || !touched[src] {
 			continue
 		}
-		if in.HeadModel.HasRelationship(src, dst) {
+		if in.HeadModel.Covered(src, dst) {
 			continue
 		}
 		k := [2]string{src, dst}
@@ -101,14 +101,27 @@ func flagDirEdges(in Input, check, detailFmt string, edges [][2]string) []model.
 			continue
 		}
 		seen[k] = true
+		detail := fmt.Sprintf(detailFmt, src, dst)
+		if a, b := containerScope(in.HeadModel, src), containerScope(in.HeadModel, dst); a != "" && b != "" && a != b && (a != src || b != dst) {
+			detail += fmt.Sprintf(" (container-level alternative: declare `%s -> %s`)", a, b)
+		}
 		fs = append(fs, model.Finding{
 			Check:    check,
 			Severity: sev,
 			Title:    fmt.Sprintf("undeclared dependency %s → %s", src, dst),
-			Detail:   fmt.Sprintf(detailFmt, src, dst),
+			Detail:   detail,
 		})
 	}
 	return fs
+}
+
+// containerScope is the enforcement scope of an element id: itself when it is
+// a container, its parent container when it is a component, "" when flat.
+func containerScope(m model.Model, id string) string {
+	if _, ok := m.Container(id); ok {
+		return id
+	}
+	return m.ContainerOf(id)
 }
 
 // checkCMakeCode is the C++ analogue of checkC4Code: it re-derives the CMake
@@ -341,7 +354,9 @@ func checkC4Code(in Input) []model.Finding {
 		for _, dir := range dirs {
 			// import dirs are module-relative; globs are git-root-relative.
 			dst := in.Mapper.ResolveDir(in.Prefix + dir)
-			if dst == "" || dst == fc.Component {
+			// Same lineage (identity, or a container and its own child) is
+			// containment, never a flaggable dependency.
+			if dst == "" || in.HeadModel.SameLineage(fc.Component, dst) {
 				continue
 			}
 			e := edge{fc.Component, dst}
@@ -349,19 +364,33 @@ func checkC4Code(in Input) []model.Finding {
 				continue
 			}
 			seen[e] = true
-			if !in.HeadModel.HasRelationship(e.src, e.dst) {
+			if !in.HeadModel.Covered(e.src, e.dst) {
 				fs = append(fs, model.Finding{
 					Check:    "c4<->code",
 					Severity: sev,
 					Title:    fmt.Sprintf("undeclared dependency %s → %s", e.src, e.dst),
-					Detail: fmt.Sprintf("code in %s now imports %s but workspace.dsl has no `%s -> %s` relationship; "+
-						"add the relationship to the model or remove the import (introduced via %s)",
-						e.src, e.dst, e.src, e.dst, fc.Path),
+					Detail:   c4CodeDetail(in.HeadModel, e.src, e.dst, fc.Path),
 				})
 			}
 		}
 	}
 	return fs
+}
+
+// c4CodeDetail words the c4<->code finding. Flat and same-container pairs keep
+// the historical wording byte-for-byte; a cross-container pair also offers the
+// container-level roll-up edge (component level recommended first).
+func c4CodeDetail(m model.Model, src, dst, path string) string {
+	a, b := containerScope(m, src), containerScope(m, dst)
+	if a != "" && b != "" && a != b && (a != src || b != dst) {
+		return fmt.Sprintf("code in %s now imports %s but workspace.dsl declares neither `%s -> %s` (component level) "+
+			"nor `%s -> %s` (container level — covers every %s → %s component dependency); "+
+			"add one to the model or remove the import (introduced via %s)",
+			src, dst, src, dst, a, b, a, b, path)
+	}
+	return fmt.Sprintf("code in %s now imports %s but workspace.dsl has no `%s -> %s` relationship; "+
+		"add the relationship to the model or remove the import (introduced via %s)",
+		src, dst, src, dst, path)
 }
 
 // cmakeFilesAt reads every CMakeLists.txt under the nugit root (prefix) at ref,

@@ -134,6 +134,91 @@ var adversarial = []Case{
 		WantTier:  model.TierTrivial,
 		WantClean: true,
 	},
+
+	// ---- two-level roll-up: attacks on the Covered() boundary (ADR-0017) ----
+	{
+		// The roll-up hole, attacked from inside: X -> Y is declared, but the
+		// new dependency is INTRA-X (x1 -> x2). A container edge must NEVER
+		// cover an intra-container pair — this must fire.
+		Name:       "rollup-never-covers-intra-container",
+		DSL:        leveledDSL("X -> Y"),
+		Base:       leveledFiles,
+		Head:       map[string]string{"x1/x1.go": "package x1\n\nimport _ \"example.com/m/x2\"\n\nfunc X1() {}\n"},
+		WantTier:   model.TierArchitectural,
+		WantChecks: []string{"c4<->code", "decision-coverage"},
+		WantClean:  false,
+	},
+	{
+		// X -> Y is declared but the import goes to a THIRD container's child
+		// (x1 -> z1): the declared edge is aimed elsewhere — must fire.
+		Name:       "rollup-wrong-target-container",
+		DSL:        leveledDSL("X -> Y"),
+		Base:       leveledFiles,
+		Head:       map[string]string{"x1/x1.go": "package x1\n\nimport _ \"example.com/m/z1\"\n\nfunc X1() {}\n"},
+		WantTier:   model.TierArchitectural,
+		WantChecks: []string{"c4<->code", "decision-coverage"},
+		WantClean:  false,
+	},
+	{
+		// A container-owned file (ycore/**) importing the container's OWN child
+		// component is containment, not a dependency — must stay silent.
+		Name:      "container-own-file-to-own-child-silent",
+		DSL:       leveledDSL(),
+		Base:      leveledFiles,
+		Head:      map[string]string{"ycore/core.go": "package ycore\n\nimport _ \"example.com/m/y1\"\n\nfunc Core() {}\n"},
+		WantTier:  model.TierTrivial,
+		WantClean: true,
+	},
+	{
+		// Pilot-SHAPED (fully anonymized) model: group-wrapped one-component
+		// containers with _c ids, a shared-libs container, a blockless
+		// container. An undeclared cross-container _c -> _c import must fire
+		// exactly like a flat undeclared edge.
+		Name:       "pilot-shape-cross-container-undeclared",
+		DSL:        pilotShapeDSL,
+		Base:       pilotShapeFiles,
+		Head:       map[string]string{"svc/ingest/ingest.go": "package ingest\n\nimport (\n\t_ \"example.com/m/lib/x\"\n\t_ \"example.com/m/svc/encoder\"\n)\n\nfunc Ingest() {}\n"},
+		WantTier:   model.TierArchitectural,
+		WantChecks: []string{"c4<->code", "decision-coverage"},
+		WantClean:  false,
+	},
+}
+
+// pilotShapeDSL mirrors only the SHAPE of a real leveled model — group blocks,
+// one-component-per-container with _c suffixes, a shared-libs wrapper, a
+// blockless container. All names are generic by design (redaction constraint).
+const pilotShapeDSL = `workspace "m" {
+  model {
+    sys = softwareSystem "m" {
+      group "Services" {
+        ingest = container "ingest" {
+          ingest_c = component "ingest" { properties { paths "svc/ingest/**" } }
+        }
+        encoder = container "encoder" {
+          encoder_c = component "encoder" { properties { paths "svc/encoder/**" } }
+        }
+        publisher = container "publisher" {
+          publisher_c = component "publisher" { properties { paths "svc/publisher/**" } }
+        }
+      }
+      shared = container "shared-libs" {
+        libx = component "libx" { properties { paths "lib/x/**" } }
+        liby = component "liby" { properties { paths "lib/y/**" } }
+      }
+      edge = container "edge"
+      ingest_c -> libx
+      encoder_c -> libx
+      publisher_c -> liby
+    }
+  }
+}`
+
+var pilotShapeFiles = map[string]string{
+	"svc/ingest/ingest.go":       "package ingest\n\nimport _ \"example.com/m/lib/x\"\n\nfunc Ingest() {}\n",
+	"svc/encoder/encoder.go":     "package encoder\n\nimport _ \"example.com/m/lib/x\"\n\nfunc Encode() {}\n",
+	"svc/publisher/publisher.go": "package publisher\n\nimport _ \"example.com/m/lib/y\"\n\nfunc Publish() {}\n",
+	"lib/x/x.go":                 "package x\n\nfunc X() {}\n",
+	"lib/y/y.go":                 "package y\n\nfunc Y() {}\n",
 }
 
 func specObj(id string) string {

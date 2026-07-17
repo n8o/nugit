@@ -181,6 +181,62 @@ func TestContainerDiff(t *testing.T) {
 	}
 }
 
+// GenArchLint roll-down (ADR-0017): go-arch-lint has no container level, so a
+// container relationship endpoint expands to its child components (plus the
+// container itself when it has own paths), and containers without paths are
+// not emitted at all.
+func TestGenArchLintContainerRollDown(t *testing.T) {
+	m := Parse(`workspace "m" {
+	  model {
+	    s = softwareSystem "m" {
+	      X = container "X" {
+	        x1 = component "X1" { properties { paths "x1/**" } }
+	        x2 = component "X2" { properties { paths "x2/**" } }
+	      }
+	      Y = container "Y" {
+	        properties { "paths" "ycore/**" }
+	        y1 = component "Y1" { properties { paths "y1/**" } }
+	      }
+	      W = container "W"
+	      X -> Y
+	      y1 -> x1
+	      X -> W
+	    }
+	  }
+	}`)
+	got := GenArchLint(m)
+	// Paths-less containers never emitted; path-bound container Y is.
+	if strings.Contains(got, `"X":`) || strings.Contains(got, `"W":`) {
+		t.Errorf("paths-less container leaked into components:\n%s", got)
+	}
+	if !strings.Contains(got, "  \"Y\":\n    in: \"ycore/**\"\n") {
+		t.Errorf("path-bound container Y not emitted as a component:\n%s", got)
+	}
+	// X -> Y expands to {x1,x2} × {Y,y1}.
+	for _, src := range []string{"x1", "x2"} {
+		idx := strings.Index(got, "  \""+src+"\":\n    mayDependOn:")
+		if idx < 0 {
+			t.Fatalf("deps for %s missing:\n%s", src, got)
+		}
+		block := got[idx:]
+		if end := strings.Index(block[1:], "  \""); end >= 0 {
+			block = block[:end+1]
+		}
+		if !strings.Contains(block, `- "Y"`) || !strings.Contains(block, `- "y1"`) {
+			t.Errorf("X -> Y did not roll down for %s:\n%s", src, block)
+		}
+	}
+	// Component-level edge y1 -> x1 stays literal.
+	if !strings.Contains(got, "  \"y1\":\n    mayDependOn:\n      - \"x1\"\n") {
+		t.Errorf("component edge lost:\n%s", got)
+	}
+	// X -> W: dst expansion is empty (no children, no paths) — edge dropped,
+	// so nothing may depend on W anywhere.
+	if strings.Contains(got, `- "W"`) {
+		t.Errorf("edge to an empty container must be dropped:\n%s", got)
+	}
+}
+
 // A container-only delta renders in MermaidDiff as plain nodes (subgraphs are
 // a follow-up), styled like component adds/removes.
 func TestMermaidDiffContainerNodes(t *testing.T) {

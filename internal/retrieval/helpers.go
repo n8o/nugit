@@ -35,26 +35,33 @@ func c4Slice(m model.Model, comp string) C4Slice {
 	return s
 }
 
-// inScope reports whether an object applies to comp (its own scope, or global).
-func inScope(o *model.KnowledgeObject, comp string) bool {
+// inScope reports whether an object applies to the scope chain: comp itself,
+// comp's parent container, or global. Flat models pass parent == "".
+func inScope(o *model.KnowledgeObject, comp, parent string) bool {
 	switch o.Scope {
 	case "", "global":
 		return true
 	case comp:
 		return true
 	}
-	return false
+	return parent != "" && o.Scope == parent
 }
 
-// relevant reports whether a spec is the active spec for comp/path (component-
-// scoped or linked to the component), not just any global spec.
-func relevant(o *model.KnowledgeObject, comp, path string) bool {
-	if comp != "" && o.Scope == comp {
-		return true
-	}
-	for _, e := range o.RelatesTo {
-		if knowledge.ParseEdge(e).Target == comp && comp != "" {
+// relevant reports whether a spec is the active spec for the scope chain
+// (scoped or linked to the component or its parent container), not just any
+// global spec.
+func relevant(o *model.KnowledgeObject, comp, parent string) bool {
+	for _, s := range []string{comp, parent} {
+		if s == "" {
+			continue
+		}
+		if o.Scope == s {
 			return true
+		}
+		for _, e := range o.RelatesTo {
+			if knowledge.ParseEdge(e).Target == s {
+				return true
+			}
 		}
 	}
 	// A global/unscoped spec serves a path that has no component-scoped spec.
