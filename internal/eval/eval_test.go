@@ -26,3 +26,15 @@ func TestCorpus(t *testing.T) {
 		t.Errorf("check recall %.0f%% below gate (95%%) — false negatives", m.CheckRecall*100)
 	}
 }
+
+// The adversarial set is hand-built spoofs: zero tolerance — every case must
+// pass exactly (no precision/recall slack).
+func TestAdversarial(t *testing.T) {
+	m := RunSet(adversarial)
+	for _, r := range m.Cases {
+		if !r.Pass() {
+			t.Errorf("%s: tier=%v(ok=%v) clean=%v miss=%v extra=%v err=%v",
+				r.Name, r.GotTier, r.TierOK, r.CleanOK, r.MissChecks, r.ExtraChecks, r.Err)
+		}
+	}
+}
