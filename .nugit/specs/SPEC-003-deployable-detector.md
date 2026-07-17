@@ -18,7 +18,7 @@ confidence: high
 The deterministic fact-extraction half of [[0012-ai-drafts-model-code-enforces]]:
 how nugit derives a repo's **container inventory** (deployable units) and the
 **evidence graph** the grounded-agent bootstrap may not contradict. Measured
-against the JBS monorepo (~36 first-party containers); the *method* is general, the
+against the pilot monorepo (~36 first-party containers); the *method* is general, the
 accuracy numbers are repo-specific.
 
 ## Normative requirements
@@ -26,7 +26,7 @@ accuracy numbers are repo-specific.
 1. **Prune first.** All detection runs after excluding directories that hold no
    first-party deployables and inflate raw counts 7–20× (`.worktrees`,
    `.claude/worktrees`, `vendor`, `third_party`, `node_modules`, `build`, `target`,
-   `dist`, `testdata`). On JBS this collapses 695 raw executables → 77 and 53 raw
+   `dist`, `testdata`). On the pilot repo this collapses 695 raw executables → 77 and 53 raw
    Dockerfiles → 37. **Skipping this step makes every estimate garbage.**
 
 2. **Dockerfile is the spine.** A container candidate = a first-party Dockerfile
@@ -68,6 +68,6 @@ accuracy numbers are repo-specific.
 ## The deterministic/agent line
 
 Deterministic detection produces a **correct but flat and partially-mislabelled**
-inventory (~83% clean on JBS). It does **not** decide sub-system grouping, naming,
+inventory (~83% clean on the pilot). It does **not** decide sub-system grouping, naming,
 multi-deployable expansion judgement, or runtime-created pods — those are the
 agent's, grounded by and forbidden to contradict this evidence.

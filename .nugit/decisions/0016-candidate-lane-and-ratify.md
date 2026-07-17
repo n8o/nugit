@@ -12,7 +12,7 @@ relates_to:
   - constrains:retrieval
 provenance:
   commit: seed
-  citation: OrangePro review (2026-07-16) — candidate lanes never mint evidence tiers
+  citation: prior-art review, 2026-07-16 — candidate lanes never mint evidence tiers
 confidence: high
 ---
 
@@ -24,7 +24,7 @@ confidence: high
 distill` minted ADRs as `accepted` and lessons as `active` at the moment of
 promotion, making a machine-drafted record indistinguishable from a
 deliberated, human-ratified one — the store could not tell its own candidates
-from its corpus. The OrangePro review surfaced the discipline worth copying:
+from its corpus. A prior-art review surfaced the discipline worth copying:
 AI-derived content lives in a structurally separate candidate lane and can
 never mint trust on its own; only a deliberate act promotes it.
 

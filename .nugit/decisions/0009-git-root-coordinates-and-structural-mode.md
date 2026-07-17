@@ -48,7 +48,7 @@ non-Go bulk.
 
 ## Consequences
 
-- Monorepos and nested modules work; JBS yields a 71-component structural model.
+- Monorepos and nested modules work; the pilot monorepo yields a 71-component structural model.
 - Per-language analyzers (P2) later add edges + enforcement on top of the same
   git-root-relative globs.
 

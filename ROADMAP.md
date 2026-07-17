@@ -47,12 +47,11 @@ queryable. `target_link_libraries(foo PRIVATE bar)` is an explicit "component fo
 depends on bar" edge at exactly C4-component altitude. Two routes, both real:
 
 - **Static `target_link_libraries` parse** — zero configure, zero build env.
-  Proven on JBS: **122 components, 204 edges** (`nmos_node`, `st2110_common`,
-  `media_transport` as the core libs). Approximate (misses variable/conditional/
-  function-defined edges).
+  Proven on the pilot monorepo: **122 components, 204 edges**. Approximate (misses
+  variable/conditional/function-defined edges).
 - **CMake File API** (you're on cmake 4.2) — exact targets + sources + link deps
   from a *configured* build dir. Accurate; resolves the edges static parse can't
-  (JBS has 1,816 `target_link_libraries` calls). Cost: needs a configured build
+  (the pilot has 1,816 `target_link_libraries` calls). Cost: needs a configured build
   tree (a project that already builds in CI has one — reuse it, no fresh configure).
 
 Honest residual: it's **target/module-level** (not catching a rogue `#include`
@@ -70,9 +69,9 @@ fall back to the static parse or warn-only.
 
 ## Phases
 
-### P1 — Any-repo + monorepo support  ·  `MONO-1`  ·  ~L  ·  **unblocks JBS now**
+### P1 — Any-repo + monorepo support  ·  `MONO-1`  ·  ~L  ·  **unblocks the pilot now**
 Two changes: (a) **git-root-relative coordinates everywhere** so a nugit root that
-isn't the git root stops silently orphaning every path (the JBS nested-module bug);
+isn't the git root stops silently orphaning every path (the pilot's nested-module bug);
 (b) a **language-agnostic structural bootstrap** — `nugit init` discovers components
 from the directory layout (one per `apps/*`, `libs/*`, … via a `-layout` heuristic),
 emitting components + globs with **no edges**, so any repo gets the full PR view.
@@ -90,7 +89,7 @@ dep dirs) consumed by both `consistency` and `bootstrap`; add backends:
   straight into `mapping.ResolveDir`).
 - **Python** — stdlib-AST walk (no install needed).
 - **C++ — CMake** — static `target_link_libraries` parse (zero-config, proven on
-  JBS) with the File API as the accurate upgrade when a configured build dir is
+  the pilot) with the File API as the accurate upgrade when a configured build dir is
   present. Components = CMake targets, edges = link deps.
 
 Add `nugit c4 gen-rules` (model → go-arch-lint config) as the generator half.
@@ -149,11 +148,11 @@ MONO-1 ─▶ I1-MULTILANG ─▶ R1 ─▶ CAPTURE-LIFECYCLE
 ## Open decisions for you
 
 1. **C++ default:** zero-config static `target_link_libraries` parse (works today,
-   ~204 edges on JBS), or the File API when a build dir is present (accurate,
+   ~204 edges on the pilot), or the File API when a build dir is present (accurate,
    resolves all 1,816 link calls) falling back to static? Recommendation: ship
    static as the default, File API as an opt-in upgrade.
 2. **Scope:** build all five phases (~4–6 wks), or stop after P1–P2 (any-codebase +
    multi-lang enforcement incl. C++) and treat retrieval/capture as a later push?
-3. **JBS granularity:** for C++ the components fall out of CMake targets (122 of
+3. **Pilot granularity:** for C++ the components fall out of CMake targets (122 of
    them) — keep them 1:1, or group targets into coarser subsystems? For the
    non-CMake parts, components per `apps/*` + `libs/*` child or per top-level dir?

@@ -11,7 +11,7 @@ relates_to:
   - elaborates:ADR-0011
 provenance:
   commit: seed
-  citation: internal/model/model.go KindReference; JBS pilot review 2026-07-02
+  citation: internal/model/model.go KindReference; pilot review 2026-07-02
 confidence: high
 ---
 
@@ -22,8 +22,8 @@ confidence: high
 The four durable types are all *project-authored*: a lesson needs an incident,
 an ADR needs a decision, a spec needs intended behavior, the glossary holds
 vocabulary. External technical material — papers, vendor docs, standards,
-benchmarks — that shapes the project has no home. The JBS pilot hit this
-directly: SMPTE/NMOS/MXL research informing ADRs had nowhere to live except
+benchmarks — that shapes the project has no home. The pilot hit this
+directly: standards and vendor research informing ADRs had nowhere to live except
 squeezed into ADR Context sections or dropped. ADR-0011 already defines *how*
 external content may enter (inbound proposal via reviewed PR, never a
 bidirectional-authoritative merge); what's missing is a *type* for it.

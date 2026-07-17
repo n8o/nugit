@@ -44,11 +44,11 @@ An agent with scoped typed memory produces PRs with:
 ## Usage
 
 ```sh
-# 1. define tasks against a target repo that has a .nugit/ store (e.g. JBS)
+# 1. define tasks against a target repo that has a .nugit/ store (e.g. your pilot repo)
 cp tasks.example.json tasks.json && $EDITOR tasks.json
 
 # 2. run both arms, 3 runs each, scoring as it goes
-./run.sh -t tasks.json -r ~/Development/jeket/JBS -n 3
+./run.sh -t tasks.json -r ~/path/to/target-repo -n 3
 
 # 3. compare arms
 ./summarize.sh results/results.jsonl

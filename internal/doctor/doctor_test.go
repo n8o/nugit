@@ -22,7 +22,7 @@ func TestUntypedObjects(t *testing.T) {
 	dir := t.TempDir()
 	write(t, dir, ".nugit/decisions/good.md",
 		"---\nschema_version: 1\nid: ADR-1\ntype: decision\nscope: global\nstatus: accepted\n---\n\n# ok\n")
-	// The JBS bug: supersedes as a YAML list fails the string-typed schema and
+	// A bug seen in the wild: supersedes as a YAML list fails the string-typed schema and
 	// silently untypes the whole object.
 	write(t, dir, ".nugit/decisions/list-supersedes.md",
 		"---\nschema_version: 1\nid: ADR-2\ntype: decision\nsupersedes:\n  - ADR-1\n---\n\n# broken\n")

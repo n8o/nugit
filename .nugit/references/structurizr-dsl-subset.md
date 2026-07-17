@@ -26,7 +26,7 @@ Claims distilled for this project (full language reference at `source`):
   block; nugit's use of it for file→component binding (ADR-0002) piggybacks on
   valid DSL, so models stay renderable by real Structurizr tooling.
 - The **real Structurizr renderer is stricter than nugit's parser** (verified on
-  the JBS model): it requires `system → container → component` nesting and
+  the pilot model): it requires `system → container → component` nesting and
   multi-line quoted properties — `properties {\n  "paths" "x"\n}` — inline
   `properties { paths "x" }` is a parse error there even though nugit accepts
   it. Emit the multi-line form everywhere (`bootstrap` does).
