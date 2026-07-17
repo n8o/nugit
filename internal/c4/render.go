@@ -39,6 +39,13 @@ func label(c model.Component) string {
 	return c.ID
 }
 
+func containerLabel(c model.Container) string {
+	if c.Name != "" {
+		return c.Name
+	}
+	return c.ID
+}
+
 // mermaidLabel escapes for Mermaid (NOT Go's %q): a literal quote or square
 // bracket otherwise closes the node and breaks GitHub's parser. Entity-encode the
 // dangerous characters and flatten newlines.

@@ -173,6 +173,20 @@ type Component struct {
 	Paths []string
 	Tags  []string
 	Tech  string
+	// Container is the id of the parent container this component is declared
+	// inside, or "" for a flat (container-less) model.
+	Container string `json:",omitempty"`
+}
+
+// Container is one C4 container parsed from workspace.dsl — the level between
+// system and component. The parent system is deliberately not tracked: nugit
+// models a single-system subset, so containers are the top grouping level.
+type Container struct {
+	ID    string
+	Name  string
+	Paths []string
+	Tags  []string
+	Tech  string
 }
 
 // Relationship is a directed dependency between two components in the model.
@@ -186,6 +200,7 @@ type Relationship struct {
 type Model struct {
 	Name          string
 	Components    []Component
+	Containers    []Container
 	Relationships []Relationship
 	// Properties are model-level key/values (a Structurizr `properties` block).
 	Properties map[string]string
@@ -207,6 +222,33 @@ func (m Model) Comp(id string) (Component, bool) {
 	return Component{}, false
 }
 
+// Container returns the container with the given id, if present.
+func (m Model) Container(id string) (Container, bool) {
+	for _, ct := range m.Containers {
+		if ct.ID == id {
+			return ct, true
+		}
+	}
+	return Container{}, false
+}
+
+// ContainerOf returns the parent container id of the component with the given
+// id, or "" otherwise (unknown id, flat component, or id naming a container).
+func (m Model) ContainerOf(id string) string {
+	for _, c := range m.Components {
+		if c.ID == id {
+			return c.Container
+		}
+	}
+	return ""
+}
+
+// SameLineage reports whether a and b are the same element or one is the
+// other's parent container. Containment is never a flaggable dependency.
+func (m Model) SameLineage(a, b string) bool {
+	return a == b || m.ContainerOf(a) == b && b != "" || m.ContainerOf(b) == a && a != ""
+}
+
 // HasRelationship reports whether the model contains a src->dst edge.
 func (m Model) HasRelationship(src, dst string) bool {
 	for _, r := range m.Relationships {
@@ -217,6 +259,53 @@ func (m Model) HasRelationship(src, dst string) bool {
 	return false
 }
 
+// Covered reports whether a code-level src→dst dependency is legalized by the
+// model under two-level roll-up semantics (ADR-0017). Let A/B be the container
+// scopes of src/dst (an id that IS a container is its own scope):
+//
+//   - same lineage (containment) is never flagged;
+//   - within one container (A == B, non-empty), only a literal component edge
+//     covers — a container edge NEVER covers intra-container pairs;
+//   - across containers (or mixed levels), any declared edge over
+//     {src, A} × {dst, B} covers: component edge, container edge (roll-up),
+//     or mixed.
+//
+// Flat models (A == B == "") reduce exactly to HasRelationship.
+func (m Model) Covered(src, dst string) bool {
+	if m.SameLineage(src, dst) {
+		return true
+	}
+	a, b := m.scopeOf(src), m.scopeOf(dst)
+	if a != "" && a == b {
+		return m.HasRelationship(src, dst)
+	}
+	srcs := []string{src}
+	if a != "" && a != src {
+		srcs = append(srcs, a)
+	}
+	dsts := []string{dst}
+	if b != "" && b != dst {
+		dsts = append(dsts, b)
+	}
+	for _, s := range srcs {
+		for _, d := range dsts {
+			if m.HasRelationship(s, d) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// scopeOf returns the container scope of an id: the id itself when it names a
+// container, its parent container when it names a component, "" otherwise.
+func (m Model) scopeOf(id string) string {
+	if _, ok := m.Container(id); ok {
+		return id
+	}
+	return m.ContainerOf(id)
+}
+
 // ---- Deltas (all computed deterministically) ----
 
 // C4Delta is the structural diff of workspace.dsl between base and head.
@@ -224,6 +313,9 @@ type C4Delta struct {
 	AddedComponents   []Component
 	RemovedComponents []Component
 	ChangedComponents []ComponentChange
+	AddedContainers   []Container       `json:",omitempty"`
+	RemovedContainers []Container       `json:",omitempty"`
+	ChangedContainers []ContainerChange `json:",omitempty"`
 	AddedRels         []Relationship
 	RemovedRels       []Relationship
 	ChangedRels       []RelationshipChange
@@ -233,8 +325,9 @@ type C4Delta struct {
 
 func (d C4Delta) Empty() bool {
 	return len(d.AddedComponents) == 0 && len(d.RemovedComponents) == 0 &&
-		len(d.ChangedComponents) == 0 && len(d.AddedRels) == 0 &&
-		len(d.RemovedRels) == 0 && len(d.ChangedRels) == 0
+		len(d.ChangedComponents) == 0 && len(d.AddedContainers) == 0 &&
+		len(d.RemovedContainers) == 0 && len(d.ChangedContainers) == 0 &&
+		len(d.AddedRels) == 0 && len(d.RemovedRels) == 0 && len(d.ChangedRels) == 0
 }
 
 // RelationshipChange records an edge whose metadata (description) changed while
@@ -248,6 +341,13 @@ type RelationshipChange struct {
 type ComponentChange struct {
 	Before Component
 	After  Component
+	Fields []string // names of fields that changed
+}
+
+// ContainerChange records a non-structural change to a container (e.g. paths/tech).
+type ContainerChange struct {
+	Before Container
+	After  Container
 	Fields []string // names of fields that changed
 }
 

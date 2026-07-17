@@ -49,7 +49,7 @@ func TierOf(o model.KnowledgeObject, s Signals) model.Evidence {
 	}
 	bound := 0
 	for _, id := range comps {
-		if c, ok := s.Model.Comp(id); ok && len(c.Paths) > 0 {
+		if pathBound(s.Model, id) {
 			bound++
 		}
 	}
@@ -62,6 +62,29 @@ func TierOf(o model.KnowledgeObject, s Signals) model.Evidence {
 		return model.EvidenceEnforced
 	}
 	return model.EvidenceChecked
+}
+
+// pathBound reports whether a governed element id is bound to files: a
+// component with paths, a container with its own paths, or a container with at
+// least one path-bound child component. Flat models see only the first case —
+// behavior unchanged.
+func pathBound(m model.Model, id string) bool {
+	if c, ok := m.Comp(id); ok {
+		return len(c.Paths) > 0
+	}
+	ct, ok := m.Container(id)
+	if !ok {
+		return false
+	}
+	if len(ct.Paths) > 0 {
+		return true
+	}
+	for _, c := range m.Components {
+		if c.Container == id && len(c.Paths) > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // Annotate populates Evidence on every object in place (mirrors

@@ -110,6 +110,15 @@ func c4Section(d model.C4Delta) string {
 		return "_No change to `workspace.dsl`._\n"
 	}
 	var b strings.Builder
+	for _, ct := range d.AddedContainers {
+		fmt.Fprintf(&b, "- ➕ container **%s** (%s)\n", ct.ID, containerNameOr(ct))
+	}
+	for _, ct := range d.RemovedContainers {
+		fmt.Fprintf(&b, "- ➖ container **%s** (%s)\n", ct.ID, containerNameOr(ct))
+	}
+	for _, ct := range d.ChangedContainers {
+		fmt.Fprintf(&b, "- ± container **%s** changed: %s\n", ct.After.ID, strings.Join(ct.Fields, ", "))
+	}
 	for _, c := range d.AddedComponents {
 		fmt.Fprintf(&b, "- ➕ component **%s** (%s)\n", c.ID, nameOr(c))
 	}
@@ -325,6 +334,12 @@ func componentCount(d model.CodeDelta) int {
 
 func c4Summary(d model.C4Delta) string {
 	var ps []string
+	if n := len(d.AddedContainers); n > 0 {
+		ps = append(ps, fmt.Sprintf("+%d container(s)", n))
+	}
+	if n := len(d.RemovedContainers); n > 0 {
+		ps = append(ps, fmt.Sprintf("-%d container(s)", n))
+	}
 	if n := len(d.AddedComponents); n > 0 {
 		ps = append(ps, fmt.Sprintf("+%d component(s)", n))
 	}
@@ -335,12 +350,22 @@ func c4Summary(d model.C4Delta) string {
 		ps = append(ps, fmt.Sprintf("%d relationship change(s)", n))
 	}
 	if len(ps) == 0 {
+		if len(d.ChangedComponents) == 0 && len(d.ChangedRels) == 0 && len(d.ChangedContainers) > 0 {
+			return "container metadata changed"
+		}
 		return "component metadata changed"
 	}
 	return strings.Join(ps, ", ")
 }
 
 func nameOr(c model.Component) string {
+	if c.Name != "" {
+		return c.Name
+	}
+	return c.ID
+}
+
+func containerNameOr(c model.Container) string {
 	if c.Name != "" {
 		return c.Name
 	}

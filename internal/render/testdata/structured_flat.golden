@@ -1,0 +1,121 @@
+{
+  "BaseRef": "base",
+  "HeadRef": "head",
+  "Commits": [
+    {
+      "SHA": "0123456789abcdef",
+      "Subject": "feat: x",
+      "Body": "",
+      "Trailer": {
+        "Decision": "d",
+        "Rejected": "",
+        "Learned": "l",
+        "Affects": null,
+        "Spec": "",
+        "Keywords": [
+          "k"
+        ],
+        "Extra": null
+      }
+    }
+  ],
+  "C4": {
+    "AddedComponents": [
+      {
+        "ID": "b",
+        "Name": "B",
+        "Paths": [
+          "b/**"
+        ],
+        "Tags": null,
+        "Tech": ""
+      }
+    ],
+    "RemovedComponents": null,
+    "ChangedComponents": [
+      {
+        "Before": {
+          "ID": "a",
+          "Name": "A",
+          "Paths": null,
+          "Tags": null,
+          "Tech": ""
+        },
+        "After": {
+          "ID": "a",
+          "Name": "A2",
+          "Paths": null,
+          "Tags": null,
+          "Tech": ""
+        },
+        "Fields": [
+          "name"
+        ]
+      }
+    ],
+    "AddedRels": [
+      {
+        "Src": "a",
+        "Dst": "b",
+        "Desc": "uses"
+      }
+    ],
+    "RemovedRels": null,
+    "ChangedRels": null,
+    "RawDiff": ""
+  },
+  "Code": {
+    "Files": [
+      {
+        "Path": "a/a.go",
+        "Added": 3,
+        "Deleted": 1,
+        "Status": "M",
+        "Component": "a"
+      }
+    ],
+    "ByComp": {
+      "a": [
+        {
+          "Path": "a/a.go",
+          "Added": 3,
+          "Deleted": 1,
+          "Status": "M",
+          "Component": "a"
+        }
+      ]
+    },
+    "TotalAdd": 3,
+    "TotalDel": 1
+  },
+  "Knowledge": {
+    "Changes": null
+  },
+  "Plan": {
+    "Present": false,
+    "Completed": null,
+    "Current": "",
+    "Remaining": null,
+    "Note": "",
+    "NewlyCompleted": null,
+    "NewlyStarted": null,
+    "AddedItems": null,
+    "RemovedItems": null,
+    "Regressed": null
+  },
+  "Findings": [
+    {
+      "Check": "c4\u003c-\u003ecode",
+      "Severity": "fail",
+      "Title": "undeclared dependency a → c",
+      "Detail": "detail"
+    }
+  ],
+  "Significance": {
+    "Tier": "architectural",
+    "Reasons": [
+      "model changed"
+    ]
+  },
+  "Narrative": ""
+}

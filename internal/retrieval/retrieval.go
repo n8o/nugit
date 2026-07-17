@@ -94,6 +94,11 @@ func Context(opt Options) (Bundle, error) {
 	if comp == "" {
 		comp = mp.ResolveDir(path) // allow a directory argument
 	}
+	// Scope chain: knowledge scoped to the parent CONTAINER also applies to a
+	// path owned by a child component ("" when comp is flat or itself a
+	// container — flat models are untouched). Resolve may itself return a
+	// container id for container-owned paths.
+	parent := m.ContainerOf(comp)
 
 	b := Bundle{Path: opt.Path, Component: comp, BudgetTokens: budget}
 	b.C4 = c4Slice(m, comp)
@@ -128,7 +133,7 @@ func Context(opt Options) (Bundle, error) {
 
 	for i := range objs {
 		o := &objs[i]
-		if !inScope(o, comp) {
+		if !inScope(o, comp, parent) {
 			continue
 		}
 		switch o.Type {
@@ -143,7 +148,7 @@ func Context(opt Options) (Bundle, error) {
 		case model.KindSpec:
 			// One spec slot; a ratified spec displaces a proposed placeholder
 			// (ADR-0016) but never the other way around.
-			if relevant(o, comp, path) &&
+			if relevant(o, comp, parent) &&
 				(spec == nil || (spec.Status == string(model.StatusProposed) && o.Status != model.StatusProposed)) {
 				if spec != nil {
 					delete(pulled, spec.ID)

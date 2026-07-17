@@ -134,11 +134,14 @@ func (p *parser) next() (token, bool) {
 	return t, ok
 }
 
-// Only `component` carries a path binding and is recorded. `container` is a
-// transparent C4 grouping (system → container → component): like softwareSystem,
-// the parser descends into it and records the components inside, but the container
-// element itself is not a nugit component. Emitting components inside a container
-// is what makes the DSL valid Structurizr (components can't sit under a system).
+// `component` carries a path binding and is recorded as a nugit component.
+// `container` is ALSO recorded — as a first-class model.Container in its own
+// slice (never as a component, so flat consumers are untouched): the parser
+// descends into its body, records the components inside with their parent
+// container id, and routes container-level `properties` keys other than
+// paths/path to the model properties (the transparent-container behavior
+// Structural() has always relied on). softwareSystem/person and system-level
+// `group` blocks stay transparent.
 var elementKeywords = map[string]bool{
 	"component": true,
 }
@@ -193,22 +196,23 @@ func (p *parser) parseAssignment(id string) {
 	if !ok || kw.kind != tWord {
 		return
 	}
+	if kw.val == "container" {
+		p.parseContainer(id)
+		return
+	}
 	if !elementKeywords[kw.val] {
 		// e.g. softwareSystem / person — descend but don't record as component.
 		// Still consume an optional block so its inner components are seen.
 		p.consumeOptionalBlock()
 		return
 	}
+	p.m.Components = append(p.m.Components, p.parseComponent(id))
+}
+
+// parseComponent parses a component declaration after `id = component`.
+func (p *parser) parseComponent(id string) model.Component {
 	// collect positional strings: name [description] [technology]
-	var strs []string
-	for {
-		t, ok := p.peek()
-		if !ok || t.kind != tStr {
-			break
-		}
-		p.next()
-		strs = append(strs, t.val)
-	}
+	strs := p.positionalStrings()
 	comp := model.Component{ID: id}
 	if len(strs) > 0 {
 		comp.Name = strs[0]
@@ -223,7 +227,158 @@ func (p *parser) parseAssignment(id string) {
 	if t, ok := p.peek(); ok && t.kind == tLBrace {
 		p.parseComponentBlock(&comp)
 	}
-	p.m.Components = append(p.m.Components, comp)
+	return comp
+}
+
+// parseContainer parses a container declaration after `id = container` into a
+// first-class model.Container (positional strings mirror parseComponent).
+func (p *parser) parseContainer(id string) {
+	strs := p.positionalStrings()
+	ct := model.Container{ID: id}
+	if len(strs) > 0 {
+		ct.Name = strs[0]
+	}
+	if len(strs) > 2 {
+		ct.Tech = strs[2]
+	}
+	if len(strs) > 3 { // positional 4th arg is a comma-separated tag list
+		ct.Tags = append(ct.Tags, splitCommaList(strs[3])...)
+	}
+	if t, ok := p.peek(); ok && t.kind == tLBrace {
+		p.next() // consume '{'
+		p.parseContainerBody(&ct)
+	}
+	p.m.Containers = append(p.m.Containers, ct)
+}
+
+// parseContainerBody consumes a container block, recording nested components
+// (tagged with the container id), relationships, and container metadata.
+// `group` blocks inside a container are transparent — their contents belong to
+// the same container.
+func (p *parser) parseContainerBody(ct *model.Container) {
+	for {
+		t, ok := p.next()
+		if !ok || t.kind == tRBrace {
+			return
+		}
+		if t.kind != tWord {
+			if t.kind == tLBrace {
+				p.skipBlockBody()
+			}
+			continue
+		}
+		switch t.val {
+		case "technology":
+			if s, ok := p.peek(); ok && s.kind == tStr {
+				p.next()
+				ct.Tech = s.val
+			}
+		case "tags":
+			for {
+				s, ok := p.peek()
+				if !ok || s.kind != tStr {
+					break
+				}
+				p.next()
+				ct.Tags = append(ct.Tags, splitCommaList(s.val)...)
+			}
+		case "properties":
+			p.parseContainerProperties(ct)
+		case "group":
+			// A group inside a container is a transparent visual wrapper: recurse
+			// into it as if its contents sat directly in the container body.
+			p.positionalStrings()
+			if b, ok := p.peek(); ok && b.kind == tLBrace {
+				p.next()
+				p.parseContainerBody(ct)
+			}
+		default:
+			// IDENT = component ... — record the child with its parent container.
+			if nt, ok := p.peek(); ok && nt.kind == tEq {
+				p.next() // consume '='
+				kw, ok := p.next()
+				if !ok || kw.kind != tWord {
+					continue
+				}
+				if kw.val == "component" {
+					comp := p.parseComponent(t.val)
+					comp.Container = ct.ID
+					p.m.Components = append(p.m.Components, comp)
+					continue
+				}
+				// Other nested elements (rare, e.g. a mis-nested system): descend
+				// transparently so inner declarations are still seen.
+				p.positionalStrings()
+				if b, ok := p.peek(); ok && b.kind == tLBrace {
+					p.next()
+					p.parseContainerBody(ct)
+				}
+				continue
+			}
+			// Relationship inside the container: IDENT -> IDENT
+			if a, ok := p.peek(); ok && a.kind == tArrow {
+				p.next()
+				p.parseRelationship(t.val)
+				continue
+			}
+			// Unknown statement; if it opens a block, skip it.
+			if b, ok := p.peek(); ok && b.kind == tLBrace {
+				p.next()
+				p.skipBlockBody()
+			}
+		}
+	}
+}
+
+// parseContainerProperties reads a container-level properties block: paths/path
+// keys bind the container to files; EVERY other key merges into the model
+// properties, last-wins. The merge is a regression guard, not a convenience:
+// `nugit init` emits `"nugit_structural" "true"` inside the container block,
+// and Structural() must keep seeing it now that containers are parsed instead
+// of fallen through.
+func (p *parser) parseContainerProperties(ct *model.Container) {
+	t, ok := p.peek()
+	if !ok || t.kind != tLBrace {
+		return
+	}
+	p.next() // '{'
+	for {
+		k, ok := p.next()
+		if !ok || k.kind == tRBrace {
+			return
+		}
+		if k.kind != tWord && k.kind != tStr {
+			continue
+		}
+		v, ok := p.peek()
+		if !ok || v.kind != tStr {
+			continue
+		}
+		p.next()
+		if k.val == "paths" || k.val == "path" {
+			ct.Paths = append(ct.Paths, splitCommaList(v.val)...)
+			continue
+		}
+		if p.m.Properties == nil {
+			p.m.Properties = map[string]string{}
+		}
+		p.m.Properties[k.val] = v.val
+	}
+}
+
+// positionalStrings consumes and returns the run of quoted strings at the
+// cursor (an element's positional name/description/technology/tags arguments).
+func (p *parser) positionalStrings() []string {
+	var strs []string
+	for {
+		t, ok := p.peek()
+		if !ok || t.kind != tStr {
+			break
+		}
+		p.next()
+		strs = append(strs, t.val)
+	}
+	return strs
 }
 
 func (p *parser) parseComponentBlock(comp *model.Component) {

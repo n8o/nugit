@@ -13,6 +13,13 @@ import (
 // and each declared relationship becomes an allowed dependency. This gives a Go
 // team a second, independent enforcement of the same model in CI — deterministic
 // and derived, never hand-maintained.
+//
+// Two-level parity (ADR-0017): a container with its OWN paths is emitted as a
+// go-arch-lint component (paths-less wrapper containers are not emitted at
+// all), and a relationship endpoint naming a container rolls DOWN to its child
+// components (plus the container itself when path-bound) — go-arch-lint has no
+// container level, so the roll-up rule is expanded into the flat cross-product
+// it permits.
 func GenArchLint(m model.Model) string {
 	// Merge components by id (a duplicate id would otherwise emit a duplicate YAML
 	// key); union their path globs.
@@ -28,18 +35,57 @@ func GenArchLint(m model.Model) string {
 			ids = append(ids, cp.ID)
 		}
 	}
-	sort.Strings(ids)
-
-	// id -> allowed targets (only edges whose BOTH ends are real components).
-	allow := map[string][]string{}
-	for _, r := range m.Relationships {
-		if _, okS := byID[r.Src]; !okS {
+	// Containers with own paths join the emitted set; children stay indexed for
+	// endpoint expansion either way.
+	children := map[string][]string{}
+	for _, c := range m.Components {
+		if c.Container != "" {
+			children[c.Container] = append(children[c.Container], c.ID)
+		}
+	}
+	ctPathBound := map[string]bool{}
+	for i := range m.Containers {
+		ct := m.Containers[i]
+		if len(ct.Paths) == 0 {
 			continue
 		}
-		if _, okD := byID[r.Dst]; !okD {
-			continue // never emit a mayDependOn to a non-existent component
+		ctPathBound[ct.ID] = true
+		if ex, ok := byID[ct.ID]; ok {
+			ex.Paths = append(ex.Paths, ct.Paths...)
+		} else {
+			byID[ct.ID] = &model.Component{ID: ct.ID, Paths: append([]string(nil), ct.Paths...)}
+			ids = append(ids, ct.ID)
 		}
-		allow[r.Src] = append(allow[r.Src], r.Dst)
+	}
+	sort.Strings(ids)
+
+	// expand maps a relationship endpoint to the emitted components it stands
+	// for: a component is itself; a container is its child components plus
+	// itself when path-bound; anything else expands to nothing (edge dropped).
+	expand := func(id string) []string {
+		if _, ok := m.Container(id); ok {
+			out := append([]string(nil), children[id]...)
+			if ctPathBound[id] {
+				out = append(out, id)
+			}
+			return out
+		}
+		if _, ok := byID[id]; ok {
+			return []string{id}
+		}
+		return nil // never emit a mayDependOn touching a non-existent component
+	}
+
+	// id -> allowed targets (cross-product of both expanded endpoints).
+	allow := map[string][]string{}
+	for _, r := range m.Relationships {
+		srcs, dsts := expand(r.Src), expand(r.Dst)
+		if len(srcs) == 0 || len(dsts) == 0 {
+			continue
+		}
+		for _, s := range srcs {
+			allow[s] = append(allow[s], dsts...)
+		}
 	}
 
 	var b strings.Builder

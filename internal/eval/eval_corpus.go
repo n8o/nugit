@@ -33,6 +33,44 @@ var baseFiles = map[string]string{
 	"c/c.go": "package c\n\nfunc C() {}\n",
 }
 
+// leveledDSL builds a two-level fixture: containers X{x1,x2}, Y{y1} (Y also
+// binds its own ycore/** paths), Z{z1}, plus the given relationship lines.
+// Fully anonymized (redaction constraint: generic ids only, never pilot names).
+func leveledDSL(edges ...string) string {
+	s := `workspace "m" {
+  model {
+    sys = softwareSystem "m" {
+      X = container "X" {
+        x1 = component "X1" { properties { paths "x1/**" } }
+        x2 = component "X2" { properties { paths "x2/**" } }
+      }
+      Y = container "Y" {
+        properties { "paths" "ycore/**" }
+        y1 = component "Y1" { properties { paths "y1/**" } }
+      }
+      Z = container "Z" {
+        z1 = component "Z1" { properties { paths "z1/**" } }
+      }
+`
+	for _, e := range edges {
+		s += "      " + e + "\n"
+	}
+	return s + `    }
+  }
+}`
+}
+
+var leveledFiles = map[string]string{
+	"x1/x1.go":      "package x1\n\nfunc X1() {}\n",
+	"x2/x2.go":      "package x2\n\nfunc X2() {}\n",
+	"y1/y1.go":      "package y1\n\nfunc Y1() {}\n",
+	"ycore/core.go": "package ycore\n\nfunc Core() {}\n",
+	"z1/z1.go":      "package z1\n\nfunc Z1() {}\n",
+}
+
+const x1ImportsY1 = "package x1\n\nimport _ \"example.com/m/y1\"\n\nfunc X1() {}\n"
+const ycoreImportsZ1 = "package ycore\n\nimport _ \"example.com/m/z1\"\n\nfunc Core() {}\n"
+
 func adr(id, scope, supersedes string) string {
 	return adrWith(id, scope, "accepted", supersedes)
 }
@@ -165,6 +203,57 @@ var corpus = []Case{
 		Name:      "large-churn-single-component",
 		Head:      map[string]string{"a/a.go": bigFunc},
 		WantTier:  model.TierFeature, // > trivial churn threshold
+		WantClean: true,
+	},
+
+	// ---- two-level enforcement (ADR-0017): containers + roll-up ----
+	{
+		// Cross-container dependency declared at COMPONENT level: clean.
+		Name:      "leveled-component-edge-clean",
+		DSL:       leveledDSL("x1 -> y1"),
+		Base:      leveledFiles,
+		Head:      map[string]string{"x1/x1.go": x1ImportsY1},
+		WantTier:  model.TierTrivial,
+		WantClean: true,
+	},
+	{
+		// Same dependency declared ONLY as the container edge X -> Y: the
+		// roll-up covers it — clean.
+		Name:      "leveled-container-rollup-clean",
+		DSL:       leveledDSL("X -> Y"),
+		Base:      leveledFiles,
+		Head:      map[string]string{"x1/x1.go": x1ImportsY1},
+		WantTier:  model.TierTrivial,
+		WantClean: true,
+	},
+	{
+		// Undeclared at either level: fires and is architectural.
+		Name:       "leveled-cross-undeclared",
+		DSL:        leveledDSL(),
+		Base:       leveledFiles,
+		Head:       map[string]string{"x1/x1.go": x1ImportsY1},
+		WantTier:   model.TierArchitectural,
+		WantChecks: []string{"c4<->code", "decision-coverage"},
+		WantClean:  false,
+	},
+	{
+		// A file owned by the CONTAINER's own paths (ycore/**) importing a
+		// foreign child: fires with the container id as the source.
+		Name:       "leveled-container-src-undeclared",
+		DSL:        leveledDSL(),
+		Base:       leveledFiles,
+		Head:       map[string]string{"ycore/core.go": ycoreImportsZ1},
+		WantTier:   model.TierArchitectural,
+		WantChecks: []string{"c4<->code", "decision-coverage"},
+		WantClean:  false,
+	},
+	{
+		// Same import, container edge Y -> Z declared: clean.
+		Name:      "leveled-container-src-covered",
+		DSL:       leveledDSL("Y -> Z"),
+		Base:      leveledFiles,
+		Head:      map[string]string{"ycore/core.go": ycoreImportsZ1},
+		WantTier:  model.TierTrivial,
 		WantClean: true,
 	},
 }

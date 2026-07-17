@@ -6,13 +6,18 @@ import "sort"
 // a finding is never an opaque block — `nugit explain <check>` reads these.
 var explanations = map[string]string{
 	"c4<->code": "Go code introduced an import edge between two C4 components that workspace.dsl does not declare.\n" +
-		"Fix: add the `src -> dst` relationship to the model, or remove the import.",
+		"Fix: add the `src -> dst` relationship to the model, or remove the import.\n" +
+		"In a leveled model the check spans both levels: a container edge `A -> B` also covers every cross-container\n" +
+		"component dependency from A into B (roll-up), but intra-container pairs are only ever covered by a component-level edge.",
 	"cmake<->code": "CMake target_link_libraries links two components the model does not declare.\n" +
-		"Fix: add the `src -> dst` relationship to workspace.dsl, or remove the link.",
+		"Fix: add the `src -> dst` relationship to workspace.dsl, or remove the link.\n" +
+		"In a leveled model a container edge `A -> B` also covers cross-container component links (roll-up); intra-container pairs need a component-level edge.",
 	"python<->code": "A Python import crosses two components the model does not declare.\n" +
-		"Fix: add the `src -> dst` relationship to workspace.dsl, or remove the import.",
+		"Fix: add the `src -> dst` relationship to workspace.dsl, or remove the import.\n" +
+		"In a leveled model a container edge `A -> B` also covers cross-container component imports (roll-up); intra-container pairs need a component-level edge.",
 	"ts<->code": "A TypeScript/JS import crosses two components the model does not declare (resolved by dependency-cruiser).\n" +
-		"Fix: add the `src -> dst` relationship, remove the import, or install dependency-cruiser to enforce TS edges.",
+		"Fix: add the `src -> dst` relationship, remove the import, or install dependency-cruiser to enforce TS edges.\n" +
+		"In a leveled model a container edge `A -> B` also covers cross-container component imports (roll-up); intra-container pairs need a component-level edge.",
 	"stale-knowledge": "The PR changes code governed by a superseded/invalidated knowledge object without updating it.\n" +
 		"Fix: update the object, or supersede it with a new record.",
 	"decision-coverage": "An architecturally-significant change has no accompanying decision record.\n" +
@@ -22,8 +27,9 @@ var explanations = map[string]string{
 		"Fix: add the spec under .nugit/**/specs/, or correct the reference.",
 	"capture-hygiene": "A commit trailer block is present but missing a mandatory field (learned:/keywords:).\n" +
 		"Fix: add the field, or drop the trailer block.",
-	"model-health": "workspace.dsl has a duplicate component id or an invalid path glob.\n" +
-		"Fix: rename/merge the duplicate, or correct the glob.",
+	"model-health": "workspace.dsl has a duplicate element id (components and containers share one namespace), an invalid\n" +
+		"path glob, or a relationship endpoint that names no declared component or container.\n" +
+		"Fix: rename/merge the duplicate, correct the glob, or fix/declare the endpoint.",
 }
 
 // topics documents cross-cutting concepts that are not check ids (kept apart

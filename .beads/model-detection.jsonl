@@ -3,4 +3,4 @@
 {"id":"DETECT-2","title":"DockerfileDetector (spine) + CMake install(RUNTIME) cross-check -> container inventory with confidence tiers + evidence","issue_type":"task","status":"closed"}
 {"id":"DETECT-3","title":"K8sImageDetector — first-party image gate + deploy confirm (helm render)","issue_type":"task","status":"closed"}
 {"id":"DETECT-4","title":"Grounded-agent bootstrap — subsystem grouping/naming + resolve the NEEDS-AGENT long tail","issue_type":"task","status":"closed"}
-{"id":"DETECT-5","title":"Extend c4<->code enforcement to span container + component levels","issue_type":"task","status":"open"}
+{"id":"DETECT-5","title":"Extend c4<->code enforcement to span container + component levels","issue_type":"task","status":"in_progress"}
