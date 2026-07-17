@@ -23,6 +23,11 @@ not re-propose those), the active spec, matched lessons, matched references,
 glossary, and any ephemeral working-memory notes. Read it before proposing a
 change.
 
+If the `nugit` MCP server isn't wired into the client yet, `nugit agent` is the
+wiring path: `nugit agent -client claude-code -install` writes the
+project-scoped `.mcp.json`; `nugit agent -client cursor|codex|opencode` prints
+the snippet for that client plus where it goes.
+
 To feed external research in (papers, vendor docs, standards): distill the
 project-relevant claims into `.nugit/references/<slug>.md` (front-matter with
 `type: reference`, `source:` URL, scope + keywords; `relates_to: [informs:<ADR>]`

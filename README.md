@@ -88,6 +88,25 @@ go build -o nugit ./cmd/nugit
 Exit code is non-zero when a finding reaches `-fail-on` severity (default `fail`),
 so it drops straight into CI.
 
+### Wiring your agent
+
+Capture works out of the box, but retrieval stays dark until your coding agent
+knows how to launch `nugit mcp`. `nugit agent` prints (or installs) the exact
+per-client MCP config:
+
+```sh
+nugit agent -client claude-code -install   # writes project-scoped .mcp.json (never merges; -force overwrites)
+nugit agent -client cursor                 # snippet for ~/.cursor/mcp.json (absolute repo path baked in)
+nugit agent -client codex                  # TOML snippet for ~/.codex/config.toml
+nugit agent -client opencode               # snippet for opencode.json in the project
+nugit agent -client generic                # plain mcpServers JSON for any MCP-aware client
+```
+
+`-install` supports claude-code only, because its `.mcp.json` is project-scoped;
+the user-global configs (cursor, codex) are printed with the resolved absolute
+repo path so you can merge them by hand. Use `-bin /path/to/nugit` if the binary
+isn't on the client's `PATH`.
+
 ### In CI (composite Action)
 
 ```yaml

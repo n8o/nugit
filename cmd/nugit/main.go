@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/n8o/nugit/internal/agentcfg"
 	"github.com/n8o/nugit/internal/c4"
 	"github.com/n8o/nugit/internal/config"
 	"github.com/n8o/nugit/internal/consistency"
@@ -40,16 +41,30 @@ const usage = `nugit — git-native PR view (thin keystone)
 
 usage:
   nugit init [flags]          scaffold .nugit/ and bootstrap a C4 model
+  nugit agent [flags]         print/install the MCP wiring config for a coding agent
   nugit context [flags]       scoped, typed knowledge bundle for a path (for agents)
   nugit mcp [flags]           run the MCP stdio server (exposes context() to agents)
   nugit stats [flags]         aggregate the local context() usage log
+  nugit remember [flags]      jot ephemeral working memory (.nugit-local/, gitignored)
   nugit distill [flags]       promote commit-trailer decisions/lessons to durable knowledge
+  nugit hook commit-msg <f>   git hook entrypoint: validate the commit-trailer block
   nugit c4 render [flags]      render the C4 model as Mermaid
   nugit c4 preview [flags]     live C4 diagrams via local Structurizr renderer (Docker)
   nugit deploy [flags]        deterministic deployable-container inventory (Dockerfiles + CMake)
+  nugit model facts [flags]   deterministic grounding bundle for the bootstrap agent
+  nugit doctor [flags]        setup pre-flight health checks
+  nugit obsidian [flags]      (re)generate .nugit/INDEX.md for the Obsidian vault
+  nugit notion publish [flags] publish the knowledge corpus to a Notion database
   nugit explain [check]       rationale + remediation for a consistency check
   nugit pr-render [flags]      compute & render the unified PR view
   nugit version
+
+agent flags:
+  -C dir         repo directory (default ".")
+  -client c      claude-code (default) | cursor | codex | opencode | generic
+  -install       write the config file (claude-code only; others print the snippet)
+  -force         with -install: overwrite an existing .mcp.json
+  -bin path      nugit binary to embed (default "nugit", resolved from PATH)
 
 context flags:
   -C dir         repo directory (default ".")
@@ -83,6 +98,8 @@ func main() {
 	switch os.Args[1] {
 	case "init":
 		os.Exit(cmdInit(os.Args[2:]))
+	case "agent":
+		os.Exit(cmdAgent(os.Args[2:]))
 	case "context":
 		os.Exit(cmdContext(os.Args[2:]))
 	case "mcp":
@@ -221,6 +238,53 @@ func cmdInit(args []string) int {
 		fmt.Printf("A workspace.dsl already exists (left unchanged); discovered %d component(s), %d edge(s). Use -force to regenerate.\n",
 			res.Components, res.Edges)
 	}
+	fmt.Println()
+	fmt.Println("Wire your coding agent (exposes the context() MCP tool):")
+	fmt.Println("  nugit agent -client claude-code -install     # writes .mcp.json in this repo")
+	fmt.Println("  nugit agent -client cursor|codex|opencode    # prints the snippet + where it goes")
+	return 0
+}
+
+// cmdAgent prints (or, for claude-code, installs) the MCP config that wires
+// `nugit mcp` into a coding agent — the missing step between capture (which
+// works out of the box) and retrieval (which stays dark until the client
+// knows how to launch the server).
+func cmdAgent(args []string) int {
+	fs := flag.NewFlagSet("agent", flag.ExitOnError)
+	dir := fs.String("C", ".", "repo directory")
+	client := fs.String("client", "claude-code", "coding agent: claude-code|cursor|codex|opencode|generic")
+	install := fs.Bool("install", false, "write the config file (claude-code only)")
+	force := fs.Bool("force", false, "with -install: overwrite an existing .mcp.json")
+	bin := fs.String("bin", "", "nugit binary to embed (default \"nugit\", resolved from PATH)")
+	_ = fs.Parse(args)
+
+	c := agentcfg.Client(*client)
+	text, dest, err := agentcfg.Snippet(c, *dir, *bin)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "nugit agent: %v\n", err)
+		return 2
+	}
+	if !*install {
+		fmt.Print(text)
+		fmt.Printf("\n→ put this in %s\n", dest)
+		return 0
+	}
+	if c != agentcfg.ClaudeCode {
+		fmt.Fprintf(os.Stderr, "nugit agent: -install only supports claude-code (its config is project-scoped); for %s, merge this snippet into %s yourself:\n\n%s", c, dest, text)
+		return 2
+	}
+	created, path, err := agentcfg.InstallClaudeCode(*dir, *bin, *force)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "nugit agent: %v\n", err)
+		return 1
+	}
+	if !created {
+		fmt.Printf("  skipped  %s (exists — never merged automatically; -force to overwrite)\n\n", path)
+		fmt.Printf("Merge this snippet manually:\n\n%s", text)
+		return 0
+	}
+	fmt.Printf("  created  %s\n", path)
+	fmt.Println("Restart Claude Code in this repo to pick up the nugit MCP server (context tool).")
 	return 0
 }
 

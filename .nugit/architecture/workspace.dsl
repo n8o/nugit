@@ -169,6 +169,11 @@ workspace "nugit" "Git-native typed knowledge & unified PR view — self-model (
                     "paths" "internal/modelfacts/**"
                 }
             }
+            agentcfg = component "Agent wiring" "Per-client MCP config snippets + claude-code install (nugit agent)" "Go" {
+                properties {
+                    "paths" "internal/agentcfg/**"
+                }
+            }
             cli = component "CLI" "nugit command entrypoint" "Go" {
                 properties {
                     "paths" "cmd/nugit/**"
@@ -283,6 +288,7 @@ workspace "nugit" "Git-native typed knowledge & unified PR view — self-model (
             cli -> obsidian "obsidian command"
             cli -> deploy "deploy command"
             cli -> modelfacts "model facts command"
+            cli -> agentcfg "agent command"
 
             modelfacts -> deploy "reads the container inventory"
             modelfacts -> cmake "reads the dependency edges"
