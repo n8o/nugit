@@ -58,6 +58,30 @@ Requirements: `claude` CLI, `nugit` on PATH, `jq`, and a target repo with a
 `.nugit/` store. Runs are billed agent invocations — size `tasks.json × -n × 2`
 accordingly.
 
+## Joining usage to outcomes
+
+Usage records carry the git branch they were served on (`branch` field; empty
+when the repo dir isn't a git repo, `"HEAD"` when detached), which makes the
+branch the join key between the two halves of the measurement question —
+without any harness at all, on real day-to-day branches:
+
+```sh
+# per-branch context() usage (how much memory was pulled, per branch)
+nugit stats -format json | jq '.by_branch'
+
+# per-branch outcomes (what pr-render found on that branch's diff)
+nugit pr-render -base <target> -head <branch> -format json | jq '.findings | length'
+```
+
+Correlate the two across branches: if branches with heavy `context()` use
+consistently land with fewer findings than branches without, the memory is
+earning its keep. Records also carry `references` (distilled external sources
+served per bundle) so reference-heavy bundles can be sliced out separately.
+
+All of this is local-only: the usage log lives in gitignored
+`.nugit/.cache/usage.jsonl` and never leaves the repo — no telemetry
+(ADR-0013).
+
 ## Caveats (read before quoting numbers)
 
 - pr-render findings measure *architecture/knowledge conformance*, not task

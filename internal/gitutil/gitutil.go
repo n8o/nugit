@@ -51,6 +51,18 @@ func (r Repo) Prefix() string {
 	return strings.TrimSpace(out)
 }
 
+// CurrentBranch returns the branch HEAD points at (`git rev-parse
+// --abbrev-ref HEAD`), trimmed. It returns "" on any error (e.g. not a git
+// repo, or an unborn branch with no commits); a detached HEAD returns the
+// literal string "HEAD" verbatim, exactly as git reports it.
+func (r Repo) CurrentBranch() string {
+	out, err := r.git("rev-parse", "--abbrev-ref", "HEAD")
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(out)
+}
+
 // HooksDir returns the absolute path of the repo's git hooks directory, or ""
 // when Dir is not in a git repo.
 func (r Repo) HooksDir() string {
