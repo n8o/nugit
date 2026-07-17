@@ -188,9 +188,13 @@ func runCase(c Case) CaseResult {
 }
 
 // Run executes the whole corpus and aggregates metrics.
-func Run() Metrics {
+func Run() Metrics { return RunSet(corpus) }
+
+// RunSet executes any labeled case set and aggregates metrics (used by the
+// main corpus and the adversarial spoof set).
+func RunSet(cases []Case) Metrics {
 	var m Metrics
-	for _, c := range corpus {
+	for _, c := range cases {
 		r := runCase(c)
 		m.Cases = append(m.Cases, r)
 		m.N++
