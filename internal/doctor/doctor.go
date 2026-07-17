@@ -5,8 +5,11 @@
 package doctor
 
 import (
+	"encoding/json"
 	"fmt"
+	"math"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -21,20 +24,38 @@ import (
 
 // Check is one health probe.
 type Check struct {
-	Name   string
-	OK     bool
-	Detail string
+	Name string
+	OK   bool
+	// Advisory checks inform without gating: they never affect AllOK or the
+	// doctor exit code (e.g. "MCP wired" — useful, not mandatory).
+	Advisory bool
+	Detail   string
+}
+
+// StoreHealth is a descriptive (never gating) snapshot of the knowledge store.
+type StoreHealth struct {
+	ByType   map[string]int // decision / lesson / spec / reference / glossary
+	ByStatus map[string]int // effective status counts
+	Untyped  int            // files invisible to retrieval (silent-untype)
+	// OrphanComponents have zero scoped knowledge (scope match only; edges
+	// deliberately not counted — this measures where capture is thin).
+	OrphanComponents []string
+	ProposedPending  int // candidate lane awaiting `nugit ratify` (ADR-0016)
+	Score            int // 0..100, descriptive only — see Reasons
+	Reasons          []string
 }
 
 // Report is the full pre-flight result.
 type Report struct {
 	Checks []Check
+	// Health is nil when the store failed to load.
+	Health *StoreHealth
 }
 
-// AllOK reports whether every check passed.
+// AllOK reports whether every gating (non-advisory) check passed.
 func (r Report) AllOK() bool {
 	for _, c := range r.Checks {
-		if !c.OK {
+		if !c.OK && !c.Advisory {
 			return false
 		}
 	}
@@ -78,9 +99,138 @@ func Run(repoDir string) Report {
 
 	// Informational, never a pre-flight failure (OK is always true): proposed
 	// objects are a healthy candidate lane (ADR-0016), just one awaiting review.
-	add("proposed objects pending ratification", true, pendingDetail(objs))
+	r.Checks = append(r.Checks, Check{Name: "proposed objects pending ratification",
+		OK: true, Advisory: true, Detail: pendingDetail(objs)})
+
+	wired, wdetail := mcpWired(repoDir)
+	r.Checks = append(r.Checks, Check{Name: "MCP wired", OK: wired, Advisory: true, Detail: wdetail})
+
+	if kerr == nil {
+		h := storeHealth(m, objs, len(bad))
+		r.Health = &h
+	}
 
 	return r
+}
+
+// mcpJSON is the subset of .mcp.json doctor inspects.
+type mcpJSON struct {
+	Servers map[string]struct {
+		Command string   `json:"command"`
+		Args    []string `json:"args"`
+	} `json:"mcpServers"`
+}
+
+// mcpWired reports whether .mcp.json exposes the context() MCP tool — i.e.
+// some server entry runs `nugit ... mcp`. Advisory: retrieval works without
+// it, but agents can't call context() until it's wired.
+func mcpWired(repoDir string) (bool, string) {
+	b, err := os.ReadFile(filepath.Join(repoDir, ".mcp.json"))
+	if err != nil {
+		return false, "no .mcp.json — run `nugit agent -client claude-code -install`" + lookPathHint()
+	}
+	var cfg mcpJSON
+	if json.Unmarshal(b, &cfg) != nil {
+		return false, ".mcp.json is not valid JSON"
+	}
+	var matches []string
+	for name, s := range cfg.Servers {
+		hasMCP := false
+		for _, a := range s.Args {
+			if a == "mcp" {
+				hasMCP = true
+			}
+		}
+		if strings.Contains(s.Command, "nugit") && hasMCP {
+			matches = append(matches, name)
+		}
+	}
+	if len(matches) == 0 {
+		return false, ".mcp.json has no nugit mcp server — run `nugit agent -client claude-code -install`"
+	}
+	sort.Strings(matches)
+	return true, fmt.Sprintf("server %q runs nugit mcp", matches[0]) + lookPathHint()
+}
+
+func lookPathHint() string {
+	if _, err := exec.LookPath("nugit"); err != nil {
+		return " (nugit is not on PATH — `go install github.com/n8o/nugit/cmd/nugit@latest`)"
+	}
+	return ""
+}
+
+// storeHealth summarizes the knowledge store descriptively. The score is a
+// direction indicator with reasons, never a gate — doctor's exit code ignores
+// it by design (a number to move, not a number to fail on).
+func storeHealth(m model.Model, objs []model.KnowledgeObject, untyped int) StoreHealth {
+	h := StoreHealth{ByType: map[string]int{}, ByStatus: map[string]int{}, Untyped: untyped}
+	scoped := map[string]bool{}
+	for _, o := range objs {
+		if o.ID == "" || o.Type == "" {
+			continue
+		}
+		h.ByType[string(o.Type)]++
+		st := o.EffectiveStatus
+		if st == "" {
+			st = o.Status
+		}
+		if st != "" {
+			h.ByStatus[string(st)]++
+		}
+		if o.Status == model.StatusProposed &&
+			o.EffectiveStatus != model.StatusSuperseded && o.EffectiveStatus != model.StatusInvalidated {
+			h.ProposedPending++
+		}
+		if o.Scope != "" && o.Scope != "global" {
+			scoped[o.Scope] = true
+		}
+	}
+	for _, c := range m.Components {
+		if !scoped[c.ID] {
+			h.OrphanComponents = append(h.OrphanComponents, c.ID)
+		}
+	}
+	sort.Strings(h.OrphanComponents)
+
+	score := 100
+	deduct := func(points int, reason string) {
+		score -= points
+		h.Reasons = append(h.Reasons, reason)
+	}
+	if untyped > 0 {
+		p := 15 * untyped
+		if p > 30 {
+			p = 30
+		}
+		deduct(p, fmt.Sprintf("%d file(s) invisible to retrieval (untyped front-matter)", untyped))
+	}
+	if n, total := len(h.OrphanComponents), len(m.Components); n > 0 && total > 0 {
+		deduct(int(math.Round(40*float64(n)/float64(total))),
+			fmt.Sprintf("%d/%d component(s) have no scoped knowledge", n, total))
+	}
+	if h.ByType["decision"]+h.ByType["lesson"] == 0 && len(m.Components) > 0 {
+		deduct(20, "no captured decisions or lessons yet")
+	}
+	if h.ProposedPending > 0 {
+		p := 5 * h.ProposedPending
+		if p > 15 {
+			p = 15
+		}
+		deduct(p, fmt.Sprintf("%d distilled object(s) awaiting review (`nugit ratify -list`)", h.ProposedPending))
+	}
+	if score < 0 {
+		score = 0
+	}
+	h.Score = score
+	return h
+}
+
+// CountsLine renders the store composition on one line, fixed order.
+func (h StoreHealth) CountsLine() string {
+	left := fmt.Sprintf("decisions: %d  lessons: %d  specs: %d  references: %d",
+		h.ByType["decision"], h.ByType["lesson"], h.ByType["spec"], h.ByType["reference"])
+	right := fmt.Sprintf("proposed: %d  superseded: %d", h.ProposedPending, h.ByStatus["superseded"])
+	return left + " | " + right
 }
 
 // pendingDetail summarizes the candidate lane: proposed objects that are still

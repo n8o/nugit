@@ -1,6 +1,7 @@
 package retrieval
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -239,7 +240,7 @@ func TestAmendedDecisionStaysLiveAndAnnotated(t *testing.T) {
 		t.Error("the amending decision must be in the bundle too")
 	}
 	md := b.Markdown()
-	if !strings.Contains(md, "accepted, amended by ADR-AMEND") ||
+	if !strings.Contains(md, "amended by ADR-AMEND") ||
 		!strings.Contains(md, "read together with ADR-AMEND") {
 		t.Errorf("markdown must annotate the amendment:\n%s", md)
 	}
@@ -276,11 +277,11 @@ func TestProposedIncludedLabeledAndDroppedFirst(t *testing.T) {
 		t.Errorf("accepted must rank before proposed at equal scope, got %s, %s", b.Decisions[0].ID, b.Decisions[1].ID)
 	}
 	md := b.Markdown()
-	if !strings.Contains(md, "proposed — unratified") {
-		t.Errorf("proposed decision must be labeled unratified in markdown:\n%s", md)
+	if !strings.Contains(md, "proposed · unratified") {
+		t.Errorf("proposed decision must be labeled status · tier in markdown:\n%s", md)
 	}
-	if !strings.Contains(md, "`LESSON-P` (proposed)") {
-		t.Errorf("proposed lesson must carry a (proposed) suffix:\n%s", md)
+	if !strings.Contains(md, "`LESSON-P` _[unratified]_") {
+		t.Errorf("proposed lesson must carry a tier suffix:\n%s", md)
 	}
 
 	// Squeeze the budget so the decisions bucket itself overflows by one token
@@ -300,5 +301,49 @@ func TestProposedIncludedLabeledAndDroppedFirst(t *testing.T) {
 	}
 	if kept["ADR-AAA"] {
 		t.Errorf("proposed decision must drop before accepted under budget pressure; kept: %v", kept)
+	}
+}
+
+// Trust tiers surface on context() items and respond to enforcement signals:
+// enforce mode + Go backend -> enforced; warn mode -> checked. Bundle JSON
+// carries the tier label but never path globs.
+func TestContextTiers(t *testing.T) {
+	dir := t.TempDir()
+	wf(t, dir, "go.mod", "module example.com/x\n\ngo 1.25\n")
+	wf(t, dir, ".nugit/architecture/workspace.dsl", `workspace "m" {
+  model { sys = softwareSystem "m" {
+    render = component "R" { properties { paths "internal/render/**" } }
+  } }
+}`)
+	wf(t, dir, ".nugit/decisions/r.md", obj("ADR-R", "decision", "render", "the rule", ""))
+
+	b, err := Context(Options{RepoDir: dir, Path: "internal/render/render.go"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(b.Decisions) != 1 || b.Decisions[0].Tier != "enforced" {
+		t.Fatalf("enforce mode + Go backend must yield tier enforced, got %+v", b.Decisions)
+	}
+	if md := b.Markdown(); !strings.Contains(md, "accepted · enforced") {
+		t.Errorf("markdown must label status · tier:\n%s", md)
+	}
+	js, err := json.Marshal(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(js), `"tier":"enforced"`) {
+		t.Errorf("bundle JSON must carry the tier: %s", js)
+	}
+	if strings.Contains(string(js), "render/**") {
+		t.Errorf("bundle JSON must never carry path globs: %s", js)
+	}
+
+	wf(t, dir, ".nugit/config.yml", "schema_version: 1\nc4:\n  mode: warn\n")
+	b2, err := Context(Options{RepoDir: dir, Path: "internal/render/render.go"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b2.Decisions[0].Tier != "checked" {
+		t.Errorf("warn mode must degrade the tier to checked, got %q", b2.Decisions[0].Tier)
 	}
 }

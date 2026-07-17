@@ -285,6 +285,7 @@ workspace "nugit" "Git-native typed knowledge & unified PR view — self-model (
             evidence -> tsdeps "checks dependency-cruiser availability"
             consistency -> evidence "governed-components resolver"
             engine -> evidence "annotates trust tiers"
+            retrieval -> evidence "annotates bundle items"
             cli -> localmem "remember command"
             cli -> trailers "commit-msg hook validation"
             cli -> c4 "c4 render command"

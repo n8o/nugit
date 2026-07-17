@@ -12,6 +12,7 @@ import (
 
 	"github.com/n8o/nugit/internal/c4"
 	"github.com/n8o/nugit/internal/config"
+	"github.com/n8o/nugit/internal/evidence"
 	"github.com/n8o/nugit/internal/knowledge"
 	"github.com/n8o/nugit/internal/localmem"
 	"github.com/n8o/nugit/internal/mapping"
@@ -31,10 +32,13 @@ const DefaultBudgetTokens = 4000
 
 // Item is one returned knowledge object (decision / spec / lesson).
 type Item struct {
-	ID       string `json:"id"`
-	Type     string `json:"type"`
-	Scope    string `json:"scope"`
-	Status   string `json:"status"`
+	ID     string `json:"id"`
+	Type   string `json:"type"`
+	Scope  string `json:"scope"`
+	Status string `json:"status"`
+	// Tier is the derived trust tier (enforced/checked/declared/proposed/
+	// stale) — how much of this item nugit mechanically verifies.
+	Tier     string `json:"tier,omitempty"`
 	Path     string `json:"path"`
 	Summary  string `json:"summary"`
 	Rejected string `json:"rejected,omitempty"` // the anti-hallucination field
@@ -98,6 +102,13 @@ func Context(opt Options) (Bundle, error) {
 	if err != nil {
 		return b, err
 	}
+	// Trust tiers (never authored): the agent reading this bundle sees how much
+	// of each item nugit mechanically verifies.
+	evidence.Annotate(objs, evidence.Signals{
+		Model:   m,
+		Enforce: !cfg.C4Warn(),
+		Backend: evidence.BackendActive(opt.RepoDir),
+	})
 	byKey := map[string]*model.KnowledgeObject{}
 	for i := range objs {
 		if objs[i].ID != "" {
@@ -130,7 +141,13 @@ func Context(opt Options) (Bundle, error) {
 			decisions = append(decisions, toItem(o, ""))
 			pulled[o.ID] = true
 		case model.KindSpec:
-			if spec == nil && relevant(o, comp, path) {
+			// One spec slot; a ratified spec displaces a proposed placeholder
+			// (ADR-0016) but never the other way around.
+			if relevant(o, comp, path) &&
+				(spec == nil || (spec.Status == string(model.StatusProposed) && o.Status != model.StatusProposed)) {
+				if spec != nil {
+					delete(pulled, spec.ID)
+				}
 				it := toItem(o, "")
 				spec = &it
 				pulled[o.ID] = true

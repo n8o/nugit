@@ -469,8 +469,18 @@ func cmdDoctor(args []string) int {
 		mark := "✓"
 		if !c.OK {
 			mark = "✗"
+			if c.Advisory {
+				mark = "-" // advisory: informative, never gates
+			}
 		}
 		fmt.Printf("  %s %s — %s\n", mark, c.Name, c.Detail)
+	}
+	if h := r.Health; h != nil {
+		fmt.Printf("\n  store health: %d/100\n", h.Score)
+		for _, reason := range h.Reasons {
+			fmt.Printf("    - %s\n", reason)
+		}
+		fmt.Printf("  %s\n", h.CountsLine())
 	}
 	if !r.AllOK() {
 		fmt.Println("\nSome checks failed. Run `nugit init` or fix the items above.")
