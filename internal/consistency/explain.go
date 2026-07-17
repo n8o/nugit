@@ -16,7 +16,8 @@ var explanations = map[string]string{
 	"stale-knowledge": "The PR changes code governed by a superseded/invalidated knowledge object without updating it.\n" +
 		"Fix: update the object, or supersede it with a new record.",
 	"decision-coverage": "An architecturally-significant change has no accompanying decision record.\n" +
-		"Fix: add an ADR under .nugit/decisions/ (or a `decision:` commit trailer).",
+		"A `status: proposed` ADR is a candidate, not ratified knowledge, so it does not satisfy this check (ADR-0016).\n" +
+		"Fix: add an ADR under .nugit/decisions/ (or a `decision:` commit trailer); ratify a proposed ADR with `nugit ratify <id>`.",
 	"spec-linkage": "A commit references a spec id that has no matching object in-tree.\n" +
 		"Fix: add the spec under .nugit/**/specs/, or correct the reference.",
 	"capture-hygiene": "A commit trailer block is present but missing a mandatory field (learned:/keywords:).\n" +

@@ -532,8 +532,9 @@ func cmdDistill(args []string) int {
 	base := fs.String("base", "HEAD~1", "base ref")
 	head := fs.String("head", "HEAD", "head ref")
 	min := fs.Int("min-recur", 2, "min recurrences for a lesson to promote")
+	status := fs.String("status", "proposed", "minted status: proposed | ratified")
 	_ = fs.Parse(args)
-	res, err := distill.Distill(distill.Options{RepoDir: *dir, Base: *base, Head: *head, MinRecur: *min})
+	res, err := distill.Distill(distill.Options{RepoDir: *dir, Base: *base, Head: *head, MinRecur: *min, Status: *status})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "nugit distill: %v\n", err)
 		return 1
@@ -546,8 +547,10 @@ func cmdDistill(args []string) int {
 	}
 	if len(res.Decisions) == 0 && len(res.Lessons) == 0 {
 		fmt.Printf("Nothing to promote (%d already in the store).\n", res.Skipped)
-	} else {
+	} else if *status == "ratified" {
 		fmt.Printf("\nPromoted %d decision(s), %d lesson(s). Review and commit them with the PR.\n", len(res.Decisions), len(res.Lessons))
+	} else {
+		fmt.Printf("\nPromoted %d decision(s), %d lesson(s) as proposed. Review, commit with the PR, then ratify with 'nugit ratify <id>'.\n", len(res.Decisions), len(res.Lessons))
 	}
 	return 0
 }

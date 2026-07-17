@@ -244,3 +244,61 @@ func TestAmendedDecisionStaysLiveAndAnnotated(t *testing.T) {
 		t.Errorf("markdown must annotate the amendment:\n%s", md)
 	}
 }
+
+func objWith(id, typ, scope, status, body string) string {
+	return "---\nschema_version: 1\nid: " + id + "\ntype: " + typ + "\nscope: " + scope +
+		"\nstatus: " + status + "\ncreated: 2026-01-01T00:00:00Z\nprovenance:\n  commit: x\n---\n\n# " + id + " title\n\n" + body + "\n"
+}
+
+// ADR-0016 candidate lane: proposed objects stay in the bundle, labeled, but
+// rank below ratified peers at equal scope and are truncated first.
+func TestProposedIncludedLabeledAndDroppedFirst(t *testing.T) {
+	dir := t.TempDir()
+	wf(t, dir, ".nugit/architecture/workspace.dsl", `workspace "m" {
+  model { sys = softwareSystem "m" {
+    render = component "R" { properties { paths "internal/render/**" } }
+  } }
+}`)
+	// Proposed id sorts alphabetically FIRST so the test proves status rank,
+	// not id order, decides placement.
+	wf(t, dir, ".nugit/decisions/aaa.md", objWith("ADR-AAA", "decision", "render", "proposed", "draft decision"))
+	wf(t, dir, ".nugit/decisions/zzz.md", objWith("ADR-ZZZ", "decision", "render", "accepted", "ratified decision"))
+	wf(t, dir, ".nugit/lessons/p.md", objWith("LESSON-P", "lesson", "render", "proposed", "draft lesson"))
+
+	b, err := Context(Options{RepoDir: dir, Path: "internal/render/render.go"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(b.Decisions) != 2 {
+		t.Fatalf("proposed decision must be included: got %d decisions", len(b.Decisions))
+	}
+	if b.Decisions[0].ID != "ADR-ZZZ" || b.Decisions[1].ID != "ADR-AAA" {
+		t.Errorf("accepted must rank before proposed at equal scope, got %s, %s", b.Decisions[0].ID, b.Decisions[1].ID)
+	}
+	md := b.Markdown()
+	if !strings.Contains(md, "proposed — unratified") {
+		t.Errorf("proposed decision must be labeled unratified in markdown:\n%s", md)
+	}
+	if !strings.Contains(md, "`LESSON-P` (proposed)") {
+		t.Errorf("proposed lesson must carry a (proposed) suffix:\n%s", md)
+	}
+
+	// Squeeze the budget so the decisions bucket itself overflows by one token
+	// (lessons truncate after decisions, so exclude the lesson's cost): the
+	// proposed decision (last in sorted order) must be the one dropped.
+	if len(b.Lessons) != 1 {
+		t.Fatalf("fixture expects exactly one lesson, got %d", len(b.Lessons))
+	}
+	b2, err := Context(Options{RepoDir: dir, Path: "internal/render/render.go",
+		BudgetTokens: b.EstimatedTokens - b.Lessons[0].tokens - 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	kept := ids(b2.Decisions)
+	if !kept["ADR-ZZZ"] {
+		t.Errorf("accepted decision must survive the squeeze; kept: %v", kept)
+	}
+	if kept["ADR-AAA"] {
+		t.Errorf("proposed decision must drop before accepted under budget pressure; kept: %v", kept)
+	}
+}

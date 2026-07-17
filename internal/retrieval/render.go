@@ -3,6 +3,8 @@ package retrieval
 import (
 	"fmt"
 	"strings"
+
+	"github.com/n8o/nugit/internal/model"
 )
 
 // Markdown renders the bundle for human inspection (`nugit context`).
@@ -46,7 +48,7 @@ func (b Bundle) Markdown() string {
 	if len(b.Lessons) > 0 {
 		w.WriteString("**Lessons**\n")
 		for _, l := range b.Lessons {
-			fmt.Fprintf(&w, "- `%s` — %s%s\n", l.ID, l.Summary, viaSuffix(l.Via))
+			fmt.Fprintf(&w, "- `%s`%s — %s%s\n", l.ID, proposedSuffix(l), l.Summary, viaSuffix(l.Via))
 		}
 		w.WriteString("\n")
 	}
@@ -54,7 +56,7 @@ func (b Bundle) Markdown() string {
 	if len(b.References) > 0 {
 		w.WriteString("**References** _(distilled external sources)_\n")
 		for _, r := range b.References {
-			fmt.Fprintf(&w, "- `%s` — %s%s\n", r.ID, r.Summary, viaSuffix(r.Via))
+			fmt.Fprintf(&w, "- `%s`%s — %s%s\n", r.ID, proposedSuffix(r), r.Summary, viaSuffix(r.Via))
 		}
 		w.WriteString("\n")
 	}
@@ -83,13 +85,27 @@ func (b Bundle) Markdown() string {
 	return w.String()
 }
 
-// statusLabel renders an item's status, annotated when the object is live but
-// partially overridden by amendments (ADR-0015).
-func statusLabel(it Item) string {
-	if len(it.AmendedBy) == 0 {
-		return it.Status
+// proposedSuffix marks candidate-lane items on lines that don't carry a full
+// status label (lessons, references — ADR-0016).
+func proposedSuffix(it Item) string {
+	if it.Status == string(model.StatusProposed) {
+		return " (proposed)"
 	}
-	return it.Status + ", amended by " + strings.Join(it.AmendedBy, ", ")
+	return ""
+}
+
+// statusLabel renders an item's status, annotated when the object is live but
+// partially overridden by amendments (ADR-0015), and flagged when it is a
+// candidate awaiting ratification (ADR-0016).
+func statusLabel(it Item) string {
+	s := it.Status
+	if s == string(model.StatusProposed) {
+		s += " — unratified"
+	}
+	if len(it.AmendedBy) == 0 {
+		return s
+	}
+	return s + ", amended by " + strings.Join(it.AmendedBy, ", ")
 }
 
 func viaSuffix(via string) string {
