@@ -2,10 +2,11 @@ package c4
 
 import "testing"
 
-// A `container` is a transparent C4 grouping: the parser must descend into it and
-// record the components inside (with paths + relationships), but NOT record the
-// container itself. This is what lets nugit emit valid Structurizr DSL
-// (system → container → component) while keeping its component-centric model.
+// A `container` never leaks into Components: the parser descends into it and
+// records the components inside (with paths + relationships), while the
+// container itself is recorded separately in Model.Containers. The assertion
+// that matters for every flat consumer — the container id is NOT a component —
+// must keep holding now that containers are first-class.
 func TestContainerIsTransparent(t *testing.T) {
 	// The quoted-key, multi-line properties form is exactly what nugit emits for
 	// Structurizr compatibility — the parser must read paths out of it.

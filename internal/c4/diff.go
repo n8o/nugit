@@ -32,6 +32,26 @@ func Diff(base, head model.Model, rawDiff string) model.C4Delta {
 		}
 	}
 
+	baseCt := indexContainers(base)
+	headCt := indexContainers(head)
+	for id, hc := range headCt {
+		bc, ok := baseCt[id]
+		if !ok {
+			d.AddedContainers = append(d.AddedContainers, hc)
+			continue
+		}
+		if fields := containerChangedFields(bc, hc); len(fields) > 0 {
+			d.ChangedContainers = append(d.ChangedContainers, model.ContainerChange{
+				Before: bc, After: hc, Fields: fields,
+			})
+		}
+	}
+	for id, bc := range baseCt {
+		if _, ok := headCt[id]; !ok {
+			d.RemovedContainers = append(d.RemovedContainers, bc)
+		}
+	}
+
 	baseRel := indexRels(base)
 	headRel := indexRels(head)
 	for k, r := range headRel {
@@ -51,6 +71,11 @@ func Diff(base, head model.Model, rawDiff string) model.C4Delta {
 	sortComponents(d.RemovedComponents)
 	sort.Slice(d.ChangedComponents, func(i, j int) bool {
 		return d.ChangedComponents[i].After.ID < d.ChangedComponents[j].After.ID
+	})
+	sortContainers(d.AddedContainers)
+	sortContainers(d.RemovedContainers)
+	sort.Slice(d.ChangedContainers, func(i, j int) bool {
+		return d.ChangedContainers[i].After.ID < d.ChangedContainers[j].After.ID
 	})
 	sortRels(d.AddedRels)
 	sortRels(d.RemovedRels)
@@ -72,6 +97,14 @@ func indexComponents(m model.Model) map[string]model.Component {
 	return out
 }
 
+func indexContainers(m model.Model) map[string]model.Container {
+	out := map[string]model.Container{}
+	for _, ct := range m.Containers {
+		out[ct.ID] = ct
+	}
+	return out
+}
+
 func indexRels(m model.Model) map[string]model.Relationship {
 	out := map[string]model.Relationship{}
 	for _, r := range m.Relationships {
@@ -81,6 +114,23 @@ func indexRels(m model.Model) map[string]model.Relationship {
 }
 
 func componentChangedFields(a, b model.Component) []string {
+	var fields []string
+	if a.Name != b.Name {
+		fields = append(fields, "name")
+	}
+	if a.Tech != b.Tech {
+		fields = append(fields, "technology")
+	}
+	if !eqSet(a.Paths, b.Paths) {
+		fields = append(fields, "paths")
+	}
+	if !eqSet(a.Tags, b.Tags) {
+		fields = append(fields, "tags")
+	}
+	return fields
+}
+
+func containerChangedFields(a, b model.Container) []string {
 	var fields []string
 	if a.Name != b.Name {
 		fields = append(fields, "name")
@@ -117,6 +167,10 @@ func eqSet(a, b []string) bool {
 }
 
 func sortComponents(cs []model.Component) {
+	sort.Slice(cs, func(i, j int) bool { return cs[i].ID < cs[j].ID })
+}
+
+func sortContainers(cs []model.Container) {
 	sort.Slice(cs, func(i, j int) bool { return cs[i].ID < cs[j].ID })
 }
 

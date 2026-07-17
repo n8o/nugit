@@ -1,0 +1,143 @@
+graph LR
+  agentcfg["Agent wiring"]
+  beads["Beads adapter"]
+  bootstrap["Bootstrap"]
+  c4["C4 parser + diff"]
+  cli["CLI"]
+  cmake["CMake analyzer"]
+  config["Config"]
+  consistency["Consistency checks"]
+  delta["Delta engine"]
+  deploy["Deployable detector"]
+  distill["Distiller"]
+  doctor["Doctor"]
+  engine["Engine"]
+  eval["Eval"]
+  evidence["Evidence tiers"]
+  gitutil["Git plumbing"]
+  goimports["Go import analyzer"]
+  icepanel["IcePanel projection"]
+  knowledge["Knowledge reader"]
+  localmem["Working memory"]
+  mapping["File->component mapper"]
+  mcp["MCP server"]
+  model_["Domain model"]
+  modelfacts["Model facts"]
+  narrative["LLM narrative"]
+  notion["Notion projection"]
+  obsidian["Obsidian vault"]
+  pyimports["Python analyzer"]
+  ratify["Ratifier"]
+  render["Renderer"]
+  retrieval["Retrieval"]
+  scaffold["Scaffold"]
+  significance["Significance classifier"]
+  trailers["Trailer parser"]
+  tsdeps["TS analyzer"]
+  usage["Usage log"]
+  beads --> gitutil
+  beads --> model_
+  bootstrap --> cmake
+  bootstrap --> gitutil
+  bootstrap --> goimports
+  bootstrap --> mapping
+  bootstrap --> model_
+  bootstrap --> pyimports
+  bootstrap --> tsdeps
+  c4 --> model_
+  cli --> agentcfg
+  cli --> c4
+  cli --> config
+  cli --> consistency
+  cli --> deploy
+  cli --> distill
+  cli --> doctor
+  cli --> engine
+  cli --> icepanel
+  cli --> localmem
+  cli --> mcp
+  cli --> model_
+  cli --> modelfacts
+  cli --> notion
+  cli --> obsidian
+  cli --> ratify
+  cli --> render
+  cli --> retrieval
+  cli --> scaffold
+  cli --> trailers
+  cli --> usage
+  consistency --> cmake
+  consistency --> evidence
+  consistency --> gitutil
+  consistency --> goimports
+  consistency --> knowledge
+  consistency --> mapping
+  consistency --> model_
+  consistency --> pyimports
+  consistency --> trailers
+  consistency --> tsdeps
+  delta --> beads
+  delta --> c4
+  delta --> gitutil
+  delta --> knowledge
+  delta --> mapping
+  delta --> model_
+  distill --> gitutil
+  distill --> knowledge
+  distill --> model_
+  distill --> trailers
+  doctor --> bootstrap
+  doctor --> c4
+  doctor --> config
+  doctor --> gitutil
+  doctor --> knowledge
+  doctor --> model_
+  engine --> config
+  engine --> consistency
+  engine --> delta
+  engine --> evidence
+  engine --> gitutil
+  engine --> goimports
+  engine --> knowledge
+  engine --> mapping
+  engine --> model_
+  engine --> narrative
+  engine --> significance
+  engine --> trailers
+  eval --> engine
+  eval --> model_
+  evidence --> bootstrap
+  evidence --> knowledge
+  evidence --> model_
+  evidence --> tsdeps
+  gitutil --> model_
+  icepanel --> model_
+  knowledge --> model_
+  mapping --> model_
+  mcp --> retrieval
+  mcp --> usage
+  modelfacts --> cmake
+  modelfacts --> deploy
+  narrative --> model_
+  notion --> knowledge
+  notion --> model_
+  obsidian --> knowledge
+  obsidian --> model_
+  ratify --> knowledge
+  ratify --> model_
+  render --> c4
+  render --> model_
+  retrieval --> c4
+  retrieval --> config
+  retrieval --> evidence
+  retrieval --> knowledge
+  retrieval --> localmem
+  retrieval --> mapping
+  retrieval --> model_
+  scaffold --> bootstrap
+  scaffold --> gitutil
+  significance --> model_
+  trailers --> model_
+  usage --> config
+  usage --> gitutil
+  usage --> retrieval

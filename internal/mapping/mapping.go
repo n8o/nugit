@@ -22,12 +22,17 @@ type rule struct {
 	// specificity = length of the literal prefix before the first wildcard.
 	// Longer literal prefix wins on overlap (most-specific-glob rule).
 	spec int
+	// level: 0 = component, 1 = container. At equal literal-prefix specificity
+	// a component glob beats a container glob (the finer element owns the file).
+	level int
 }
 
-// InvalidPattern names a component glob that failed validation.
+// InvalidPattern names a component or container glob that failed validation.
 type InvalidPattern struct {
 	Comp    string
 	Pattern string
+	// Kind is "component" or "container" — which element declared the glob.
+	Kind string
 }
 
 // Mapper resolves paths to components.
@@ -36,9 +41,12 @@ type Mapper struct {
 	invalid []InvalidPattern
 }
 
-// New builds a Mapper from a parsed model. Rules are pre-sorted by descending
-// specificity so Resolve can return the first match deterministically. Globs
-// that fail validation are dropped and recorded in InvalidPatterns().
+// New builds a Mapper from a parsed model. Both component and container path
+// globs are ingested — a path owned only by a container resolves to the
+// container id. Rules are pre-sorted by descending specificity (component
+// before container on ties) so Resolve can return the first match
+// deterministically. Globs that fail validation are dropped and recorded in
+// InvalidPatterns().
 func New(m model.Model) *Mapper {
 	var rules []rule
 	var invalid []InvalidPattern
@@ -47,13 +55,25 @@ func New(m model.Model) *Mapper {
 			if doublestar.ValidatePattern(g) {
 				rules = append(rules, rule{comp: c.ID, pattern: g, spec: literalPrefixLen(g)})
 			} else {
-				invalid = append(invalid, InvalidPattern{Comp: c.ID, Pattern: g})
+				invalid = append(invalid, InvalidPattern{Comp: c.ID, Pattern: g, Kind: "component"})
+			}
+		}
+	}
+	for _, ct := range m.Containers {
+		for _, g := range ct.Paths {
+			if doublestar.ValidatePattern(g) {
+				rules = append(rules, rule{comp: ct.ID, pattern: g, spec: literalPrefixLen(g), level: 1})
+			} else {
+				invalid = append(invalid, InvalidPattern{Comp: ct.ID, Pattern: g, Kind: "container"})
 			}
 		}
 	}
 	sort.SliceStable(rules, func(i, j int) bool {
 		if rules[i].spec != rules[j].spec {
 			return rules[i].spec > rules[j].spec
+		}
+		if rules[i].level != rules[j].level {
+			return rules[i].level < rules[j].level
 		}
 		if rules[i].pattern != rules[j].pattern {
 			return rules[i].pattern < rules[j].pattern

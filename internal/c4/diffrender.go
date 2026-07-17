@@ -29,6 +29,9 @@ func MermaidDiff(d model.C4Delta, head model.Model) string {
 	for _, c := range head.Components {
 		name[c.ID] = label(c)
 	}
+	for _, ct := range head.Containers {
+		name[ct.ID] = containerLabel(ct)
+	}
 	for _, c := range d.AddedComponents {
 		state[c.ID] = 1
 		if name[c.ID] == "" {
@@ -42,6 +45,22 @@ func MermaidDiff(d model.C4Delta, head model.Model) string {
 	for _, c := range d.ChangedComponents {
 		state[c.After.ID] = 3
 		name[c.After.ID] = label(c.After)
+	}
+	// Container adds/removes/changes join the focused diagram as plain nodes
+	// (subgraph rendering is a follow-up; the delta must still be visible).
+	for _, ct := range d.AddedContainers {
+		state[ct.ID] = 1
+		if name[ct.ID] == "" {
+			name[ct.ID] = containerLabel(ct)
+		}
+	}
+	for _, ct := range d.RemovedContainers {
+		state[ct.ID] = 2
+		name[ct.ID] = containerLabel(ct)
+	}
+	for _, ct := range d.ChangedContainers {
+		state[ct.After.ID] = 3
+		name[ct.After.ID] = containerLabel(ct.After)
 	}
 
 	addRel := map[[2]string]bool{}

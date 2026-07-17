@@ -173,33 +173,77 @@ func checkTSCode(in Input) []model.Finding {
 }
 
 // checkModelHealth surfaces authoring errors in workspace.dsl that would
-// otherwise fail silently: duplicate component ids (last-wins collapse) and
-// invalid path globs (which never match anything).
+// otherwise fail silently: duplicate element ids (components and containers
+// share one namespace; last-wins collapse), invalid path globs (which never
+// match anything), and relationship endpoints naming no declared element.
 func checkModelHealth(in Input) []model.Finding {
 	var fs []model.Finding
-	counts := map[string]int{}
+	compCounts := map[string]int{}
 	for _, c := range in.HeadModel.Components {
-		counts[c.ID]++
+		compCounts[c.ID]++
 	}
-	ids := make([]string, 0, len(counts))
-	for id := range counts {
+	ctCounts := map[string]int{}
+	for _, ct := range in.HeadModel.Containers {
+		ctCounts[ct.ID]++
+	}
+	idSet := map[string]bool{}
+	for id := range compCounts {
+		idSet[id] = true
+	}
+	for id := range ctCounts {
+		idSet[id] = true
+	}
+	ids := make([]string, 0, len(idSet))
+	for id := range idSet {
 		ids = append(ids, id)
 	}
 	sort.Strings(ids)
 	for _, id := range ids {
-		if counts[id] > 1 {
+		total := compCounts[id] + ctCounts[id]
+		if total <= 1 {
+			continue
+		}
+		if ctCounts[id] == 0 { // component-only duplicate: wording unchanged
 			fs = append(fs, model.Finding{
 				Check: "model-health", Severity: model.SevWarn,
-				Title:  fmt.Sprintf("duplicate component id %q (%d declarations)", id, counts[id]),
+				Title:  fmt.Sprintf("duplicate component id %q (%d declarations)", id, total),
 				Detail: "workspace.dsl declares this id more than once; only the last binding is used — rename or merge them",
 			})
+			continue
 		}
+		fs = append(fs, model.Finding{
+			Check: "model-health", Severity: model.SevWarn,
+			Title:  fmt.Sprintf("duplicate element id %q (%d declarations)", id, total),
+			Detail: "workspace.dsl declares this id more than once (components and containers share one namespace); only the last binding is used — rename or merge them",
+		})
 	}
 	for _, bad := range in.Mapper.InvalidPatterns() {
 		fs = append(fs, model.Finding{
 			Check: "model-health", Severity: model.SevWarn,
-			Title:  fmt.Sprintf("component %q has an invalid path glob %q", bad.Comp, bad.Pattern),
-			Detail: "this glob is syntactically invalid and matches no files, so the component owns nothing",
+			Title:  fmt.Sprintf("%s %q has an invalid path glob %q", bad.Kind, bad.Comp, bad.Pattern),
+			Detail: fmt.Sprintf("this glob is syntactically invalid and matches no files, so the %s owns nothing", bad.Kind),
+		})
+	}
+	// A relationship endpoint that names no declared element can never cover a
+	// code dependency — the edge silently enforces nothing.
+	unknown := map[string]bool{}
+	for _, r := range in.HeadModel.Relationships {
+		for _, end := range []string{r.Src, r.Dst} {
+			if compCounts[end] == 0 && ctCounts[end] == 0 {
+				unknown[end] = true
+			}
+		}
+	}
+	unknownIDs := make([]string, 0, len(unknown))
+	for id := range unknown {
+		unknownIDs = append(unknownIDs, id)
+	}
+	sort.Strings(unknownIDs)
+	for _, id := range unknownIDs {
+		fs = append(fs, model.Finding{
+			Check: "model-health", Severity: model.SevWarn,
+			Title:  fmt.Sprintf("relationship endpoint %q matches no component or container", id),
+			Detail: "workspace.dsl declares a relationship touching this unknown element, so the edge covers nothing — fix the id or declare the element",
 		})
 	}
 	return fs
