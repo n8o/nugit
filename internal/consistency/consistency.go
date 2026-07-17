@@ -422,15 +422,23 @@ func governedComponents(o model.KnowledgeObject) []string {
 }
 
 // checkDecisionCoverage: an architecturally-significant change with no
-// accompanying or linked decision record.
+// accompanying or linked decision record. A `status: proposed` ADR is a
+// candidate, not yet ratified knowledge (ADR-0016), so it softens the finding
+// but does not satisfy it; the `decision:` trailer bypass stays — the trailer
+// is the ADR-0005 capture primitive and records the why regardless of lane.
 func checkDecisionCoverage(in Input) []model.Finding {
 	if !in.Architectural {
 		return nil
 	}
+	var proposed []string
 	for _, kc := range in.Knowledge.Changes {
 		if kc.Object != nil && kc.Object.Type == model.KindDecision &&
 			(kc.Status == "A" || kc.Status == "M") {
-			return nil // covered
+			if kc.Object.Status == model.StatusProposed {
+				proposed = append(proposed, kc.Object.ID)
+				continue
+			}
+			return nil // covered by a ratified decision
 		}
 	}
 	// also covered if a commit carries a decision: trailer
@@ -438,6 +446,15 @@ func checkDecisionCoverage(in Input) []model.Finding {
 		if strings.TrimSpace(c.Trailer.Decision) != "" {
 			return nil
 		}
+	}
+	if len(proposed) > 0 {
+		sort.Strings(proposed)
+		return []model.Finding{{
+			Check:    "decision-coverage",
+			Severity: model.SevWarn,
+			Title:    "architectural change covered only by a proposed (unratified) decision",
+			Detail:   "the why is drafted (" + strings.Join(proposed, ", ") + ") but not ratified; promote it with `nugit ratify <id>` or add a `decision:` trailer",
+		}}
 	}
 	return []model.Finding{{
 		Check:    "decision-coverage",

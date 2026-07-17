@@ -172,6 +172,8 @@ func Context(opt Options) (Bundle, error) {
 			}
 			pulled[tgt.ID] = true
 			// Never surface a superseded/invalidated rationale as live context.
+			// Proposed stays IN, labeled (ADR-0016): superseded is known-wrong;
+			// proposed is merely unratified and often the only recorded why.
 			if st := effectiveStatus(tgt); st == model.StatusSuperseded || st == model.StatusInvalidated {
 				continue
 			}
