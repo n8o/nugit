@@ -34,8 +34,12 @@ var baseFiles = map[string]string{
 }
 
 func adr(id, scope, supersedes string) string {
+	return adrWith(id, scope, "accepted", supersedes)
+}
+
+func adrWith(id, scope, status, supersedes string) string {
 	s := "---\nschema_version: 1\nid: " + id + "\ntype: decision\nscope: " + scope +
-		"\nstatus: accepted\ncreated: 2026-01-01T00:00:00Z\n"
+		"\nstatus: " + status + "\ncreated: 2026-01-01T00:00:00Z\n"
 	if supersedes != "" {
 		s += "supersedes: " + supersedes + "\n"
 	}
@@ -115,6 +119,18 @@ var corpus = []Case{
 		},
 		WantTier:   model.TierArchitectural,
 		WantChecks: []string{"c4<->code"}, // decision-coverage satisfied by the new ADR
+		WantClean:  false,
+	},
+	{
+		// ADR-0016 candidate lane: a `status: proposed` ADR is a draft, not
+		// ratified knowledge — decision-coverage must still warn.
+		Name: "proposed-adr-does-not-cover",
+		Head: map[string]string{
+			"b/b.go":                  "package b\n\nimport _ \"example.com/m/a\"\n\nfunc B() {}\n",
+			".nugit/decisions/why.md": adrWith("ADR-WHY", "b", "proposed", ""),
+		},
+		WantTier:   model.TierArchitectural,
+		WantChecks: []string{"c4<->code", "decision-coverage"},
 		WantClean:  false,
 	},
 	{

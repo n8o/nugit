@@ -27,6 +27,10 @@ type Options struct {
 	Head     string
 	MinRecur int    // a `learned:` must recur ≥ this to promote (default 2)
 	Now      string // ISO timestamp for created: (testable); "" -> time.Now()
+	// Status controls the minted status: "proposed" (default — the candidate
+	// lane of ADR-0016: machine-drafted records await `nugit ratify`) or
+	// "ratified" (pre-lane behavior: decisions land accepted, lessons active).
+	Status string
 }
 
 // Result reports what was promoted.
@@ -44,6 +48,14 @@ var slugRE = regexp.MustCompile(`[^a-z0-9]+`)
 func Distill(opt Options) (Result, error) {
 	if opt.MinRecur <= 0 {
 		opt.MinRecur = 2
+	}
+	adrStatus, lessonStatus := string(model.StatusProposed), string(model.StatusProposed)
+	switch opt.Status {
+	case "", "proposed":
+	case "ratified":
+		adrStatus, lessonStatus = string(model.StatusAccepted), string(model.StatusActive)
+	default:
+		return Result{}, fmt.Errorf("distill: unknown status %q (want proposed or ratified)", opt.Status)
 	}
 	now := opt.Now
 	if now == "" {
@@ -104,7 +116,7 @@ func Distill(opt Options) (Result, error) {
 		maxADR++
 		key := fmt.Sprintf("ADR-%04d", maxADR)
 		path := filepath.Join(".nugit", "decisions", fmt.Sprintf("%04d-%s.md", maxADR, slug(d)))
-		wrote, err := writeObj(opt.RepoDir, path, adrBody(key, c, now))
+		wrote, err := writeObj(opt.RepoDir, path, adrBody(key, c, now, adrStatus))
 		if err != nil {
 			return res, err
 		}
@@ -137,7 +149,7 @@ func Distill(opt Options) (Result, error) {
 		s := uniqueSlug(slug(l), usedSlug, opt.RepoDir)
 		usedSlug[s] = true
 		path := filepath.Join(".nugit", "lessons", s+".md")
-		wrote, err := writeObj(opt.RepoDir, path, lessonBody(c, now, s))
+		wrote, err := writeObj(opt.RepoDir, path, lessonBody(c, now, s, lessonStatus))
 		if err != nil {
 			return res, err
 		}
@@ -190,7 +202,7 @@ func scopeOf(affects []string) string {
 	return "global"
 }
 
-func adrBody(key string, c model.Commit, now string) string {
+func adrBody(key string, c model.Commit, now, status string) string {
 	t := c.Trailer
 	var rel []string
 	for _, a := range t.Affects {
@@ -200,7 +212,7 @@ func adrBody(key string, c model.Commit, now string) string {
 		rel = append(rel, "satisfies:"+t.Spec)
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "---\nschema_version: 1\nid: %s\ntype: decision\nscope: %s\nstatus: accepted\ncreated: %s\n", key, scopeOf(t.Affects), now)
+	fmt.Fprintf(&b, "---\nschema_version: 1\nid: %s\ntype: decision\nscope: %s\nstatus: %s\ncreated: %s\n", key, scopeOf(t.Affects), status, now)
 	if len(rel) > 0 {
 		b.WriteString("relates_to:\n")
 		for _, r := range rel {
@@ -218,11 +230,11 @@ func adrBody(key string, c model.Commit, now string) string {
 	return b.String()
 }
 
-func lessonBody(c model.Commit, now, slug string) string {
+func lessonBody(c model.Commit, now, slug, status string) string {
 	t := c.Trailer
 	var b strings.Builder
-	fmt.Fprintf(&b, "---\nschema_version: 1\nid: %s\ntype: lesson\nscope: %s\nstatus: active\ncreated: %s\nprovenance:\n  commit: %s\nconfidence: medium\n---\n\n",
-		"LESSON-"+slug, scopeOf(t.Affects), now, short(c.SHA))
+	fmt.Fprintf(&b, "---\nschema_version: 1\nid: %s\ntype: lesson\nscope: %s\nstatus: %s\ncreated: %s\nprovenance:\n  commit: %s\nconfidence: medium\n---\n\n",
+		"LESSON-"+slug, scopeOf(t.Affects), status, now, short(c.SHA))
 	fmt.Fprintf(&b, "# Lesson — %s\n\n", title(t.Learned))
 	fmt.Fprintf(&b, "**Trigger:** %s\n\n", firstLine(c.Subject))
 	fmt.Fprintf(&b, "**Insight:** %s\n\n", t.Learned)
