@@ -112,6 +112,7 @@ graph LR
   evidence --> tsdeps
   gitutil --> model_
   icepanel --> model_
+  knowledge --> gitutil
   knowledge --> model_
   mapping --> model_
   mcp --> retrieval
