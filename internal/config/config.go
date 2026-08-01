@@ -28,7 +28,7 @@ type Config struct {
 		FailOn string `yaml:"fail_on"`
 	} `yaml:"pr_render"`
 	Capture struct {
-		CommitMsg string `yaml:"commit_msg"` // warn (default) | block | off
+		CommitMsg string `yaml:"commit_msg"` // warn (default) | nudge | block | off
 	} `yaml:"capture"`
 	Narrative struct {
 		Enabled bool   `yaml:"enabled"` // opt-in LLM prose; default false (off)
@@ -105,7 +105,12 @@ func LoadBytes(b []byte) (Config, error) {
 		c.PRRender.FailOn = "fail"
 	}
 	c.Capture.CommitMsg = strings.ToLower(strings.TrimSpace(c.Capture.CommitMsg))
-	if c.Capture.CommitMsg != "block" && c.Capture.CommitMsg != "off" {
+	switch c.Capture.CommitMsg {
+	case "nudge", "block", "off":
+	default:
+		// Unknown value: fall back to the default (warn), never to a mode the
+		// user didn't ask for — a typo must not silently nudge, block, or
+		// disable capture (ADR-0023 keeps this discipline).
 		c.Capture.CommitMsg = "warn"
 	}
 	c.Usage.Log = strings.ToLower(strings.TrimSpace(c.Usage.Log))
