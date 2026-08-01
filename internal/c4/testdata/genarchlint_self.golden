@@ -57,6 +57,8 @@ components:
     in: "internal/narrative/**"
   "notion":
     in: "internal/notion/**"
+  "nudge":
+    in: "internal/nudge/**"
   "obsidian":
     in: "internal/obsidian/**"
   "pyimports":
@@ -117,6 +119,7 @@ deps:
       - "model_"
       - "modelfacts"
       - "notion"
+      - "nudge"
       - "obsidian"
       - "ratify"
       - "reinforce"
@@ -230,6 +233,15 @@ deps:
     mayDependOn:
       - "knowledge"
       - "model_"
+  "nudge":
+    mayDependOn:
+      - "c4"
+      - "config"
+      - "gitutil"
+      - "mapping"
+      - "model_"
+      - "significance"
+      - "trailers"
   "obsidian":
     mayDependOn:
       - "knowledge"

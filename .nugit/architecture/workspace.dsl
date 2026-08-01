@@ -134,6 +134,11 @@ workspace "nugit" "Git-native typed knowledge & unified PR view — self-model (
                     "paths" "internal/distill/**"
                 }
             }
+            nudge = component "Capture nudge" "Significance-aware capture prompt in the commit-msg hook (ADR-0023)" "Go" {
+                properties {
+                    "paths" "internal/nudge/**"
+                }
+            }
             ratify = component "Ratifier" "Promotes proposed knowledge to the ratified corpus (ADR-0016)" "Go" {
                 properties {
                     "paths" "internal/ratify/**"
@@ -263,6 +268,14 @@ workspace "nugit" "Git-native typed knowledge & unified PR view — self-model (
             distill -> model_ "uses types"
             engine -> distill "computes the PR-time proposal set (ADR-0018)"
 
+            nudge -> model_ "uses types"
+            nudge -> gitutil "bounded staged-diff numstat"
+            nudge -> c4 "parses the working-tree model"
+            nudge -> mapping "seeds keywords from components"
+            nudge -> significance "classifies the staged change"
+            nudge -> config "mode + trivial thresholds"
+            nudge -> trailers "detects an existing capture block"
+
             eval -> engine "runs the corpus"
             eval -> model_ "uses types"
 
@@ -308,6 +321,7 @@ workspace "nugit" "Git-native typed knowledge & unified PR view — self-model (
             retrieval -> evidence "annotates bundle items"
             cli -> localmem "remember command"
             cli -> trailers "commit-msg hook validation"
+            cli -> nudge "commit-msg hook capture nudge"
             cli -> c4 "c4 render command"
             cli -> consistency "explain command"
             cli -> doctor "doctor command"
