@@ -75,6 +75,7 @@ graph LR
   consistency --> knowledge
   consistency --> mapping
   consistency --> model_
+  consistency --> modelfacts
   consistency --> pyimports
   consistency --> trailers
   consistency --> tsdeps
@@ -93,7 +94,9 @@ graph LR
   doctor --> config
   doctor --> gitutil
   doctor --> knowledge
+  doctor --> mapping
   doctor --> model_
+  doctor --> modelfacts
   engine --> config
   engine --> consistency
   engine --> delta

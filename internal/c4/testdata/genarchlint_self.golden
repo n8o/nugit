@@ -136,6 +136,7 @@ deps:
       - "knowledge"
       - "mapping"
       - "model_"
+      - "modelfacts"
       - "pyimports"
       - "trailers"
       - "tsdeps"
@@ -162,7 +163,9 @@ deps:
       - "config"
       - "gitutil"
       - "knowledge"
+      - "mapping"
       - "model_"
+      - "modelfacts"
   "engine":
     mayDependOn:
       - "config"

@@ -27,6 +27,19 @@ const dslWithAC = `workspace "m" {
   }
 }`
 
+// baseDSL + a component mapping the d/** unit (model-drift twin case).
+const baseDSLWithD = `workspace "m" {
+  model {
+    s = softwareSystem "m" {
+      a = component "A" { properties { paths "a/**" } }
+      b = component "B" { properties { paths "b/**" } }
+      c = component "C" { properties { paths "c/**" } }
+      d = component "D" { properties { paths "d/**" } }
+      a -> b
+    }
+  }
+}`
+
 var baseFiles = map[string]string{
 	"a/a.go": "package a\n\nimport _ \"example.com/m/b\"\n\nfunc A() {}\n",
 	"b/b.go": "package b\n\nfunc B() {}\n",
@@ -234,6 +247,25 @@ var corpus = []Case{
 		Name:      "large-churn-single-component",
 		Head:      map[string]string{"a/a.go": bigFunc},
 		WantTier:  model.TierFeature, // > trivial churn threshold
+		WantClean: true,
+	},
+
+	// ---- model drift (ADR-0021): detected units vs the DSL ----
+	{
+		// A new Go package the model doesn't map, touched by this PR: the
+		// facts-vs-DSL diff must warn (the pilot's decay signature).
+		Name:       "model-drift-new-unit",
+		Head:       map[string]string{"d/d.go": "package d\n\nfunc D() {}\n"},
+		WantTier:   model.TierTrivial,
+		WantChecks: []string{"model-drift"},
+		WantClean:  true,
+	},
+	{
+		// Twin: the same new package, but the model already maps it — silent.
+		Name:      "model-drift-unit-modeled",
+		DSL:       baseDSLWithD,
+		Head:      map[string]string{"d/d.go": "package d\n\nfunc D() {}\n"},
+		WantTier:  model.TierTrivial,
 		WantClean: true,
 	},
 

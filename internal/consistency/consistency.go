@@ -20,6 +20,7 @@ import (
 	"github.com/n8o/nugit/internal/knowledge"
 	"github.com/n8o/nugit/internal/mapping"
 	"github.com/n8o/nugit/internal/model"
+	"github.com/n8o/nugit/internal/modelfacts"
 	"github.com/n8o/nugit/internal/pyimports"
 	"github.com/n8o/nugit/internal/trailers"
 	"github.com/n8o/nugit/internal/tsdeps"
@@ -58,6 +59,7 @@ func C4CodeFindings(in Input) []model.Finding {
 	fs = append(fs, checkPythonCode(in)...)
 	fs = append(fs, checkTSCode(in)...)
 	fs = append(fs, checkModelHealth(in)...)
+	fs = append(fs, checkModelDrift(in)...)
 	return Sort(fs)
 }
 
@@ -261,6 +263,62 @@ func checkModelHealth(in Input) []model.Finding {
 		})
 	}
 	return fs
+}
+
+// checkModelDrift (ADR-0021) diffs the deterministic unit inventory — the same
+// detector facts that ground the nugit-model bootstrap — against workspace.dsl,
+// scoped to units whose directories this PR touches. A detected buildable or
+// deployable unit with no model element and no path mapping is drift: the model
+// silently stopped covering real code (the pilot lost 11 units this way, three
+// of them detector-visible BEFORE its last manual refresh). Always warn, never
+// fail: the remediation is a model refresh, not a code change. Excluded from
+// IsUndeclaredEdge, so it never feeds the significance verdict.
+func checkModelDrift(in Input) []model.Finding {
+	if in.Mapper.Empty() || in.HeadModel.Structural() {
+		return nil
+	}
+	unmodeled := modelfacts.Unmodeled(modelfacts.Units(in.RepoDir),
+		in.Prefix, in.Mapper.ResolveDir, elementNames(in.HeadModel))
+	var fs []model.Finding
+	for _, u := range unmodeled {
+		dirPrefix := in.Prefix + u.Dir + "/"
+		touched, mapped := false, false
+		for _, fc := range in.Code.Files {
+			if strings.HasPrefix(fc.Path, dirPrefix) {
+				touched = true
+				if fc.Component != "" {
+					mapped = true // a finer glob owns part of the unit — not absence
+				}
+			}
+		}
+		if !touched || mapped {
+			continue
+		}
+		fs = append(fs, model.Finding{
+			Check:    "model-drift",
+			Severity: model.SevWarn,
+			Title:    fmt.Sprintf("detected unit %s is missing from workspace.dsl", u.Dir),
+			Detail: fmt.Sprintf("this PR touches %s, which the %s detector identifies as a real unit (%s), "+
+				"but no model element maps it — run the nugit-model skill to refresh the model, "+
+				"or add a component/container stub with `properties { paths %q }`",
+				u.Dir, u.Kind, u.Evidence, u.Dir+"/**"),
+		})
+	}
+	return fs
+}
+
+// elementNames collects every element id and display name in the model, for
+// the drift check's name-match escape (a declared-but-unbound element is a
+// binding gap, not absence).
+func elementNames(m model.Model) []string {
+	var out []string
+	for _, c := range m.Components {
+		out = append(out, c.ID, c.Name)
+	}
+	for _, ct := range m.Containers {
+		out = append(out, ct.ID, ct.Name)
+	}
+	return out
 }
 
 // OtherFindings runs the checks that depend on the significance verdict (set via

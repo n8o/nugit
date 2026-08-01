@@ -34,6 +34,10 @@ var explanations = map[string]string{
 		"store object, but carries no front-matter `supersedes:`/`amends:` edge. Effective status is derived from edges\n" +
 		"only (ADR-0003), so retrieval keeps serving both the new object and the contradicted one as live (ADR-0022).\n" +
 		"Fix: add `supersedes: <id>` (whole-object) or `relates_to: [amends:<id>]` (partial, ADR-0015) to the superseding object.",
+	"model-drift": "The PR touches a detected buildable/deployable unit (deploy artifact, CMake target dir, or Go package)\n" +
+		"that no workspace.dsl element maps — model coverage decayed since the last refresh (ADR-0021).\n" +
+		"Fix: run the nugit-model skill to refresh the model, or add a component/container stub with `properties { paths \"<dir>/**\" }`.\n" +
+		"`nugit doctor` reports the full-repo unmodeled backlog; this check only warns about units the PR touches.",
 }
 
 // topics documents cross-cutting concepts that are not check ids (kept apart

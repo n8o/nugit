@@ -225,6 +225,7 @@ workspace "nugit" "Git-native typed knowledge & unified PR view — self-model (
             consistency -> cmake "re-derives the CMake graph for enforcement"
             consistency -> pyimports "re-derives the Python graph for enforcement"
             consistency -> tsdeps "re-derives the TS graph for enforcement"
+            consistency -> modelfacts "diffs the detected-unit inventory (model-drift, ADR-0021)"
 
             engine -> model_ "uses types"
             engine -> consistency "runs checks"
@@ -318,6 +319,8 @@ workspace "nugit" "Git-native typed knowledge & unified PR view — self-model (
             doctor -> bootstrap "detects the backend"
             doctor -> knowledge "checks the store"
             doctor -> model_ "uses types"
+            doctor -> mapping "resolves unit dirs for the coverage scan"
+            doctor -> modelfacts "full-repo facts-vs-DSL diff (ADR-0021)"
 
             cli -> obsidian "obsidian command"
             cli -> deploy "deploy command"

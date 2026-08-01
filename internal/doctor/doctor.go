@@ -20,7 +20,9 @@ import (
 	"github.com/n8o/nugit/internal/config"
 	"github.com/n8o/nugit/internal/gitutil"
 	"github.com/n8o/nugit/internal/knowledge"
+	"github.com/n8o/nugit/internal/mapping"
 	"github.com/n8o/nugit/internal/model"
+	"github.com/n8o/nugit/internal/modelfacts"
 )
 
 // Check is one health probe.
@@ -120,6 +122,14 @@ func Run(repoDir string) Report {
 	// ADR-0026: wiring coherence between config.yml and the artifacts that
 	// invoke nugit (CI workflows, CLAUDE.md, skill files). Advisory only.
 	r.Checks = append(r.Checks, wiringChecks(repoDir, cfg)...)
+	// Full-repo facts-vs-DSL diff (ADR-0021): the periodic drift scan the
+	// PR-scoped model-drift check deliberately doesn't do. Advisory: modeling
+	// debt is a backlog to work, never a pre-flight failure.
+	if len(m.Components) > 0 && !m.Structural() {
+		covOK, covDetail := modelCoverage(repoDir, m)
+		r.Checks = append(r.Checks, Check{Name: "model covers detected units",
+			OK: covOK, Advisory: true, Detail: covDetail})
+	}
 
 	if kerr == nil {
 		h := storeHealth(m, objs, bad)
@@ -213,6 +223,38 @@ func provDetail(issues []string) string {
 		shown = append(append([]string{}, shown[:3]...), fmt.Sprintf("… %d more", len(issues)-3))
 	}
 	return fmt.Sprintf("%d provenance issue(s): %s", len(issues), strings.Join(shown, "; "))
+}
+
+// modelCoverage diffs the full detected-unit inventory against the model
+// (ADR-0021's doctor surface). Same core as the PR-scoped model-drift check,
+// without the touched-dirs filter.
+func modelCoverage(repoDir string, m model.Model) (bool, string) {
+	var names []string
+	for _, c := range m.Components {
+		names = append(names, c.ID, c.Name)
+	}
+	for _, ct := range m.Containers {
+		names = append(names, ct.ID, ct.Name)
+	}
+	prefix := gitutil.Repo{Dir: repoDir}.Prefix()
+	unmodeled := modelfacts.Unmodeled(modelfacts.Units(repoDir),
+		prefix, mapping.New(m).ResolveDir, names)
+	if len(unmodeled) == 0 {
+		return true, "every detected buildable/deployable unit maps to a model element"
+	}
+	dirs := make([]string, 0, len(unmodeled))
+	for _, u := range unmodeled {
+		dirs = append(dirs, u.Dir)
+	}
+	shown := dirs
+	if len(shown) > 5 {
+		shown = shown[:5]
+	}
+	s := fmt.Sprintf("%d detected unit(s) missing from workspace.dsl: %s", len(dirs), strings.Join(shown, ", "))
+	if len(dirs) > len(shown) {
+		s += fmt.Sprintf(" (+%d more)", len(dirs)-len(shown))
+	}
+	return false, s + " — run the nugit-model skill or add stubs"
 }
 
 // mcpJSON is the subset of .mcp.json doctor inspects.
