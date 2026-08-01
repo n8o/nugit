@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // mustGit runs git in dir with identity/signing pinned so the test is hermetic.
@@ -158,5 +159,72 @@ func TestCommonRootFallsBackOutsideGit(t *testing.T) {
 	}
 	if got := (Repo{Dir: dir}).CommonGitDir(); got != "" {
 		t.Fatalf(`non-repo CommonGitDir: want "", got %q`, got)
+	}
+}
+
+// mustGitAt is mustGit with the commit date pinned (window-boundary tests).
+func mustGitAt(t *testing.T, dir, date string, args ...string) {
+	t.Helper()
+	base := []string{"-C", dir,
+		"-c", "user.name=test", "-c", "user.email=test@example.com",
+		"-c", "commit.gpgsign=false"}
+	cmd := exec.Command("git", append(base, args...)...)
+	cmd.Env = append(os.Environ(), "GIT_AUTHOR_DATE="+date, "GIT_COMMITTER_DATE="+date)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %v: %v: %s", args, err, out)
+	}
+}
+
+func TestLogSince(t *testing.T) {
+	dir := t.TempDir()
+	mustGit(t, dir, "init")
+	write := func(rel, content string) {
+		t.Helper()
+		p := filepath.Join(dir, rel)
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		mustGit(t, dir, "add", "-A")
+	}
+	old := time.Now().AddDate(0, 0, -120).Format(time.RFC3339)
+	write("a/a.go", "package a // v1\n")
+	mustGitAt(t, dir, old, "commit", "-m", "fix(a): ancient — outside the window")
+	write("a/a.go", "package a // v2\n")
+	mustGit(t, dir, "commit", "-m", "fix(a): recent\n\nlearned: something\nkeywords: a")
+	write("b/b.go", "package b\n")
+	mustGit(t, dir, "commit", "-m", "fix(b): other component")
+
+	r := Repo{Dir: dir}
+
+	got, err := r.LogSince("HEAD", 90, 200, "a/**")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Subject != "fix(a): recent" {
+		t.Fatalf("since+pathspec filter: got %+v", got)
+	}
+	if got[0].Body == "" {
+		t.Error("LogSince must return full bodies (trailer parsing needs them)")
+	}
+
+	// No pathspec: both in-window commits, newest first.
+	got, err = r.LogSince("HEAD", 90, 200)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got[0].Subject != "fix(b): other component" {
+		t.Fatalf("unfiltered: got %+v", got)
+	}
+
+	// max-count bounds the scan.
+	got, err = r.LogSince("HEAD", 90, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("max-count: got %d commits", len(got))
 	}
 }

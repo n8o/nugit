@@ -275,6 +275,31 @@ const (
 	fieldSep  = "\x1f" // unit separator
 )
 
+// LogSince returns up to maxCount non-merge commits reachable from ref whose
+// commit date falls within the last sinceDays days, optionally limited to
+// paths matching the given glob patterns. Patterns are git-root-relative and
+// passed with `:(top,glob)` pathspec magic, so the result is independent of
+// the working directory (matching the model's git-root-relative path globs).
+// Newest first, full bodies. Both bounds exist so a history scan (e.g. the
+// recurrence check) stays O(window), never O(history).
+func (r Repo) LogSince(ref string, sinceDays, maxCount int, globs ...string) ([]model.Commit, error) {
+	args := []string{"log", "--no-merges",
+		fmt.Sprintf("--since=%d.days", sinceDays),
+		fmt.Sprintf("--max-count=%d", maxCount),
+		"--pretty=format:" + logFormat, ref}
+	if len(globs) > 0 {
+		args = append(args, "--")
+		for _, g := range globs {
+			args = append(args, ":(top,glob)"+g)
+		}
+	}
+	out, err := r.git(args...)
+	if err != nil {
+		return nil, err
+	}
+	return parseCommits(out), nil
+}
+
 // logFormat is the machine-parseable pretty format shared by Log and LogPath.
 const logFormat = "%H" + fieldSep + "%s" + fieldSep + "%b" + commitSep
 

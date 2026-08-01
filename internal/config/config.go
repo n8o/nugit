@@ -37,6 +37,11 @@ type Config struct {
 	Usage struct {
 		Log string `yaml:"log"` // on (default) | off — local .nugit/.cache/usage.jsonl only
 	} `yaml:"usage"`
+	Recurrence struct {
+		Mode       string `yaml:"mode"`        // warn (default) | off
+		WindowDays int    `yaml:"window_days"` // history window scanned for fix churn (default 90)
+		MinFixes   int    `yaml:"min_fixes"`   // fix-typed commits that trigger the warn (default 3)
+	} `yaml:"recurrence"`
 }
 
 // Default returns the built-in defaults used when config.yml is absent or a key
@@ -52,6 +57,9 @@ func Default() Config {
 	c.PRRender.FailOn = "fail"
 	c.Capture.CommitMsg = "warn"
 	c.Usage.Log = "on"
+	c.Recurrence.Mode = "warn"
+	c.Recurrence.WindowDays = 90
+	c.Recurrence.MinFixes = 3
 	return c
 }
 
@@ -104,6 +112,16 @@ func LoadBytes(b []byte) (Config, error) {
 	if c.Usage.Log != "off" {
 		c.Usage.Log = "on"
 	}
+	c.Recurrence.Mode = strings.ToLower(strings.TrimSpace(c.Recurrence.Mode))
+	if c.Recurrence.Mode != "off" {
+		c.Recurrence.Mode = "warn"
+	}
+	if c.Recurrence.WindowDays <= 0 {
+		c.Recurrence.WindowDays = 90
+	}
+	if c.Recurrence.MinFixes <= 0 {
+		c.Recurrence.MinFixes = 3
+	}
 	return c, nil
 }
 
@@ -124,3 +142,6 @@ func FailOnRank(s string) int {
 		return 2
 	}
 }
+
+// RecurrenceOn reports whether the recurrence check runs (ADR-0019).
+func (c Config) RecurrenceOn() bool { return c.Recurrence.Mode != "off" }

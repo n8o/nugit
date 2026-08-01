@@ -41,6 +41,11 @@ var explanations = map[string]string{
 		"that no workspace.dsl element maps — model coverage decayed since the last refresh (ADR-0021).\n" +
 		"Fix: run the nugit-model skill to refresh the model, or add a component/container stub with `properties { paths \"<dir>/**\" }`.\n" +
 		"`nugit doctor` reports the full-repo unmodeled backlog; this check only warns about units the PR touches.",
+	"recurrence": "A component this PR touches has accumulated several fix-typed commits (fix:/revert: subjects) inside the\n" +
+		"configured window with no knowledge capture — the failure class is recurring and nothing durable was learned (ADR-0019).\n" +
+		"Fix: capture the why (learned:/keywords: trailer + `nugit distill`, or an ADR/lesson), or — when governing knowledge\n" +
+		"exists but proved too narrow — widen it with `nugit reinforce <id> -text \"…\" -keywords …`.\n" +
+		"Knobs: recurrence.mode (warn|off), recurrence.window_days, recurrence.min_fixes in .nugit/config.yml.",
 }
 
 // topics documents cross-cutting concepts that are not check ids (kept apart

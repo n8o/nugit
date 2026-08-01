@@ -125,6 +125,11 @@ func BuildReport(opt Options) (model.Report, error) {
 		AllObjects: allObjs,
 		Commits:    commits,
 		C4Warn:     cfg.C4Warn(),
+		Recurrence: consistency.RecurrenceOpts{
+			Enabled:    cfg.RecurrenceOn(),
+			WindowDays: cfg.Recurrence.WindowDays,
+			MinFixes:   cfg.Recurrence.MinFixes,
+		},
 	}
 
 	// Order matters: C4<->code first (independent), then significance (uses it),

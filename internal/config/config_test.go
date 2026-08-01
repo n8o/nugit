@@ -73,6 +73,25 @@ func TestLoadReadsFile(t *testing.T) {
 	}
 }
 
+func TestRecurrenceKnobs(t *testing.T) {
+	c := Default()
+	if !c.RecurrenceOn() || c.Recurrence.WindowDays != 90 || c.Recurrence.MinFixes != 3 {
+		t.Errorf("recurrence defaults: %+v", c.Recurrence)
+	}
+	c, err := LoadBytes([]byte("recurrence:\n  mode: OFF\n  window_days: 30\n  min_fixes: 2\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.RecurrenceOn() || c.Recurrence.WindowDays != 30 || c.Recurrence.MinFixes != 2 {
+		t.Errorf("recurrence overlay: %+v", c.Recurrence)
+	}
+	// Unknown mode / non-positive bounds fall back to the defaults.
+	c, _ = LoadBytes([]byte("recurrence:\n  mode: bogus\n  window_days: -1\n"))
+	if !c.RecurrenceOn() || c.Recurrence.WindowDays != 90 {
+		t.Errorf("recurrence normalization: %+v", c.Recurrence)
+	}
+}
+
 func TestUsageLogKnob(t *testing.T) {
 	if c := Default(); c.Usage.Log != "on" {
 		t.Errorf("default usage.log should be on, got %q", c.Usage.Log)

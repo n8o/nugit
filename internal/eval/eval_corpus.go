@@ -1,6 +1,10 @@
 package eval
 
-import "github.com/n8o/nugit/internal/model"
+import (
+	"time"
+
+	"github.com/n8o/nugit/internal/model"
+)
 
 // Shared base: three components (a,b,c); a depends on b (declared). Clean.
 const baseDSL = `workspace "m" {
@@ -114,8 +118,12 @@ func adrPaths(id, scope, status, supersedes, glob string) string {
 }
 
 func lesson(id, scope string) string {
+	return lessonAt(id, scope, "2026-01-01T00:00:00Z")
+}
+
+func lessonAt(id, scope, created string) string {
 	return "---\nschema_version: 1\nid: " + id + "\ntype: lesson\nscope: " + scope +
-		"\nstatus: active\ncreated: 2026-01-01T00:00:00Z\nprovenance:\n  commit: x\n---\n\n# " + id + "\n"
+		"\nstatus: active\ncreated: " + created + "\nprovenance:\n  commit: x\n---\n\n# " + id + "\n"
 }
 
 const warnConfig = "schema_version: 1\nc4:\n  mode: warn\n"
@@ -294,6 +302,52 @@ var corpus = []Case{
 		WantTier:  model.TierTrivial,
 		WantClean: true,
 	},
+	// ---- recurrence (ADR-0019): fix churn with no knowledge delta ----
+	{
+		// Third fix-typed commit on one component inside the window, nothing
+		// captured: the recurrence check must warn (warn-severity: still clean).
+		Name: "recurrence-uncaptured-fixes",
+		History: []Step{
+			{Msg: "fix(a): first regression", Files: map[string]string{"a/a.go": aEdit("r1")}},
+			{Msg: "fix(a): second regression", Files: map[string]string{"a/a.go": aEdit("r2")}},
+		},
+		Head:       map[string]string{"a/a.go": aEdit("r3")},
+		HeadMsg:    "fix(a): third regression",
+		WantTier:   model.TierTrivial,
+		WantChecks: []string{"recurrence"},
+		WantClean:  true,
+	},
+	{
+		// Same churn, but a lesson governing the component was captured inside
+		// the window — the loop closed; recurrence must stay silent.
+		Name: "recurrence-captured-lesson",
+		Base: mergeFiles(baseFiles, map[string]string{
+			".nugit/lessons/fresh.md": lessonAt("LESSON-fresh", "a",
+				time.Now().UTC().Format("2006-01-02T15:04:05Z")),
+		}),
+		History: []Step{
+			{Msg: "fix(a): first regression", Files: map[string]string{"a/a.go": aEdit("r1")}},
+			{Msg: "fix(a): second regression", Files: map[string]string{"a/a.go": aEdit("r2")}},
+		},
+		Head:      map[string]string{"a/a.go": aEdit("r3")},
+		HeadMsg:   "fix(a): third regression",
+		WantTier:  model.TierTrivial,
+		WantClean: true,
+	},
+	{
+		// Same churn, but one in-window commit carried a learned: trailer —
+		// the ADR-0005 capture primitive counts; recurrence must stay silent.
+		Name: "recurrence-trailer-captured",
+		History: []Step{
+			{Msg: "fix(a): first regression", Files: map[string]string{"a/a.go": aEdit("r1")}},
+			{Msg: "fix(a): second regression\n\nlearned: the real invariant\nkeywords: a, invariant",
+				Files: map[string]string{"a/a.go": aEdit("r2")}},
+		},
+		Head:      map[string]string{"a/a.go": aEdit("r3")},
+		HeadMsg:   "fix(a): third regression",
+		WantTier:  model.TierTrivial,
+		WantClean: true,
+	},
 
 	// ---- two-level enforcement (ADR-0017): containers + roll-up ----
 	{
@@ -345,6 +399,12 @@ var corpus = []Case{
 		WantTier:  model.TierTrivial,
 		WantClean: true,
 	},
+}
+
+// aEdit is a small distinct edit to component a (keeps the declared a->b
+// import, one file, tiny churn — trivial tier by construction).
+func aEdit(tag string) string {
+	return "package a\n\nimport _ \"example.com/m/b\"\n\n// " + tag + "\nfunc A() {}\n"
 }
 
 func mergeFiles(a, b map[string]string) map[string]string {

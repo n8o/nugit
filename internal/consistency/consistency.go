@@ -47,6 +47,8 @@ type Input struct {
 	// C4Warn downgrades the c4<->code check from fail to warn (warn-until-ratified
 	// adoption mode; set from config c4.mode).
 	C4Warn bool
+	// Recurrence configures the recurrence check (ADR-0019); zero value disables.
+	Recurrence RecurrenceOpts
 }
 
 // C4CodeFindings runs the C4<->code check plus model-health checks. The
@@ -343,6 +345,7 @@ func OtherFindings(in Input) []model.Finding {
 	fs = append(fs, checkSpecLinkage(in)...)
 	fs = append(fs, checkCaptureHygiene(in)...)
 	fs = append(fs, checkProseSupersession(in)...)
+	fs = append(fs, checkRecurrence(in)...)
 	return Sort(fs)
 }
 
