@@ -77,6 +77,20 @@ func (b Bundle) Markdown() string {
 		w.WriteString("\n")
 	}
 
+	if len(b.PathHistory) > 0 {
+		w.WriteString("**Recent capture on these paths** _(derived from git history)_\n")
+		for _, h := range b.PathHistory {
+			fmt.Fprintf(&w, "- `%s` %s\n", h.SHA, oneLine(h.Subject))
+			if h.Decision != "" {
+				fmt.Fprintf(&w, "  - decision: %s\n", oneLine(h.Decision))
+			}
+			if h.Learned != "" {
+				fmt.Fprintf(&w, "  - learned: %s\n", oneLine(h.Learned))
+			}
+		}
+		w.WriteString("\n")
+	}
+
 	fmt.Fprintf(&w, "_~%d/%d tokens", b.EstimatedTokens, b.BudgetTokens)
 	if b.Truncated {
 		fmt.Fprintf(&w, " · truncated, dropped: %s", strings.Join(b.Dropped, "; "))
