@@ -70,19 +70,21 @@ func relevant(o *model.KnowledgeObject, comp, parent string) bool {
 
 func toItem(o *model.KnowledgeObject, via string) Item {
 	it := Item{
-		ID:        o.ID,
-		Type:      string(o.Type),
-		Scope:     o.Scope,
-		Status:    string(effectiveStatus(o)),
-		Tier:      string(o.Evidence),
-		Path:      o.Path,
-		Summary:   summary(o),
-		Rejected:  o.Rejected,
-		Via:       via,
-		AmendedBy: o.AmendedBy,
+		ID:           o.ID,
+		Type:         string(o.Type),
+		Scope:        o.Scope,
+		Status:       string(effectiveStatus(o)),
+		Tier:         string(o.Evidence),
+		Path:         o.Path,
+		Summary:      summary(o),
+		Rejected:     o.Rejected,
+		Via:          via,
+		AmendedBy:    o.AmendedBy,
+		ReinforcedBy: o.ReinforcedBy,
 	}
 	it.tokens = tokensOf(it.Summary) + tokensOf(it.Rejected) + tokensOf(it.ID) +
-		tokensOf(strings.Join(it.AmendedBy, " ")) + 8
+		tokensOf(strings.Join(it.AmendedBy, " ")) +
+		tokensOf(strings.Join(it.ReinforcedBy, " ")) + 8
 	return it
 }
 

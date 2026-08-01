@@ -31,6 +31,7 @@ import (
 	"github.com/n8o/nugit/internal/notion"
 	"github.com/n8o/nugit/internal/obsidian"
 	"github.com/n8o/nugit/internal/ratify"
+	"github.com/n8o/nugit/internal/reinforce"
 	"github.com/n8o/nugit/internal/render"
 	"github.com/n8o/nugit/internal/retrieval"
 	"github.com/n8o/nugit/internal/scaffold"
@@ -50,6 +51,7 @@ usage:
   nugit remember [flags]      jot ephemeral working memory (.nugit-local/, gitignored)
   nugit distill [flags]       promote commit-trailer decisions/lessons to durable knowledge (as proposed)
   nugit ratify [flags] <id>…  promote proposed knowledge objects to the ratified corpus (ADR-0016)
+  nugit reinforce [flags] <id> append-only reinforcement of a recurring lesson/decision (ADR-0019)
   nugit hook commit-msg <f>   git hook entrypoint: validate the commit-trailer block
   nugit c4 render [flags]      render the C4 model as Mermaid
   nugit c4 gen-rules [flags]   generate go-arch-lint YAML from the C4 model
@@ -129,6 +131,8 @@ func main() {
 		os.Exit(cmdDistill(os.Args[2:]))
 	case "ratify":
 		os.Exit(cmdRatify(os.Args[2:]))
+	case "reinforce":
+		os.Exit(cmdReinforce(os.Args[2:]))
 	case "c4":
 		os.Exit(cmdC4(os.Args[2:]))
 	case "export":
@@ -677,6 +681,42 @@ func cmdRatify(args []string) int {
 		fmt.Println("\nCommit the change with the PR — ratification lands via review (ADR-0011).")
 	}
 	return code
+}
+
+// cmdReinforce mints an append-only reinforcement of a live knowledge object
+// whose failure class recurred (ADR-0019): a new file with a new id and a
+// `reinforces:` edge — the target is never mutated (ADR-0003).
+func cmdReinforce(args []string) int {
+	fs := flag.NewFlagSet("reinforce", flag.ExitOnError)
+	dir := fs.String("C", ".", "repo directory")
+	text := fs.String("text", "", "the reinforcement insight — what the recurrence taught (required)")
+	kw := fs.String("keywords", "", "comma-separated keywords that widen retrieval of the target")
+	status := fs.String("status", "proposed", "minted status: proposed | ratified")
+	_ = fs.Parse(args)
+	if fs.NArg() != 1 {
+		fmt.Fprintln(os.Stderr, "nugit reinforce: usage: nugit reinforce [-C dir] -text \"…\" [-keywords a,b] [-status proposed|ratified] <id>")
+		return 2
+	}
+	var kws []string
+	for _, k := range strings.Split(*kw, ",") {
+		if k = strings.TrimSpace(k); k != "" {
+			kws = append(kws, k)
+		}
+	}
+	res, err := reinforce.Reinforce(reinforce.Options{
+		RepoDir: *dir, ID: fs.Arg(0), Text: *text, Keywords: kws, Status: *status,
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "nugit reinforce: %v\n", err)
+		return 1
+	}
+	fmt.Printf("  reinforced %s  ->  %s (%s)\n", res.Target, res.ID, res.Path)
+	if *status == "ratified" {
+		fmt.Println("\nCommit the new file with the PR — the target object is untouched (ADR-0019).")
+	} else {
+		fmt.Println("\nCommit the new file with the PR, then promote it with `nugit ratify " + res.ID + "` — the target object is untouched (ADR-0019).")
+	}
+	return 0
 }
 
 // cmdRemember writes (or lists) ephemeral working-memory notes in .nugit-local/.

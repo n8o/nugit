@@ -63,6 +63,8 @@ components:
     in: "internal/pyimports/**"
   "ratify":
     in: "internal/ratify/**"
+  "reinforce":
+    in: "internal/reinforce/**"
   "render":
     in: "internal/render/**"
   "retrieval":
@@ -117,6 +119,7 @@ deps:
       - "notion"
       - "obsidian"
       - "ratify"
+      - "reinforce"
       - "render"
       - "retrieval"
       - "scaffold"
@@ -234,6 +237,10 @@ deps:
   "pyimports":
     mayDependOn: []
   "ratify":
+    mayDependOn:
+      - "knowledge"
+      - "model_"
+  "reinforce":
     mayDependOn:
       - "knowledge"
       - "model_"

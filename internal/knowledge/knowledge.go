@@ -57,6 +57,7 @@ func Load(repoDir string) ([]model.KnowledgeObject, error) {
 	}
 	ResolveEffectiveStatus(objs)
 	ResolveAmendedBy(objs)
+	ResolveReinforcedBy(objs)
 	return objs, nil
 }
 
@@ -189,17 +190,7 @@ func ResolveEffectiveStatus(objs []model.KnowledgeObject) {
 // is read together with what overrides part of it. Superseded/invalidated
 // amenders don't annotate (a dead amendment amends nothing).
 func ResolveAmendedBy(objs []model.KnowledgeObject) {
-	amenders := map[string][]string{}
-	for _, o := range objs {
-		if o.ID == "" || o.EffectiveStatus == model.StatusSuperseded || o.EffectiveStatus == model.StatusInvalidated {
-			continue
-		}
-		for _, e := range o.RelatesTo {
-			if edge := ParseEdge(e); edge.Relation == "amends" && edge.Target != "" {
-				amenders[edge.Target] = append(amenders[edge.Target], o.ID)
-			}
-		}
-	}
+	amenders := reverseEdges(objs, "amends")
 	for i := range objs {
 		if ids := amenders[objs[i].ID]; len(ids) > 0 {
 			sort.Strings(ids)
@@ -391,6 +382,37 @@ func InvalidAppliesGlobs(objs []model.KnowledgeObject) []InvalidAppliesGlob {
 		return out[i].Pattern < out[j].Pattern
 	})
 	return out
+}
+
+// ResolveReinforcedBy computes each object's ReinforcedBy from reverse
+// `reinforces:` edges, in place on the slice (ADR-0019). The exact mirror of
+// ResolveAmendedBy: additive, status untouched, dead reinforcers annotate
+// nothing.
+func ResolveReinforcedBy(objs []model.KnowledgeObject) {
+	reinforcers := reverseEdges(objs, "reinforces")
+	for i := range objs {
+		if ids := reinforcers[objs[i].ID]; len(ids) > 0 {
+			sort.Strings(ids)
+			objs[i].ReinforcedBy = ids
+		}
+	}
+}
+
+// reverseEdges indexes live objects by the target of their `relation:` edges.
+// Superseded/invalidated sources are skipped — a dead edge annotates nothing.
+func reverseEdges(objs []model.KnowledgeObject, relation string) map[string][]string {
+	rev := map[string][]string{}
+	for _, o := range objs {
+		if o.ID == "" || o.EffectiveStatus == model.StatusSuperseded || o.EffectiveStatus == model.StatusInvalidated {
+			continue
+		}
+		for _, e := range o.RelatesTo {
+			if edge := ParseEdge(e); edge.Relation == relation && edge.Target != "" {
+				rev[edge.Target] = append(rev[edge.Target], o.ID)
+			}
+		}
+	}
+	return rev
 }
 
 // ParseEdge parses a relates_to entry like "constrains:render" into its parts.

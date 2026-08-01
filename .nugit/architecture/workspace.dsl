@@ -139,6 +139,11 @@ workspace "nugit" "Git-native typed knowledge & unified PR view — self-model (
                     "paths" "internal/ratify/**"
                 }
             }
+            reinforce = component "Reinforcer" "Mints append-only reinforcements of recurring knowledge (ADR-0019)" "Go" {
+                properties {
+                    "paths" "internal/reinforce/**"
+                }
+            }
             evidence = component "Evidence tiers" "Derives the per-object trust tier (enforced/checked/declared/proposed/stale)" "Go" {
                 properties {
                     "paths" "internal/evidence/**"
@@ -291,6 +296,9 @@ workspace "nugit" "Git-native typed knowledge & unified PR view — self-model (
             cli -> ratify "ratify command"
             ratify -> model_ "uses types"
             ratify -> knowledge "loads + resolves objects"
+            cli -> reinforce "reinforce command"
+            reinforce -> model_ "uses types"
+            reinforce -> knowledge "loads + resolves objects"
             evidence -> model_ "uses types"
             evidence -> knowledge "parses relates_to edges"
             evidence -> bootstrap "detects edge-check backends"

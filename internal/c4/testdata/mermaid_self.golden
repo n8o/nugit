@@ -28,6 +28,7 @@ graph LR
   obsidian["Obsidian vault"]
   pyimports["Python analyzer"]
   ratify["Ratifier"]
+  reinforce["Reinforcer"]
   render["Renderer"]
   retrieval["Retrieval"]
   scaffold["Scaffold"]
@@ -62,6 +63,7 @@ graph LR
   cli --> notion
   cli --> obsidian
   cli --> ratify
+  cli --> reinforce
   cli --> render
   cli --> retrieval
   cli --> scaffold
@@ -134,6 +136,8 @@ graph LR
   obsidian --> model_
   ratify --> knowledge
   ratify --> model_
+  reinforce --> knowledge
+  reinforce --> model_
   render --> c4
   render --> model_
   retrieval --> c4

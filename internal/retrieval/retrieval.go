@@ -50,7 +50,10 @@ type Item struct {
 	// direct file binding (ADR-0020). The object applies here regardless of
 	// its scope and ranks with component-scoped items.
 	PathBound bool `json:"path_bound,omitempty"`
-	tokens    int
+	// ReinforcedBy: this object was re-confirmed after a recurrence by these
+	// ids, which widen its applicability (ADR-0019).
+	ReinforcedBy []string `json:"reinforced_by,omitempty"`
+	tokens       int
 }
 
 // C4Slice is the component + its immediate relationships.

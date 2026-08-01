@@ -130,6 +130,11 @@ type KnowledgeObject struct {
 	// records that override PART of this one. The record stays live (unlike
 	// supersession) but must be read together with its amendments (ADR-0015).
 	AmendedBy []string
+	// ReinforcedBy is computed at load time from reverse `reinforces:` edges:
+	// ids of records that re-confirm this one after a recurrence and widen its
+	// retrieval surface (ADR-0019). Purely additive — the target's status is
+	// untouched (unlike supersession) and nothing is overridden (unlike amends).
+	ReinforcedBy []string
 	// Rejected is the extracted "Rejected" rationale (decisions/lessons), the
 	// anti-hallucination field. Computed once at parse time so the renderer never
 	// re-implements the extraction.
