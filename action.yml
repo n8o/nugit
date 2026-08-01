@@ -32,11 +32,14 @@ runs:
       with:
         go-version: "stable"
 
+    # Build from the action's own directory: package paths resolve against the
+    # module in the CURRENT dir, so building from the consumer's working dir
+    # fails ("cannot find main module") in any repo that isn't nugit itself.
     - name: Build nugit
       shell: bash
       env:
         ACTION_PATH: ${{ github.action_path }}
-      run: go build -o "$RUNNER_TEMP/nugit" "$ACTION_PATH/cmd/nugit"
+      run: cd "$ACTION_PATH" && go build -o "$RUNNER_TEMP/nugit" ./cmd/nugit
 
     # Every input is passed through env (NEVER interpolated into the script body)
     # so an attacker-influenced value can't inject shell — GitHub's required pattern.
