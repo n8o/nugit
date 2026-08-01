@@ -120,7 +120,9 @@ graph LR
   icepanel --> model_
   knowledge --> gitutil
   knowledge --> model_
+  localmem --> gitutil
   mapping --> model_
+  mcp --> gitutil
   mcp --> retrieval
   mcp --> usage
   modelfacts --> cmake
