@@ -162,8 +162,9 @@ func glossaryTerms(o *model.KnowledgeObject, task, path string) []string {
 	return out
 }
 
-// sortItems orders nearer-scope (component-scoped) before global, current status
-// before superseded, then by ID — so truncation drops the least-relevant first.
+// sortItems orders nearer-scope (component-scoped or path-bound) before
+// global, current status before superseded, then by ID — so truncation drops
+// the least-relevant first.
 func sortItems(items []Item) {
 	sort.SliceStable(items, func(i, j int) bool {
 		gi, gj := scopeRank(items[i]), scopeRank(items[j])
@@ -179,6 +180,9 @@ func sortItems(items []Item) {
 }
 
 func scopeRank(it Item) int {
+	if it.PathBound {
+		return 0 // a direct path match is as near as component scope (ADR-0020)
+	}
 	if it.Scope == "" || it.Scope == "global" {
 		return 1
 	}

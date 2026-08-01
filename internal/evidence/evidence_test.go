@@ -30,6 +30,12 @@ func obj(status model.Status, scope string, relates ...string) model.KnowledgeOb
 	return o
 }
 
+// withPaths adds a direct applies_to_paths binding (ADR-0020).
+func withPaths(o model.KnowledgeObject, globs ...string) model.KnowledgeObject {
+	o.AppliesToPaths = globs
+	return o
+}
+
 func TestTierOfMatrix(t *testing.T) {
 	full := Signals{Model: mdl(false, comp("a", true), comp("b", true)), Enforce: true, Backend: true}
 
@@ -51,6 +57,13 @@ func TestTierOfMatrix(t *testing.T) {
 			Signals{Model: mdl(false, comp("a", true), comp("unbound", false)), Enforce: true, Backend: true},
 			model.EvidenceChecked},
 		{"global with no edges is declared", obj(model.StatusAccepted, "global"), full, model.EvidenceDeclared},
+		// ADR-0020: a direct applies_to_paths binding counts as a binding
+		// (never merely declared) but caps at checked — it is verified only by
+		// the warn-severity stale-knowledge check, never edge-enforced.
+		{"path-bound only is checked, not declared",
+			withPaths(obj(model.StatusAccepted, "global"), "third_party/**"), full, model.EvidenceChecked},
+		{"applies_to_paths caps an otherwise-enforced object at checked",
+			withPaths(obj(model.StatusAccepted, "a"), "helm/**"), full, model.EvidenceChecked},
 		{"governs only unknown components is declared", obj(model.StatusAccepted, "global", "constrains:ghost"),
 			full, model.EvidenceDeclared},
 		{"proposed beats enforced", obj(model.StatusProposed, "a"), full, model.EvidenceProposed},

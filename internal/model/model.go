@@ -60,8 +60,11 @@ const (
 	// architecture edges touching them are mechanically enforced (fail
 	// severity) at PR time.
 	EvidenceEnforced Evidence = "enforced"
-	// EvidenceChecked: at least one governed component is path-bound, but
-	// enforcement is off (warn mode, no backend, or structural model).
+	// EvidenceChecked: at least one governed component is path-bound (or the
+	// object binds paths directly via applies_to_paths, ADR-0020), but the
+	// binding is not fully edge-enforced (warn mode, no backend, structural
+	// model, partial binding, or a direct path binding — which only the
+	// warn-severity stale-knowledge check verifies).
 	EvidenceChecked Evidence = "checked"
 	// EvidenceDeclared: written down; nothing binds it to code.
 	EvidenceDeclared Evidence = "declared"
@@ -104,6 +107,13 @@ type FrontMatter struct {
 	// Source is the external origin of a reference object (URL/DOI/standard id).
 	// The body holds distilled claims; Source links to the full document.
 	Source string `yaml:"source,omitempty"`
+	// AppliesToPaths optionally binds the object DIRECTLY to repo paths
+	// (doublestar globs, repo-relative — the ADR-0002 dialect), with no C4
+	// component in between (ADR-0020). Retrieval includes the object for a
+	// matching queried path as if it were component-scoped, and the
+	// stale-knowledge check treats a PR touching a matched path as touching
+	// the object's governed surface.
+	AppliesToPaths []string `yaml:"applies_to_paths,omitempty"`
 }
 
 // KnowledgeObject is one parsed durable record (a markdown file under .nugit/**).

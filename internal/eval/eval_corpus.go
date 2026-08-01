@@ -103,6 +103,16 @@ func adrProse(id, scope, supersedes, prose string) string {
 	return adrWith(id, scope, "accepted", supersedes) + "\n" + prose + "\n"
 }
 
+// adrPaths is adrWith() plus a direct applies_to_paths binding (ADR-0020).
+func adrPaths(id, scope, status, supersedes, glob string) string {
+	s := "---\nschema_version: 1\nid: " + id + "\ntype: decision\nscope: " + scope +
+		"\nstatus: " + status + "\ncreated: 2026-01-01T00:00:00Z\napplies_to_paths:\n  - \"" + glob + "\"\n"
+	if supersedes != "" {
+		s += "supersedes: " + supersedes + "\n"
+	}
+	return s + "provenance:\n  commit: x\n---\n\n# " + id + "\n"
+}
+
 func lesson(id, scope string) string {
 	return "---\nschema_version: 1\nid: " + id + "\ntype: lesson\nscope: " + scope +
 		"\nstatus: active\ncreated: 2026-01-01T00:00:00Z\nprovenance:\n  commit: x\n---\n\n# " + id + "\n"
@@ -164,6 +174,22 @@ var corpus = []Case{
 			".nugit/decisions/new.md": adr("ADR-NEW", "a", "ADR-OLD"),
 		}),
 		Head:       map[string]string{"a/a.go": "package a\n\nimport _ \"example.com/m/b\"\n\n// touch governed code.\nfunc A() {}\n"},
+		WantTier:   model.TierTrivial,
+		WantChecks: []string{"stale-knowledge"},
+		WantClean:  true,
+	},
+	{
+		// ADR-0020: a stale object bound DIRECTLY to an infra file via
+		// applies_to_paths is touched when the PR changes that file — no C4
+		// component involved (the file is unmapped, like the pilot's
+		// third_party/ surface).
+		Name: "stale-knowledge-path-bound",
+		Base: mergeFiles(baseFiles, map[string]string{
+			"third_party/versions.env": "PIN=1\n",
+			".nugit/decisions/old.md":  adrPaths("ADR-OLD", "global", "accepted", "", "third_party/**"),
+			".nugit/decisions/new.md":  adr("ADR-NEW", "global", "ADR-OLD"),
+		}),
+		Head:       map[string]string{"third_party/versions.env": "PIN=2\n"},
 		WantTier:   model.TierTrivial,
 		WantChecks: []string{"stale-knowledge"},
 		WantClean:  true,

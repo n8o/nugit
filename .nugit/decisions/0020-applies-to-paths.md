@@ -32,11 +32,11 @@ far it doesn't:
   *architecture*; these files are real governed surface but not components.
 - **4 of 21 logged retrievals resolved `component: ""`** and degraded to
   global-only bundles — the scope chain had nothing to hang knowledge on.
-- The **#1923 preview-freeze root cause lived in `third_party/versions.env`**
+- The **pilot preview-freeze root cause lived in `third_party/versions.env`**
   — a file that the pilot's own ADR-0020 (MoQ draft lock, `scope: global`) is
   ENTIRELY about — yet nothing connected the file to the ADR: global scope
   only surfaces on task-keyword match, and the task wording didn't happen to
-  hit. Same shape for `k8s/registry-local/configmap.yaml` (the zot
+  hit. Same shape for `k8s/registry-local/configmap.yaml` (the registry-retention
   recurrence): the lesson existed; the file couldn't summon it.
 
 Inventing pseudo-components for every infra file fights the model (fake
@@ -113,7 +113,7 @@ live decision is exactly the `amends:` edge.
   helm` is ambiguous between a component id and a directory, and every
   consumer of `scope` would need to disambiguate. A separate field keeps
   `scope` a C4 element reference, as everywhere else.
-- **Better keyword matching instead of a binding.** The #1923 file was
+- **Better keyword matching instead of a binding.** That file was
   *entirely* covered by an ADR and keywords still missed it — keyword match
   is opportunistic; a declared binding is deterministic, and determinism is
   the retrieval contract (ADR-0004, ADR-0006).
@@ -125,7 +125,7 @@ live decision is exactly the `amends:` edge.
 ## Consequences
 
 - A global ADR that is *about a file* now surfaces whenever that file is
-  queried or touched — the #1923 and zot shapes stop depending on lucky task
+  queried or touched — both shapes stop depending on lucky task
   wording. The 4/21 `component: ""` retrievals get a non-global lane.
 - Declaring `applies_to_paths` on an object whose components are fully
   enforced downgrades its tier from `enforced` to `checked`. That is the

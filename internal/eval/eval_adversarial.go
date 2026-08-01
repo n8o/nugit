@@ -93,6 +93,21 @@ var adversarial = []Case{
 		WantClean: true,
 	},
 	{
+		// A stale object path-bound to third_party/** while the PR touches a
+		// DIFFERENT unmapped infra file — the binding must not become a
+		// wildcard nag (ADR-0020).
+		Name: "stale-path-bound-elsewhere",
+		Base: mergeFiles(baseFiles, map[string]string{
+			"third_party/versions.env": "PIN=1\n",
+			"helm/values.yaml":         "replicas: 1\n",
+			".nugit/decisions/old.md":  adrPaths("ADR-OLD", "global", "accepted", "", "third_party/**"),
+			".nugit/decisions/new.md":  adr("ADR-NEW", "global", "ADR-OLD"),
+		}),
+		Head:      map[string]string{"helm/values.yaml": "replicas: 2\n"},
+		WantTier:  model.TierTrivial,
+		WantClean: true,
+	},
+	{
 		// Architectural change whose why is recorded ONLY as a trailer — the
 		// ADR-0005 capture primitive satisfies decision-coverage on its own,
 		// and a complete block keeps capture-hygiene silent too.

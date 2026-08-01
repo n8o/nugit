@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/bmatcuk/doublestar/v4"
 	"github.com/n8o/nugit/internal/gitutil"
 	"github.com/n8o/nugit/internal/model"
 	"gopkg.in/yaml.v3"
@@ -340,6 +341,56 @@ func hasAmendsEdge(o *model.KnowledgeObject, target string) bool {
 		}
 	}
 	return false
+}
+
+// AppliesTo reports whether the repo-relative path matches any of the object's
+// applies_to_paths globs (ADR-0020) — the direct path binding that needs no C4
+// component in between. Syntactically invalid globs never match; they are
+// surfaced as model-health findings via InvalidAppliesGlobs, never silently
+// dropped.
+func AppliesTo(o *model.KnowledgeObject, path string) bool {
+	path = strings.TrimPrefix(path, "./")
+	for _, g := range o.AppliesToPaths {
+		if !doublestar.ValidatePattern(g) {
+			continue
+		}
+		if ok, _ := doublestar.Match(g, path); ok {
+			return true
+		}
+	}
+	return false
+}
+
+// InvalidAppliesGlob names a syntactically invalid applies_to_paths glob on a
+// knowledge object — it can never match, so the binding is dead.
+type InvalidAppliesGlob struct {
+	ID      string // object id ("" for untyped objects)
+	Path    string // record file path
+	Pattern string
+}
+
+// InvalidAppliesGlobs returns every invalid applies_to_paths glob across the
+// set, sorted for deterministic output — the knowledge-side mirror of
+// mapping.InvalidPatterns (report, never silently drop).
+func InvalidAppliesGlobs(objs []model.KnowledgeObject) []InvalidAppliesGlob {
+	var out []InvalidAppliesGlob
+	for _, o := range objs {
+		for _, g := range o.AppliesToPaths {
+			if !doublestar.ValidatePattern(g) {
+				out = append(out, InvalidAppliesGlob{ID: o.ID, Path: o.Path, Pattern: g})
+			}
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].ID != out[j].ID {
+			return out[i].ID < out[j].ID
+		}
+		if out[i].Path != out[j].Path {
+			return out[i].Path < out[j].Path
+		}
+		return out[i].Pattern < out[j].Pattern
+	})
+	return out
 }
 
 // ParseEdge parses a relates_to entry like "constrains:render" into its parts.

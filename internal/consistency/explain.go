@@ -19,6 +19,8 @@ var explanations = map[string]string{
 		"Fix: add the `src -> dst` relationship, remove the import, or install dependency-cruiser to enforce TS edges.\n" +
 		"In a leveled model a container edge `A -> B` also covers cross-container component imports (roll-up); intra-container pairs need a component-level edge.",
 	"stale-knowledge": "The PR changes code governed by a superseded/invalidated knowledge object without updating it.\n" +
+		"The governed surface is reached via governed components (scope/constrains edges) or via a direct\n" +
+		"`applies_to_paths` file binding (ADR-0020) — the latter needs no C4 component.\n" +
 		"Fix: update the object, or supersede it with a new record.",
 	"decision-coverage": "An architecturally-significant change has no accompanying decision record.\n" +
 		"A `status: proposed` ADR is a candidate, not ratified knowledge, so it does not satisfy this check (ADR-0016).\n" +
@@ -28,7 +30,8 @@ var explanations = map[string]string{
 	"capture-hygiene": "A commit trailer block is present but missing a mandatory field (learned:/keywords:).\n" +
 		"Fix: add the field, or drop the trailer block.",
 	"model-health": "workspace.dsl has a duplicate element id (components and containers share one namespace), an invalid\n" +
-		"path glob, or a relationship endpoint that names no declared component or container.\n" +
+		"path glob, or a relationship endpoint that names no declared component or container — or a knowledge object\n" +
+		"declares an invalid `applies_to_paths` glob (ADR-0020), so its file binding is dead.\n" +
 		"Fix: rename/merge the duplicate, correct the glob, or fix/declare the endpoint.",
 	"prose-supersession": "A knowledge object added/modified by this PR declares in prose (\"Supersedes <id>\") that it replaces a live\n" +
 		"store object, but carries no front-matter `supersedes:`/`amends:` edge. Effective status is derived from edges\n" +
@@ -45,7 +48,9 @@ var explanations = map[string]string{
 var topics = map[string]string{
 	"evidence-tiers": "Every knowledge object carries a derived trust tier — how much of it nugit mechanically verifies:\n" +
 		"  enforced — every governed component is path-bound AND the c4<->code edge checks fail on violations (enforce mode, backend active).\n" +
-		"  checked  — at least one governed component is path-bound, but enforcement is off (warn mode, no backend, or structural model).\n" +
+		"  checked  — at least one governed component is path-bound (or the object binds files directly via applies_to_paths,\n" +
+		"             ADR-0020 — capped here: a direct binding is verified only by the warn-severity stale-knowledge check),\n" +
+		"             but the binding is not fully edge-enforced (warn mode, no backend, or structural model).\n" +
 		"  declared — written down; no scope/constrains edge binds it to code.\n" +
 		"  proposed — candidate lane (ADR-0016), awaiting `nugit ratify`.\n" +
 		"  stale    — superseded or invalidated.\n" +
