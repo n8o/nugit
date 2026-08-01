@@ -1,6 +1,7 @@
 package render
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -88,5 +89,80 @@ func TestMarkdownKnowledgeTier(t *testing.T) {
 	md := Markdown(rep)
 	if !strings.Contains(md, "(a, accepted, checked)") {
 		t.Errorf("knowledge bullet missing tier:\n%s", md)
+	}
+}
+
+// ADR-0026: a downgraded run leads with the same notice in every format —
+// first markdown line, check-run title prefix, and first structured-JSON field.
+func TestDowngradeNoticeAllFormats(t *testing.T) {
+	const notice = "enforcement downgraded by flag: config says fail, running with none"
+	rep := model.Report{
+		Enforcement:  model.NewEnforcementDowngrade("fail", "none"),
+		BaseRef:      "base",
+		Code:         model.CodeDelta{ByComp: map[string][]model.FileChange{}},
+		Significance: model.Significance{Tier: model.TierTrivial, Reasons: []string{"small change"}},
+	}
+	if rep.Enforcement.Notice != notice {
+		t.Fatalf("canonical notice drifted: %q", rep.Enforcement.Notice)
+	}
+
+	md := Markdown(rep)
+	first := strings.SplitN(md, "\n", 2)[0]
+	if !strings.Contains(first, notice) {
+		t.Errorf("markdown must lead with the notice; first line: %q", first)
+	}
+
+	crb, err := CheckRunJSON(rep)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cr CheckRun
+	if err := json.Unmarshal(crb, &cr); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(cr.Title, notice) {
+		t.Errorf("check-run title must start with the notice, got %q", cr.Title)
+	}
+	if !strings.Contains(cr.Summary, notice) {
+		t.Error("check-run summary (markdown) must carry the notice")
+	}
+
+	sj, err := StructuredJSON(rep)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(sj)
+	if !strings.Contains(s, notice) {
+		t.Errorf("structured JSON must carry the notice:\n%s", s)
+	}
+	// Enforcement is the first field so the notice is on the JSON's first lines.
+	if ei, bi := strings.Index(s, `"Enforcement"`), strings.Index(s, `"BaseRef"`); ei < 0 || bi < 0 || ei > bi {
+		t.Errorf("Enforcement must lead the structured JSON (Enforcement@%d, BaseRef@%d)", ei, bi)
+	}
+}
+
+// ADR-0026: no downgrade → no notice anywhere, and no Enforcement JSON key
+// (undowngraded output stays byte-identical; the flat golden also guards this).
+func TestNoDowngradeNoNotice(t *testing.T) {
+	rep := model.Report{
+		Code:         model.CodeDelta{ByComp: map[string][]model.FileChange{}},
+		Significance: model.Significance{Tier: model.TierTrivial, Reasons: []string{"small change"}},
+	}
+	if strings.Contains(Markdown(rep), "enforcement downgraded") {
+		t.Error("markdown must not mention a downgrade when none happened")
+	}
+	sj, err := StructuredJSON(rep)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(sj), "Enforcement") {
+		t.Errorf("nil Enforcement must be omitted from structured JSON:\n%s", sj)
+	}
+	crb, err := CheckRunJSON(rep)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(crb), "enforcement downgraded") {
+		t.Error("check-run must not mention a downgrade when none happened")
 	}
 }

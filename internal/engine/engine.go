@@ -25,6 +25,11 @@ type Options struct {
 	Base    string
 	Head    string
 	DSLPath string // defaults to delta.DefaultDSLPath
+	// FailOnFlag is the -fail-on value ONLY when the caller passed it
+	// explicitly; "" when the flag defaulted from config. Used to record an
+	// enforcement downgrade on the report (ADR-0026) — the engine never owns
+	// the exit-code policy itself.
+	FailOnFlag string
 }
 
 // BuildReport computes the four deltas, the significance verdict, and the
@@ -151,6 +156,12 @@ func BuildReport(opt Options) (model.Report, error) {
 		Findings:     findings,
 		Significance: sig,
 		HeadModel:    headModel,
+	}
+	// ADR-0026: an explicit flag weaker than the config-declared policy is
+	// honored (visibility, not coercion) but must be visible in every render.
+	// Compared against config at head, like every other engine input.
+	if opt.FailOnFlag != "" && config.FailOnRank(opt.FailOnFlag) < config.FailOnRank(cfg.PRRender.FailOn) {
+		rep.Enforcement = model.NewEnforcementDowngrade(cfg.PRRender.FailOn, opt.FailOnFlag)
 	}
 	// Opt-in, off by default: inert (no network) unless explicitly enabled +
 	// architectural + ANTHROPIC_API_KEY set. Never alters the deterministic facts.

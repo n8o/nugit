@@ -5,7 +5,10 @@
 // so it can never participate in an import cycle.
 package model
 
-import "time"
+import (
+	"fmt"
+	"time"
+)
 
 // Kind enumerates the durable knowledge types. The c4 model is intentionally
 // NOT a content-addressed KnowledgeObject (it is a single DSL file); see
@@ -442,9 +445,36 @@ type Significance struct {
 
 // ---- Top-level render input ----
 
+// EnforcementDowngrade records that an explicit CLI -fail-on weakened the
+// config-declared pr_render.fail_on policy (ADR-0026: enforcement knobs must
+// not silently cancel). Presence means "this run is weaker than the repo
+// declared". The exit-code policy still follows the flag — the downgrade is
+// made visible, never overridden.
+type EnforcementDowngrade struct {
+	// Notice is the canonical one-line sentence every output format leads with.
+	Notice          string
+	ConfigFailOn    string // pr_render.fail_on declared in config.yml at head
+	EffectiveFailOn string // the weaker -fail-on this run actually applied
+}
+
+// NewEnforcementDowngrade builds the record with its canonical notice line, so
+// markdown, check-run, and structured JSON all carry the identical sentence.
+func NewEnforcementDowngrade(configFailOn, effective string) *EnforcementDowngrade {
+	return &EnforcementDowngrade{
+		Notice: fmt.Sprintf("enforcement downgraded by flag: config says %s, running with %s",
+			configFailOn, effective),
+		ConfigFailOn:    configFailOn,
+		EffectiveFailOn: effective,
+	}
+}
+
 // Report is the fully-computed input to the renderer: everything deterministic,
 // assembled before any prose is generated.
 type Report struct {
+	// Enforcement is non-nil only when an explicit -fail-on downgraded the
+	// config-declared policy (ADR-0026). Declared first so the notice leads the
+	// structured JSON; omitempty keeps undowngraded output byte-identical.
+	Enforcement  *EnforcementDowngrade `json:",omitempty"`
 	BaseRef      string
 	HeadRef      string
 	Commits      []Commit

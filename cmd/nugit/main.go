@@ -842,6 +842,10 @@ func cmdPRRender(args []string) int {
 	failOn := fs.String("fail-on", "", "exit non-zero at severity: fail|warn|none (default from config.yml, else fail)")
 	_ = fs.Parse(args)
 
+	// ADR-0026: remember whether -fail-on was explicit — an explicit flag weaker
+	// than config is honored, but the report must surface the downgrade.
+	explicitFailOn := *failOn
+
 	// An unset -fail-on takes its default from config.yml (pr_render.fail_on).
 	if *failOn == "" {
 		if cfg, err := config.Load(*dir); err == nil {
@@ -858,7 +862,7 @@ func cmdPRRender(args []string) int {
 		return 2
 	}
 
-	rep, err := engine.BuildReport(engine.Options{RepoDir: *dir, Base: *base, Head: *head})
+	rep, err := engine.BuildReport(engine.Options{RepoDir: *dir, Base: *base, Head: *head, FailOnFlag: explicitFailOn})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "nugit: %v\n", err)
 		return 1
