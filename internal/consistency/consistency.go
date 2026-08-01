@@ -17,6 +17,7 @@ import (
 	"github.com/n8o/nugit/internal/evidence"
 	"github.com/n8o/nugit/internal/gitutil"
 	"github.com/n8o/nugit/internal/goimports"
+	"github.com/n8o/nugit/internal/knowledge"
 	"github.com/n8o/nugit/internal/mapping"
 	"github.com/n8o/nugit/internal/model"
 	"github.com/n8o/nugit/internal/pyimports"
@@ -270,7 +271,41 @@ func OtherFindings(in Input) []model.Finding {
 	fs = append(fs, checkDecisionCoverage(in)...)
 	fs = append(fs, checkSpecLinkage(in)...)
 	fs = append(fs, checkCaptureHygiene(in)...)
+	fs = append(fs, checkProseSupersession(in)...)
 	return Sort(fs)
+}
+
+// checkProseSupersession: a knowledge object this PR adds or modifies declares
+// in prose ("Supersedes <id>") that it replaces a live store object, but
+// carries no front-matter `supersedes:`/`amends:` edge — effective status is
+// derived from edges only (ADR-0003), so retrieval would keep serving BOTH
+// texts as live (ADR-0022). Scoped to PR-touched objects: pre-existing store
+// drift is `nugit doctor`'s job, not every PR's.
+func checkProseSupersession(in Input) []model.Finding {
+	touched := map[string]bool{}
+	for _, kc := range in.Knowledge.Changes {
+		if kc.Object != nil && kc.Object.ID != "" && (kc.Status == "A" || kc.Status == "M") {
+			touched[kc.Object.ID] = true
+		}
+	}
+	if len(touched) == 0 {
+		return nil
+	}
+	var fs []model.Finding
+	for _, p := range knowledge.ProseOnlySupersessions(in.AllObjects) {
+		if !touched[p.ObjectID] {
+			continue
+		}
+		fs = append(fs, model.Finding{
+			Check:    "prose-supersession",
+			Severity: model.SevWarn,
+			Title:    fmt.Sprintf("%s supersedes %s in prose only", p.ObjectID, p.Target),
+			Detail: fmt.Sprintf("%s (%s) says it supersedes %s, but declares no front-matter edge, so %s (%s) still serves as live; "+
+				"add `supersedes: %s` (or `relates_to: [amends:%s]` for partial supersession) so EffectiveStatus updates",
+				p.ObjectID, p.ObjectPath, p.Target, p.Target, p.TargetPath, p.Target, p.Target),
+		})
+	}
+	return fs
 }
 
 // checkCaptureHygiene surfaces commits whose trailer block is missing a mandatory
@@ -298,6 +333,7 @@ func Check(in Input) []model.Finding {
 	fs = append(fs, checkDecisionCoverage(in)...)
 	fs = append(fs, checkSpecLinkage(in)...)
 	fs = append(fs, checkCaptureHygiene(in)...)
+	fs = append(fs, checkProseSupersession(in)...)
 	return Sort(fs)
 }
 
