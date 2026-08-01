@@ -188,6 +188,16 @@ var corpus = []Case{
 		WantClean:  true,
 	},
 	{
+		// ADR-0018: a clean, high-quality trailer feeds the PR-time proposal
+		// surface but must never mint a finding — a proposal is an offer, not
+		// a defect. Guards the proposal path against leaking into checks.
+		Name:      "trailer-proposal-no-findings",
+		Head:      map[string]string{"a/a.go": "package a\n\nimport _ \"example.com/m/b\"\n\n// edit.\nfunc A() {}\n"},
+		HeadMsg:   "fix: thing\n\nlearned: keep timeouts explicit\nkeywords: timeout, config\n",
+		WantTier:  model.TierTrivial,
+		WantClean: true,
+	},
+	{
 		Name:      "test-import-not-flagged",
 		Head:      map[string]string{"a/a_test.go": "package a\n\nimport _ \"example.com/m/c\"\n"}, // a->c undeclared, but _test
 		WantTier:  model.TierTrivial,

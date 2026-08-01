@@ -440,6 +440,23 @@ type Significance struct {
 	Reasons []string
 }
 
+// ---- PR-time distill proposals (ADR-0018) ----
+
+// Proposal is one distillable commit trailer surfaced at PR time as a
+// ready-to-apply knowledge candidate: exactly what `nugit distill` would write
+// into the candidate lane (`status: proposed`, ADR-0016) for this range.
+// Computed deterministically from the PR's own commits; rendering never writes.
+type Proposal struct {
+	Kind     Kind     // decision | lesson
+	Title    string   // first line of the trailer text (truncated)
+	Text     string   // the full decision:/learned: trailer text
+	Rejected string   `json:",omitempty"`
+	Scope    string   // affects-derived scope: the single component, else global
+	Keywords []string `json:",omitempty"`
+	Commit   string   // short source-commit SHA
+	Subject  string   // source-commit subject line (the trigger)
+}
+
 // ---- Top-level render input ----
 
 // Report is the fully-computed input to the renderer: everything deterministic,
@@ -455,6 +472,12 @@ type Report struct {
 	Findings     []Finding
 	Significance Significance
 	Narrative    string // optional opt-in LLM prose; "" on the deterministic path
+	// Proposals is the PR-time distill candidate set (ADR-0018): trailers in
+	// this range that `nugit distill` would promote into the candidate lane.
+	Proposals []Proposal `json:",omitempty"`
+	// ProposalsDeduped counts candidates suppressed because the store already
+	// carries an equivalent object (exact text or keyword overlap).
+	ProposalsDeduped int `json:",omitempty"`
 	// HeadModel feeds the in-comment C4 diagram only; kept out of the structured
 	// JSON contract (it would leak every component's path globs to reviewer agents).
 	HeadModel Model `json:"-"`

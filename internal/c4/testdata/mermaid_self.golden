@@ -95,6 +95,7 @@ graph LR
   engine --> config
   engine --> consistency
   engine --> delta
+  engine --> distill
   engine --> evidence
   engine --> gitutil
   engine --> goimports
