@@ -119,7 +119,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
-      - uses: n8o/nugit@v0.2.0      # builds nugit, renders, sticky PR comment + gate
+      - uses: n8o/nugit@v0.3.0      # builds nugit, renders, sticky PR comment + gate
         with: { fail-on: fail }
 ```
 
@@ -149,7 +149,7 @@ internal/
   render/             markdown / check-run / JSON
   engine/             orchestration: two refs in, a Report out
 .nugit/               nugit's OWN knowledge (model, decisions, spec, glossary)
-docs/ · PLAN.md       the re-shaped plan and design decisions
+PLAN.md · ROADMAP.md  the re-shaped plan; ADRs live in .nugit/decisions/
 ```
 
 ## Design decisions
@@ -163,14 +163,14 @@ file→component primitive).
 ## Install & upgrade
 
 ```sh
-go install github.com/n8o/nugit/cmd/nugit@latest    # or @v0.2.0 to pin a release
+go install github.com/n8o/nugit/cmd/nugit@latest    # or @v0.3.0 to pin a release
 nugit version                                        # confirm what you have
 ```
 
 **Upgrade** by re-running the same command (`@latest` or a newer tag) — it
 overwrites the binary in place, so an existing MCP wiring (`.mcp.json` points at
 the binary) and the `nugit` skill keep working; just restart your editor so it
-relaunches the MCP server. In CI, bump the Action pin (`uses: n8o/nugit@v0.2.0` →
+relaunches the MCP server. In CI, bump the Action pin (`uses: n8o/nugit@v0.3.0` →
 the new tag). `.nugit/` stores are plain git text and forward-compatible within a
 schema version. Ensure `~/go/bin` is on `PATH`.
 
