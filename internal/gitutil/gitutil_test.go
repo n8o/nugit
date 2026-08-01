@@ -228,3 +228,51 @@ func TestLogSince(t *testing.T) {
 		t.Fatalf("max-count: got %d commits", len(got))
 	}
 }
+
+func TestNumstatCached(t *testing.T) {
+	dir := t.TempDir()
+	mustGit(t, dir, "init")
+	if err := os.WriteFile(filepath.Join(dir, "a.txt"), []byte("one\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mustGit(t, dir, "add", ".")
+	mustGit(t, dir, "commit", "-m", "root")
+
+	// clean index: empty map, no error
+	counts, err := (Repo{Dir: dir}).NumstatCached(5 * time.Second)
+	if err != nil || len(counts) != 0 {
+		t.Fatalf("clean index: want empty, got %v err=%v", counts, err)
+	}
+
+	// staged change appears; unstaged change does not
+	if err := os.WriteFile(filepath.Join(dir, "a.txt"), []byte("one\ntwo\nthree\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "b.txt"), []byte("unstaged\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mustGit(t, dir, "add", "a.txt") // b.txt stays unstaged (untracked)
+	counts, err = (Repo{Dir: dir}).NumstatCached(5 * time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := counts["a.txt"]; !ok || got != [2]int{2, 0} {
+		t.Errorf("a.txt: want [2 0], got %v (ok=%v)", got, ok)
+	}
+	if _, ok := counts["b.txt"]; ok {
+		t.Error("unstaged b.txt must not appear in the cached diff")
+	}
+}
+
+func TestNumstatCachedErrors(t *testing.T) {
+	// not a git repo: error, never a silent empty result
+	if _, err := (Repo{Dir: t.TempDir()}).NumstatCached(5 * time.Second); err == nil {
+		t.Error("non-repo must return an error")
+	}
+	// expired timeout: bounded — returns an error instead of stalling the commit
+	dir := t.TempDir()
+	mustGit(t, dir, "init")
+	if _, err := (Repo{Dir: dir}).NumstatCached(time.Nanosecond); err == nil {
+		t.Error("an already-expired timeout must surface as an error")
+	}
+}
