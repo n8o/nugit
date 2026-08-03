@@ -71,6 +71,8 @@ components:
     in: "internal/scaffold/**"
   "significance":
     in: "internal/significance/**"
+  "skillopt":
+    in: "internal/skillopt/**"
   "trailers":
     in: "internal/trailers/**"
   "tsdeps":
@@ -118,6 +120,7 @@ deps:
       - "render"
       - "retrieval"
       - "scaffold"
+      - "skillopt"
       - "trailers"
       - "usage"
   "cmake":
@@ -246,6 +249,10 @@ deps:
       - "gitutil"
   "significance":
     mayDependOn:
+      - "model_"
+  "skillopt":
+    mayDependOn:
+      - "knowledge"
       - "model_"
   "trailers":
     mayDependOn:

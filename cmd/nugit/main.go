@@ -34,6 +34,7 @@ import (
 	"github.com/n8o/nugit/internal/render"
 	"github.com/n8o/nugit/internal/retrieval"
 	"github.com/n8o/nugit/internal/scaffold"
+	"github.com/n8o/nugit/internal/skillopt"
 	"github.com/n8o/nugit/internal/trailers"
 	usagelog "github.com/n8o/nugit/internal/usage"
 )
@@ -57,6 +58,7 @@ usage:
   nugit doctor [flags]        setup pre-flight health checks
   nugit obsidian [flags]      (re)generate .nugit/INDEX.md for the Obsidian vault
   nugit notion publish [flags] publish the knowledge corpus to a Notion database
+  nugit export [flags]        export the knowledge store as eval cases (JSONL, skill-optimizer)
   nugit explain [check]       rationale + remediation for a consistency check
   nugit pr-render [flags]      compute & render the unified PR view
   nugit version
@@ -83,6 +85,13 @@ init flags:
   -component-dirs d comma-separated container dirs for structural layout
   -no-model         scaffold only; write a template workspace.dsl
   -force            overwrite existing .nugit files
+
+export flags:
+  -C dir         repo directory (default ".")
+  -format f      skillopt (default) — JSONL eval cases for a skill optimizer (ADR-0027)
+  -o path        write the JSONL here instead of stdout
+  -min-tier t    high-2 (default: emit thin triggers too) | high-3 (rich triggers only)
+  -report path   write the full JSON report here (a summary always goes to stderr)
 
 pr-render flags:
   -C dir         repo directory (default ".")
@@ -120,6 +129,8 @@ func main() {
 		os.Exit(cmdRatify(os.Args[2:]))
 	case "c4":
 		os.Exit(cmdC4(os.Args[2:]))
+	case "export":
+		os.Exit(cmdExport(os.Args[2:]))
 	case "explain":
 		os.Exit(cmdExplain(os.Args[2:]))
 	case "doctor":
@@ -519,6 +530,55 @@ func c4Preview(dir, dslPath, port string) int {
 		fmt.Fprintf(os.Stderr, "nugit c4 preview: %v\n", err)
 		return 1
 	}
+	return 0
+}
+
+// cmdExport projects the knowledge store OUTBOUND as an external artifact
+// (ADR-0027): today one format, `skillopt` — JSONL eval cases for a skill
+// optimizer, so the benchmark corpus is a DERIVED artifact that regenerates
+// with the store instead of a hand-mined snapshot that freezes.
+//
+// The JSONL goes to stdout (clean and pipeable); the tier/refusal summary goes
+// to stderr, and -report writes the full per-object accounting as JSON.
+func cmdExport(args []string) int {
+	fs := flag.NewFlagSet("export", flag.ExitOnError)
+	dir := fs.String("C", ".", "repo directory")
+	format := fs.String("format", "skillopt", "export format: skillopt")
+	out := fs.String("o", "", "write the JSONL to this file instead of stdout")
+	minTier := fs.String("min-tier", "high-2", "lowest tier to emit: high-2 | high-3")
+	report := fs.String("report", "", "write the full JSON report to this file")
+	_ = fs.Parse(args)
+	if *format != "skillopt" {
+		fmt.Fprintf(os.Stderr, "nugit export: unknown format %q (want: skillopt)\n", *format)
+		return 2
+	}
+	cases, rep, err := skillopt.Export(skillopt.Options{RepoDir: *dir, MinTier: *minTier})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "nugit export: %v\n", err)
+		return 2
+	}
+	w := os.Stdout
+	if *out != "" {
+		f, err := os.Create(*out)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "nugit export: %v\n", err)
+			return 1
+		}
+		defer f.Close()
+		w = f
+	}
+	if err := skillopt.WriteJSONL(w, cases); err != nil {
+		fmt.Fprintf(os.Stderr, "nugit export: %v\n", err)
+		return 1
+	}
+	if *report != "" {
+		b, _ := json.MarshalIndent(rep, "", "  ")
+		if err := os.WriteFile(*report, append(b, '\n'), 0o644); err != nil {
+			fmt.Fprintf(os.Stderr, "nugit export: %v\n", err)
+			return 1
+		}
+	}
+	fmt.Fprint(os.Stderr, rep.SummaryLines())
 	return 0
 }
 

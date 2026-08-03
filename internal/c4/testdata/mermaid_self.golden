@@ -32,6 +32,7 @@ graph LR
   retrieval["Retrieval"]
   scaffold["Scaffold"]
   significance["Significance classifier"]
+  skillopt["Skill-optimizer export"]
   trailers["Trailer parser"]
   tsdeps["TS analyzer"]
   usage["Usage log"]
@@ -64,6 +65,7 @@ graph LR
   cli --> render
   cli --> retrieval
   cli --> scaffold
+  cli --> skillopt
   cli --> trailers
   cli --> usage
   consistency --> cmake
@@ -137,6 +139,8 @@ graph LR
   scaffold --> bootstrap
   scaffold --> gitutil
   significance --> model_
+  skillopt --> knowledge
+  skillopt --> model_
   trailers --> model_
   usage --> config
   usage --> gitutil
