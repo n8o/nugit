@@ -123,6 +123,20 @@ var adversarial = []Case{
 		WantClean:  false,
 	},
 	{
+		// The same prose declaration WITH the front-matter edge (ADR-0022's
+		// negative twin): prose and graph agree — must stay silent.
+		Name: "prose-supersession-edge-present",
+		Base: mergeFiles(baseFiles, map[string]string{
+			".nugit/decisions/old.md": adr("ADR-OLD", "a", ""),
+		}),
+		Head: map[string]string{
+			".nugit/decisions/new.md": adrProse("ADR-NEW", "a", "ADR-OLD",
+				"Supersedes ADR-OLD — the old rule is stale."),
+		},
+		WantTier:  model.TierFeature, // knowledge changed
+		WantClean: true,
+	},
+	{
 		// The spec id is derivable from the FILENAME (SPEC-014-cache.md), even
 		// though the front-matter id differs — spec-linkage must stay silent.
 		Name: "spec-linkage-filename-id",
