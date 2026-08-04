@@ -8,8 +8,11 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
+	"path/filepath"
 	"runtime/debug"
+	"strings"
 
+	"github.com/n8o/nugit/internal/gitutil"
 	"github.com/n8o/nugit/internal/retrieval"
 	"github.com/n8o/nugit/internal/usage"
 )
@@ -102,6 +105,7 @@ func contextTool() map[string]interface{} {
 				"path":          map[string]interface{}{"type": "string", "description": "file or dir the agent is operating on"},
 				"task":          map[string]interface{}{"type": "string", "description": "current task, for keyword matching"},
 				"budget_tokens": map[string]interface{}{"type": "integer", "description": "hard cap on returned size"},
+				"cwd":           map[string]interface{}{"type": "string", "description": "absolute path of the directory you are working in (your checkout/worktree). ALWAYS pass this when the repo uses git worktrees: the server resolves the repo root, knowledge, and branch from it per request, so you read YOUR worktree's checkout instead of the primary one the server was started from. Omitted: the server's start directory is used."},
 			},
 			"required": []string{"path"},
 		},
@@ -115,6 +119,7 @@ func callTool(repoDir string, params json.RawMessage) (interface{}, *rpcError) {
 			Path         string `json:"path"`
 			Task         string `json:"task"`
 			BudgetTokens int    `json:"budget_tokens"`
+			Cwd          string `json:"cwd"`
 		} `json:"arguments"`
 	}
 	if err := json.Unmarshal(params, &p); err != nil {
@@ -123,20 +128,52 @@ func callTool(repoDir string, params json.RawMessage) (interface{}, *rpcError) {
 	if p.Name != "context" {
 		return nil, &rpcError{Code: -32602, Message: "unknown tool: " + p.Name}
 	}
+	root := resolveRoot(repoDir, p.Arguments.Cwd)
 	b, err := retrieval.Context(retrieval.Options{
-		RepoDir: repoDir, Path: p.Arguments.Path, Task: p.Arguments.Task, BudgetTokens: p.Arguments.BudgetTokens,
+		RepoDir: root, Path: p.Arguments.Path, Task: p.Arguments.Task, BudgetTokens: p.Arguments.BudgetTokens,
 	})
 	if err != nil {
 		return toolError(err.Error()), nil
 	}
-	// Best-effort local usage log; a logging failure must never fail the tool call.
-	_ = usage.Log(repoDir, "mcp", p.Arguments.Task, b)
+	// Best-effort local usage log; a logging failure must never fail the tool
+	// call. root (not the process-start dir) makes the record's branch the one
+	// the request was actually served against (ADR-0025).
+	_ = usage.Log(root, "mcp", p.Arguments.Task, b)
 	js, _ := json.Marshal(b)
 	return map[string]interface{}{
 		"content": []interface{}{
 			map[string]interface{}{"type": "text", "text": string(js)},
 		},
 	}, nil
+}
+
+// resolveRoot picks the repo root a request is served from. The MCP server is
+// one long-lived process whose start dir bakes in ONE checkout; under
+// `git worktree` fan-out (N agent worktrees sharing a project-level .mcp.json)
+// that start dir is the primary checkout — on the wrong branch for every other
+// agent. When the client passes cwd, serve from that directory's working tree
+// instead, provided it belongs to the SAME repository (identical
+// `git rev-parse --git-common-dir`) — a cross-repo cwd must never silently
+// serve some other repo's knowledge. Any resolution failure (empty, missing,
+// not a git worktree, different repo) falls back to the start root, so a
+// client that never sends cwd gets exactly the old behavior (ADR-0025).
+func resolveRoot(startDir, cwd string) string {
+	cwd = strings.TrimSpace(cwd)
+	if cwd == "" {
+		return startDir
+	}
+	if !filepath.IsAbs(cwd) {
+		cwd = filepath.Join(startDir, cwd)
+	}
+	top, err := gitutil.Repo{Dir: cwd}.WorktreeRoot()
+	if err != nil {
+		return startDir
+	}
+	home := gitutil.Repo{Dir: startDir}.CommonGitDir()
+	if home == "" || (gitutil.Repo{Dir: top}).CommonGitDir() != home {
+		return startDir
+	}
+	return top
 }
 
 func toolError(msg string) interface{} {

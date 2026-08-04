@@ -2,12 +2,60 @@ package usage
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/n8o/nugit/internal/retrieval"
 )
+
+// gitDo runs git in dir with identity/signing pinned so the test is hermetic.
+func gitDo(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	base := []string{"-C", dir,
+		"-c", "user.name=test", "-c", "user.email=test@example.com",
+		"-c", "commit.gpgsign=false"}
+	cmd := exec.Command("git", append(base, args...)...)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %v: %v: %s", args, err, out)
+	}
+}
+
+// Records appended from a linked worktree land in the ONE shared log at the
+// main checkout, so `nugit stats` sees every call no matter which worktree
+// served it — while the record still carries the worktree's branch (ADR-0025).
+func TestLogSharedAcrossWorktrees(t *testing.T) {
+	tmp := t.TempDir()
+	main := filepath.Join(tmp, "repo")
+	wt := filepath.Join(tmp, "wt")
+	if err := os.MkdirAll(main, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	gitDo(t, main, "init")
+	gitDo(t, main, "commit", "--allow-empty", "-m", "root")
+	gitDo(t, main, "worktree", "add", wt, "-b", "feat/wt")
+
+	if err := Log(wt, "mcp", "task", retrieval.Bundle{Path: "a.go"}); err != nil {
+		t.Fatalf("Log from worktree: %v", err)
+	}
+	got, err := Read(main)
+	if err != nil || len(got) != 1 {
+		t.Fatalf("Read(main): want 1 record, got %d (err %v)", len(got), err)
+	}
+	if got[0].Branch != "feat/wt" {
+		t.Errorf("branch: want the worktree's feat/wt, got %q", got[0].Branch)
+	}
+	if wtGot, err := Read(wt); err != nil || len(wtGot) != 1 {
+		t.Errorf("Read(wt) must see the shared log: got %d (err %v)", len(wtGot), err)
+	}
+	if _, err := os.Stat(filepath.Join(wt, LogPath)); !os.IsNotExist(err) {
+		t.Errorf("worktree grew its own log file (err=%v)", err)
+	}
+	if _, err := os.Stat(filepath.Join(main, LogPath)); err != nil {
+		t.Errorf("shared log missing at the main checkout: %v", err)
+	}
+}
 
 func TestAppendReadRoundtrip(t *testing.T) {
 	dir := t.TempDir()
