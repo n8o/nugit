@@ -18,3 +18,12 @@ significance:
 pr_render:
   # Exit non-zero when a finding reaches this severity (CI gate).
   fail_on: fail
+
+capture:
+  # warn (default) | nudge | block | off — ADR-0023.
+  # nudge: on a SIGNIFICANT commit with no trailer block, the commit-msg hook
+  # prints a copy-pasteable stub seeded from the touched components. It never
+  # blocks and never fails the commit. Chosen here because this repo's own
+  # doctor reports most components with no scoped knowledge: the bottleneck is
+  # capture reach, and the hook is the moment the author still holds the why.
+  commit_msg: nudge
