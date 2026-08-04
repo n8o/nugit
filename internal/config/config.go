@@ -110,3 +110,17 @@ func LoadBytes(b []byte) (Config, error) {
 // C4Warn reports whether the c4<->code check should warn (adoption) rather than
 // fail (ratified enforcement).
 func (c Config) C4Warn() bool { return c.C4.Mode == "warn" }
+
+// FailOnRank orders -fail-on policies by strictness: none < warn < fail. An
+// unknown value ranks strictest, so a typo can never read as a downgrade
+// (ADR-0026: enforcement knobs must not silently cancel).
+func FailOnRank(s string) int {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "none":
+		return 0
+	case "warn":
+		return 1
+	default:
+		return 2
+	}
+}

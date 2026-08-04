@@ -86,3 +86,17 @@ func TestUsageLogKnob(t *testing.T) {
 		t.Errorf("unknown usage.log should default to on; got %q err=%v", c.Usage.Log, err)
 	}
 }
+
+// ADR-0026: the strictness order none < warn < fail; unknown values rank
+// strictest so a typo can never read as a downgrade.
+func TestFailOnRank(t *testing.T) {
+	if !(FailOnRank("none") < FailOnRank("warn") && FailOnRank("warn") < FailOnRank("fail")) {
+		t.Error("ordering must be none < warn < fail")
+	}
+	if FailOnRank("bogus") != FailOnRank("fail") {
+		t.Error("unknown values must rank strictest")
+	}
+	if FailOnRank(" WARN ") != FailOnRank("warn") {
+		t.Error("rank must normalize case/whitespace")
+	}
+}

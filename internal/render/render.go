@@ -20,6 +20,11 @@ import (
 // Markdown builds the sticky PR comment.
 func Markdown(rep model.Report) string {
 	var b strings.Builder
+	// ADR-0026: a run weakened below the repo-declared policy announces itself
+	// on the first line of every format — an inert gate must never look green.
+	if rep.Enforcement != nil {
+		fmt.Fprintf(&b, "> ⚠️ **%s**\n\n", rep.Enforcement.Notice)
+	}
 	tier := rep.Significance.Tier
 	fmt.Fprintf(&b, "## nugit — PR view · %s\n\n", tierLabel(tier))
 	b.WriteString(narrative(rep))
@@ -305,10 +310,15 @@ func Conclusion(rep model.Report) string {
 
 // CheckRunJSON renders the check-run output as JSON.
 func CheckRunJSON(rep model.Report) ([]byte, error) {
+	title := narrative(rep)
+	// ADR-0026: the check-run title is its first line — lead with the downgrade.
+	if rep.Enforcement != nil {
+		title = rep.Enforcement.Notice + " — " + title
+	}
 	cr := CheckRun{
 		Name:       "nugit",
 		Conclusion: Conclusion(rep),
-		Title:      narrative(rep),
+		Title:      title,
 		Summary:    Markdown(rep),
 	}
 	return json.MarshalIndent(cr, "", "  ")
