@@ -4,11 +4,13 @@ package gitutil
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/n8o/nugit/internal/model"
 )
@@ -218,6 +220,32 @@ func (r Repo) Numstat(base, head string) (map[string][2]int, error) {
 	if err != nil {
 		return nil, err
 	}
+	return parseNumstat(out), nil
+}
+
+// NumstatCached returns added/deleted line counts for the STAGED diff (index
+// vs HEAD), keyed by path — what a commit-msg hook can classify, since it runs
+// after staging. The git call is hard-bounded by timeout so a hook-path caller
+// can never stall a commit; a timeout, an unborn HEAD, or any other git
+// failure returns an error for the caller to degrade on (the capture nudge
+// goes silent rather than block, ADR-0023).
+func (r Repo) NumstatCached(timeout time.Duration) (map[string][2]int, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", "-C", r.Dir,
+		"-c", "core.quotepath=false", "diff", "--cached", "--numstat", "-z", "-M")
+	var out, errb bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &errb
+	if err := cmd.Run(); err != nil {
+		return nil, fmt.Errorf("git diff --cached --numstat: %w: %s", err, strings.TrimSpace(errb.String()))
+	}
+	return parseNumstat(out.String()), nil
+}
+
+// parseNumstat parses `git diff --numstat -z` output into add/del counts keyed
+// by path (the new path for renames).
+func parseNumstat(out string) map[string][2]int {
 	counts := map[string][2]int{}
 	toks := splitNUL(out)
 	for i := 0; i < len(toks); {
@@ -243,7 +271,7 @@ func (r Repo) Numstat(base, head string) (map[string][2]int, error) {
 		}
 		counts[path] = [2]int{add, del}
 	}
-	return counts, nil
+	return counts
 }
 
 // ListTree returns every file path tracked at ref (git-root-relative), so a

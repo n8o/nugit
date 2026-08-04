@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -89,6 +90,27 @@ func TestRecurrenceKnobs(t *testing.T) {
 	c, _ = LoadBytes([]byte("recurrence:\n  mode: bogus\n  window_days: -1\n"))
 	if !c.RecurrenceOn() || c.Recurrence.WindowDays != 90 {
 		t.Errorf("recurrence normalization: %+v", c.Recurrence)
+	}
+}
+
+func TestCaptureCommitMsgLevels(t *testing.T) {
+	if c := Default(); c.Capture.CommitMsg != "warn" {
+		t.Errorf("default capture.commit_msg should be warn, got %q", c.Capture.CommitMsg)
+	}
+	// every declared level parses (case/whitespace tolerated)
+	for _, lvl := range []string{"warn", "nudge", "block", "off"} {
+		c, err := LoadBytes([]byte("capture:\n  commit_msg: '  " + strings.ToUpper(lvl) + "  '\n"))
+		if err != nil || c.Capture.CommitMsg != lvl {
+			t.Errorf("level %q should normalize to itself; got %q err=%v", lvl, c.Capture.CommitMsg, err)
+		}
+	}
+	// unknown values fall back to the default warn — never to nudge, block, or
+	// off, so a typo cannot silently change hook behavior (ADR-0023)
+	for _, bogus := range []string{"bogus", "nudgee", "nag", "prompt"} {
+		c, err := LoadBytes([]byte("capture:\n  commit_msg: " + bogus + "\n"))
+		if err != nil || c.Capture.CommitMsg != "warn" {
+			t.Errorf("unknown %q should fall back to warn; got %q err=%v", bogus, c.Capture.CommitMsg, err)
+		}
 	}
 }
 

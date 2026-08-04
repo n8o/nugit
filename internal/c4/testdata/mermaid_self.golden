@@ -25,6 +25,7 @@ graph LR
   modelfacts["Model facts"]
   narrative["LLM narrative"]
   notion["Notion projection"]
+  nudge["Capture nudge"]
   obsidian["Obsidian vault"]
   pyimports["Python analyzer"]
   ratify["Ratifier"]
@@ -61,6 +62,7 @@ graph LR
   cli --> model_
   cli --> modelfacts
   cli --> notion
+  cli --> nudge
   cli --> obsidian
   cli --> ratify
   cli --> reinforce
@@ -132,6 +134,13 @@ graph LR
   narrative --> model_
   notion --> knowledge
   notion --> model_
+  nudge --> c4
+  nudge --> config
+  nudge --> gitutil
+  nudge --> mapping
+  nudge --> model_
+  nudge --> significance
+  nudge --> trailers
   obsidian --> knowledge
   obsidian --> model_
   ratify --> knowledge

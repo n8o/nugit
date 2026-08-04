@@ -29,6 +29,7 @@ import (
 	"github.com/n8o/nugit/internal/model"
 	"github.com/n8o/nugit/internal/modelfacts"
 	"github.com/n8o/nugit/internal/notion"
+	"github.com/n8o/nugit/internal/nudge"
 	"github.com/n8o/nugit/internal/obsidian"
 	"github.com/n8o/nugit/internal/ratify"
 	"github.com/n8o/nugit/internal/reinforce"
@@ -53,6 +54,7 @@ usage:
   nugit ratify [flags] <id>…  promote proposed knowledge objects to the ratified corpus (ADR-0016)
   nugit reinforce [flags] <id> append-only reinforcement of a recurring lesson/decision (ADR-0019)
   nugit hook commit-msg <f>   git hook entrypoint: validate the commit-trailer block
+                              (capture.commit_msg: nudge also prompts on significant commits)
   nugit c4 render [flags]      render the C4 model as Mermaid
   nugit c4 gen-rules [flags]   generate go-arch-lint YAML from the C4 model
   nugit c4 export [flags]      export the C4 model (-format icepanel) as an import payload
@@ -310,7 +312,10 @@ func cmdAgent(args []string) int {
 }
 
 // cmdHook implements git hook entrypoints. `nugit hook commit-msg <file>`
-// validates the trailer block per config capture.commit_msg (warn|block|off).
+// validates the trailer block per config capture.commit_msg
+// (warn|nudge|block|off). In nudge mode it additionally prompts with a
+// trailer stub when a significant staged change carries no capture (ADR-0023);
+// the nudge is advisory only and never blocks.
 // cmdDistill promotes commit-trailer decisions/lessons into durable .nugit/ objects.
 // cmdC4 renders the C4 model. `nugit c4 render -format mermaid`.
 func cmdC4(args []string) int {
@@ -786,17 +791,21 @@ func cmdHook(args []string) int {
 			body = msg[i+1:]
 		}
 		warns := trailers.Validate(trailers.Parse(body))
-		if len(warns) == 0 {
-			return 0
-		}
 		for _, w := range warns {
 			fmt.Fprintf(os.Stderr, "nugit: %s\n", w)
 		}
-		if cfg.Capture.CommitMsg == "block" {
+		if len(warns) > 0 && cfg.Capture.CommitMsg == "block" {
 			fmt.Fprintln(os.Stderr, "nugit: commit blocked (capture.commit_msg: block). Fix the trailer or remove the block.")
 			return 1
 		}
-		return 0 // warn mode: advise, don't block
+		// ADR-0023: in nudge mode, prompt for capture when the staged change is
+		// significant and the message has no trailer block. ForStagedCommit is
+		// silent (returns "") in every other mode and on any internal error —
+		// the nudge never blocks and never slows a commit.
+		if txt := nudge.ForStagedCommit(*dir, msg, cfg); txt != "" {
+			fmt.Fprint(os.Stderr, txt)
+		}
+		return 0 // warn/nudge mode: advise, don't block
 	default:
 		fmt.Fprintf(os.Stderr, "nugit hook: unknown hook %q\n", args[0])
 		return 2
