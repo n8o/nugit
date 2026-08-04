@@ -51,6 +51,8 @@ usage:
   nugit ratify [flags] <id>…  promote proposed knowledge objects to the ratified corpus (ADR-0016)
   nugit hook commit-msg <f>   git hook entrypoint: validate the commit-trailer block
   nugit c4 render [flags]      render the C4 model as Mermaid
+  nugit c4 gen-rules [flags]   generate go-arch-lint YAML from the C4 model
+  nugit c4 export [flags]      export the C4 model (-format icepanel) as an import payload
   nugit c4 preview [flags]     live C4 diagrams via local Structurizr renderer (Docker)
   nugit deploy [flags]        deterministic deployable-container inventory (Dockerfiles + CMake)
   nugit model facts [flags]   deterministic grounding bundle for the bootstrap agent
@@ -78,7 +80,7 @@ context flags:
 init flags:
   -C dir            repo directory (default ".")
   -mode m           c4 enforcement written to config: warn (default) | enforce
-  -layout l         model layout: cmake (C++ edges) | container|toplevel|flat
+  -layout l         model layout: cmake|python|ts (language edges) | container|toplevel|flat
                     (default: auto — Go import graph, else CMake, else structural)
   -component-dirs d comma-separated container dirs for structural layout
   -no-model         scaffold only; write a template workspace.dsl
@@ -179,7 +181,7 @@ func cmdInit(args []string) int {
 	mode := fs.String("mode", "warn", "c4 enforcement mode: warn|enforce")
 	noModel := fs.Bool("no-model", false, "scaffold only; don't bootstrap a model")
 	force := fs.Bool("force", false, "overwrite existing .nugit files")
-	layout := fs.String("layout", "", "structural layout for any codebase: container|toplevel|flat (default: Go import graph, else structural)")
+	layout := fs.String("layout", "", "model layout: cmake|python|ts (language edges) or container|toplevel|flat (structural; default: Go import graph, else CMake, else structural)")
 	componentDirs := fs.String("component-dirs", "", "comma-separated container dirs for structural layout (default: apps,libs,services,...)")
 	_ = fs.Parse(args)
 
