@@ -139,6 +139,11 @@ type Trailer struct {
 	Decision string
 	Rejected string
 	Learned  string
+	// Symptom is the observable behavior that led to the change — what someone
+	// SAW, not what was done about it. Optional (ADR-0028): it is the only
+	// reliable source for a lesson's Trigger, because a symptom is frequently
+	// nowhere in the commit at all.
+	Symptom  string
 	Affects  []string // C4 component ids
 	Spec     string
 	Keywords []string
@@ -148,7 +153,7 @@ type Trailer struct {
 
 // Has reports whether the trailer carried any nugit fields at all.
 func (t Trailer) Has() bool {
-	return t.Decision != "" || t.Rejected != "" || t.Learned != "" ||
+	return t.Decision != "" || t.Rejected != "" || t.Learned != "" || t.Symptom != "" ||
 		len(t.Affects) > 0 || t.Spec != "" || len(t.Keywords) > 0 || len(t.Extra) > 0
 }
 

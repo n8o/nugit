@@ -34,6 +34,38 @@ ticket: JIRA-42`
 	}
 }
 
+// ADR-0028: `symptom:` is a typed, OPTIONAL field — it must not fall through to
+// Extra, and it must not join the mandatory set.
+func TestParseSymptom(t *testing.T) {
+	tr := Parse("symptom: checkouts failed with a 504 for ~2% of carts during the evening peak\nlearned: never use library default timeouts\nkeywords: payments")
+	if tr.Symptom != "checkouts failed with a 504 for ~2% of carts during the evening peak" {
+		t.Errorf("symptom = %q", tr.Symptom)
+	}
+	if _, dup := tr.Extra["symptom"]; dup {
+		t.Errorf("symptom must be typed, not Extra: %+v", tr.Extra)
+	}
+	if w := Validate(tr); len(w) != 0 {
+		t.Errorf("learned+keywords present: want no warnings, got %v", w)
+	}
+	// mandatory stays mandatory; symptom alone does not satisfy anything
+	if w := Validate(Parse("symptom: the poller wedged")); len(w) != 2 {
+		t.Errorf("want 2 warnings (learned, keywords), got %v", w)
+	}
+}
+
+func TestIsTrailerLine(t *testing.T) {
+	for _, s := range []string{"learned: x", "  keywords: a, b", "ticket: JIRA-42"} {
+		if !IsTrailerLine(s) {
+			t.Errorf("IsTrailerLine(%q) = false", s)
+		}
+	}
+	for _, s := range []string{"The endpoint returned 503: the upstream was down", "not a trailer", "Symptom: capitalized is prose", ""} {
+		if IsTrailerLine(s) {
+			t.Errorf("IsTrailerLine(%q) = true", s)
+		}
+	}
+}
+
 func TestValidate(t *testing.T) {
 	// block present but missing learned + keywords
 	tr := Parse("decision: do the thing\naffects: x")

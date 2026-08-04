@@ -51,12 +51,18 @@ for the decision it grounds) and land it as a PR — never paste the full docume
   `nugit distill` promotes it into a durable ADR/lesson (survives squash-merge):
 
   ```
+  symptom: <what was OBSERVED — the failure you saw, not the work you did>
   decision: <what was chosen>
   rejected: <the alternative and why not>
   learned: <a reusable lesson, if any>
   affects: <component(s)>
   keywords: <terms>
   ```
+
+- `symptom:` is optional but high-value: it seeds the distilled lesson's
+  **Trigger**, which is what a future debugger's search actually matches. Without
+  it, `nugit distill` scavenges the body for an observation and otherwise writes
+  a `TODO` for review — never the commit subject (ADR-0028).
 
 - After merging a batch: `nugit distill -base <base> -head HEAD` writes the ADRs/
   lessons into the PR for review.

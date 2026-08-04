@@ -2,6 +2,11 @@
 // reviewed knowledge objects (MADR decisions + lessons), written into the PR so
 // the store fills itself and capture survives squash-merge (ADR-0005). Stable
 // human keys, never content hashes (ADR-0001). Deterministic, no LLM.
+//
+// A lesson's Trigger is seeded from an observable symptom — the `symptom:`
+// trailer, else a symptom-shaped observation scavenged from the commit body,
+// else an explicit author-facing TODO. Never the commit subject (ADR-0028);
+// see symptom.go.
 package distill
 
 import (
@@ -236,7 +241,10 @@ func lessonBody(c model.Commit, now, slug, status string) string {
 	fmt.Fprintf(&b, "---\nschema_version: 1\nid: %s\ntype: lesson\nscope: %s\nstatus: %s\ncreated: %s\nprovenance:\n  commit: %s\nconfidence: medium\n---\n\n",
 		"LESSON-"+slug, scopeOf(t.Affects), status, now, short(c.SHA))
 	fmt.Fprintf(&b, "# Lesson — %s\n\n", title(t.Learned))
-	fmt.Fprintf(&b, "**Trigger:** %s\n\n", firstLine(c.Subject))
+	// Trigger is the observable SYMPTOM, never the commit subject (ADR-0028):
+	// the subject is a task description, which is what a future debugger will
+	// never search for and what the store's exporter refuses outright.
+	fmt.Fprintf(&b, "**Trigger:** %s\n\n", triggerFor(c))
 	fmt.Fprintf(&b, "**Insight:** %s\n\n", t.Learned)
 	if t.Rejected != "" {
 		fmt.Fprintf(&b, "**Rejected:** %s\n\n", t.Rejected)

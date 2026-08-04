@@ -4,12 +4,17 @@
 //
 //	Charge API can take up to 45s under load; default 10s causes false failures.
 //
+//	symptom: checkouts failed with a 504 for ~2% of carts during the evening peak
 //	decision: set timeout to 60s, retry on 429 only
 //	rejected: retry on timeout (masks real failures, inflates cost)
 //	learned: never use library default timeouts for billing endpoints
 //	affects: payments.charge
 //	spec: SPEC-014
 //	keywords: payments, timeout, retry, billing
+//
+// `learned:` and `keywords:` are the only mandatory fields; `symptom:` is
+// optional but is the sole reliable seed for a distilled lesson's Trigger
+// (ADR-0028) — nothing else in a commit records what was OBSERVED.
 package trailers
 
 import (
@@ -41,6 +46,8 @@ func Parse(body string) model.Trailer {
 			t.Rejected = val
 		case "learned":
 			t.Learned = val
+		case "symptom":
+			t.Symptom = val
 		case "spec":
 			t.Spec = val
 		case "affects":
@@ -55,6 +62,14 @@ func Parse(body string) model.Trailer {
 		t.Extra = nil
 	}
 	return t
+}
+
+// IsTrailerLine reports whether a line would be consumed by Parse as a
+// "key: value" trailer. Callers that scan a commit body for prose (ADR-0028's
+// symptom scavenger) use it to exclude the capture block, so the convention
+// lives in exactly one place.
+func IsTrailerLine(line string) bool {
+	return trailerLine.MatchString(strings.TrimSpace(strings.TrimRight(line, "\r")))
 }
 
 // splitList splits a comma- or space-separated list and trims empties.
