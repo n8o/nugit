@@ -3,7 +3,7 @@ schema_version: 1
 id: LESSON-model-coverage-decays-continuously-while-refresh-r
 type: lesson
 scope: modelfacts
-status: proposed
+status: active
 created: 2026-08-04T10:03:47Z
 provenance:
   commit: 38093205

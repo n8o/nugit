@@ -3,7 +3,7 @@ schema_version: 1
 id: ADR-0029
 type: decision
 scope: global
-status: proposed
+status: accepted
 created: 2026-08-04T10:03:47Z
 relates_to:
   - constrains:knowledge

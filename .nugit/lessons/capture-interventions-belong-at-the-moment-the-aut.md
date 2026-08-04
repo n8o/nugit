@@ -3,7 +3,7 @@ schema_version: 1
 id: LESSON-capture-interventions-belong-at-the-moment-the-aut
 type: lesson
 scope: nudge
-status: proposed
+status: active
 created: 2026-08-04T10:03:47Z
 provenance:
   commit: 74acd55c

@@ -3,7 +3,7 @@ schema_version: 1
 id: LESSON-additive-knowledge-changes-right-but-too-narrow-ne
 type: lesson
 scope: knowledge
-status: proposed
+status: active
 created: 2026-08-04T10:03:47Z
 provenance:
   commit: edf47bc2

@@ -3,7 +3,7 @@ schema_version: 1
 id: LESSON-effective-status-is-only-as-honest-as-its-edges-pr
 type: lesson
 scope: knowledge
-status: proposed
+status: active
 created: 2026-08-04T10:03:47Z
 provenance:
   commit: bc0e36b4

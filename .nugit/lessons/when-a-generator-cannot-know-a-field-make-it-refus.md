@@ -3,7 +3,7 @@ schema_version: 1
 id: LESSON-when-a-generator-cannot-know-a-field-make-it-refus
 type: lesson
 scope: skillopt
-status: proposed
+status: active
 created: 2026-08-04T10:03:47Z
 provenance:
   commit: 2766f49d

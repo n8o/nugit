@@ -3,7 +3,7 @@ schema_version: 1
 id: LESSON-the-pilot-s-retrieval-gap-is-reach-not-ranking-the
 type: lesson
 scope: retrieval
-status: proposed
+status: active
 created: 2026-08-04T10:03:47Z
 provenance:
   commit: f5bcb4d7

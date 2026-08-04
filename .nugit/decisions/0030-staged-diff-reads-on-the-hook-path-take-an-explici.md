@@ -3,7 +3,7 @@ schema_version: 1
 id: ADR-0030
 type: decision
 scope: gitutil
-status: proposed
+status: accepted
 created: 2026-08-04T10:03:47Z
 relates_to:
   - constrains:gitutil

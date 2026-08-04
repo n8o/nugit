@@ -3,7 +3,7 @@ schema_version: 1
 id: LESSON-under-agent-fan-out-correctness-must-live-in-the-r
 type: lesson
 scope: mcp
-status: proposed
+status: active
 created: 2026-08-04T10:03:47Z
 provenance:
   commit: 2f3e6b49

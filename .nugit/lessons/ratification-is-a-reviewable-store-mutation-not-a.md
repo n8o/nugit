@@ -3,7 +3,7 @@ schema_version: 1
 id: LESSON-ratification-is-a-reviewable-store-mutation-not-a
 type: lesson
 scope: global
-status: proposed
+status: active
 created: 2026-08-04T10:03:47Z
 provenance:
   commit: 8a4bd72d

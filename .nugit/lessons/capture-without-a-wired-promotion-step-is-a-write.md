@@ -3,7 +3,7 @@ schema_version: 1
 id: LESSON-capture-without-a-wired-promotion-step-is-a-write
 type: lesson
 scope: distill
-status: proposed
+status: active
 created: 2026-08-04T10:03:47Z
 provenance:
   commit: 10546491

@@ -3,7 +3,7 @@ schema_version: 1
 id: LESSON-any-git-call-added-to-the-commit-path-must-carry-i
 type: lesson
 scope: gitutil
-status: proposed
+status: active
 created: 2026-08-04T10:03:47Z
 provenance:
   commit: 67dbca0b

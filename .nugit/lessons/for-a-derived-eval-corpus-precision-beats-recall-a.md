@@ -3,7 +3,7 @@ schema_version: 1
 id: LESSON-for-a-derived-eval-corpus-precision-beats-recall-a
 type: lesson
 scope: skillopt
-status: proposed
+status: active
 created: 2026-08-04T10:03:47Z
 provenance:
   commit: a8b0ad9e

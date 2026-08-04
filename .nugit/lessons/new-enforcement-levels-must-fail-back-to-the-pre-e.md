@@ -3,7 +3,7 @@ schema_version: 1
 id: LESSON-new-enforcement-levels-must-fail-back-to-the-pre-e
 type: lesson
 scope: config
-status: proposed
+status: active
 created: 2026-08-04T10:03:47Z
 provenance:
   commit: 04ddb3bf

@@ -3,7 +3,7 @@ schema_version: 1
 id: LESSON-when-one-field-can-both-name-a-record-and-state-on
 type: lesson
 scope: distill
-status: proposed
+status: active
 created: 2026-08-04T10:03:47Z
 provenance:
   commit: d899aa79

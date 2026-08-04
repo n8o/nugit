@@ -3,7 +3,7 @@ schema_version: 1
 id: LESSON-a-history-scanning-check-must-be-bounded-since-max
 type: lesson
 scope: consistency
-status: proposed
+status: active
 created: 2026-08-04T10:03:47Z
 provenance:
   commit: 0b6d5aa1

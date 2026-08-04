@@ -3,7 +3,7 @@ schema_version: 1
 id: LESSON-consistency-checks-over-prose-need-a-resolution-fi
 type: lesson
 scope: consistency
-status: proposed
+status: active
 created: 2026-08-04T10:03:47Z
 provenance:
   commit: 7ef96e7e

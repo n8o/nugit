@@ -3,7 +3,7 @@ schema_version: 1
 id: LESSON-a-capture-mechanism-that-ships-disabled-captures-n
 type: lesson
 scope: global
-status: proposed
+status: active
 created: 2026-08-04T10:03:47Z
 provenance:
   commit: 1a68b378

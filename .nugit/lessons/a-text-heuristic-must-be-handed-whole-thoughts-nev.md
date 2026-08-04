@@ -3,7 +3,7 @@ schema_version: 1
 id: LESSON-a-text-heuristic-must-be-handed-whole-thoughts-nev
 type: lesson
 scope: distill
-status: proposed
+status: active
 created: 2026-08-04T10:03:47Z
 provenance:
   commit: 309b6671

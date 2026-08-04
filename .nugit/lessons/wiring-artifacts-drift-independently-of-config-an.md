@@ -3,7 +3,7 @@ schema_version: 1
 id: LESSON-wiring-artifacts-drift-independently-of-config-an
 type: lesson
 scope: doctor
-status: proposed
+status: active
 created: 2026-08-04T10:03:47Z
 provenance:
   commit: 2dbf1499

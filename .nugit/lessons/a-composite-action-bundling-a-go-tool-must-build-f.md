@@ -5,7 +5,7 @@ type: lesson
 scope: global
 applies_to_paths:
   - "action.yml"
-status: proposed
+status: active
 created: 2026-08-04T10:03:47Z
 provenance:
   commit: 6ed0b50c

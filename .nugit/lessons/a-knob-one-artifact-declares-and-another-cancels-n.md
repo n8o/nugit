@@ -3,7 +3,7 @@ schema_version: 1
 id: LESSON-a-knob-one-artifact-declares-and-another-cancels-n
 type: lesson
 scope: render
-status: proposed
+status: active
 created: 2026-08-04T10:03:47Z
 provenance:
   commit: 821368f0

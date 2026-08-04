@@ -3,7 +3,7 @@ schema_version: 1
 id: LESSON-path-bound-counts-as-bound-but-never-enforced-a-bi
 type: lesson
 scope: evidence
-status: proposed
+status: active
 created: 2026-08-04T10:03:47Z
 provenance:
   commit: 5d28e7e2

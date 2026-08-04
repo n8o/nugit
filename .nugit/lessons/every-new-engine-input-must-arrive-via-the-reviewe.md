@@ -3,7 +3,7 @@ schema_version: 1
 id: LESSON-every-new-engine-input-must-arrive-via-the-reviewe
 type: lesson
 scope: engine
-status: proposed
+status: active
 created: 2026-08-04T10:03:47Z
 provenance:
   commit: e2fd628f

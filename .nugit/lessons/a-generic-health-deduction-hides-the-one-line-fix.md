@@ -3,7 +3,7 @@ schema_version: 1
 id: LESSON-a-generic-health-deduction-hides-the-one-line-fix
 type: lesson
 scope: doctor
-status: proposed
+status: active
 created: 2026-08-04T10:03:47Z
 provenance:
   commit: 9cf52836
