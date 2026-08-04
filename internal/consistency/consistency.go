@@ -240,6 +240,19 @@ func checkModelHealth(in Input) []model.Finding {
 			Detail: fmt.Sprintf("this glob is syntactically invalid and matches no files, so the %s owns nothing", bad.Kind),
 		})
 	}
+	// Invalid applies_to_paths globs on knowledge objects (ADR-0020): the
+	// binding is dead — report it, never silently drop it.
+	for _, bad := range knowledge.InvalidAppliesGlobs(in.AllObjects) {
+		id := bad.ID
+		if id == "" {
+			id = bad.Path
+		}
+		fs = append(fs, model.Finding{
+			Check: "model-health", Severity: model.SevWarn,
+			Title:  fmt.Sprintf("knowledge object %q has an invalid applies_to_paths glob %q", id, bad.Pattern),
+			Detail: fmt.Sprintf("this glob is syntactically invalid and matches no files, so the binding is dead — fix it in %s", bad.Path),
+		})
+	}
 	// A relationship endpoint that names no declared element can never cover a
 	// code dependency — the edge silently enforces nothing.
 	unknown := map[string]bool{}
@@ -518,15 +531,22 @@ func cmakeFilesAt(repo gitutil.Repo, ref, prefix string) []cmake.File {
 }
 
 // checkStaleKnowledge: the PR changes code governed by a superseded/invalidated
-// knowledge object without updating it.
+// knowledge object without updating it. The governed surface is reached two
+// ways: via governed components (scope/constrains edges, ADR-0002) and via a
+// direct applies_to_paths binding (ADR-0020) — the latter needs no component,
+// which is the point (infra paths the C4 model deliberately doesn't cover).
 func checkStaleKnowledge(in Input) []model.Finding {
 	governing := map[string][]model.KnowledgeObject{} // component id -> stale objects
+	var pathGoverned []model.KnowledgeObject          // stale objects bound directly to paths
 	for _, o := range in.AllObjects {
 		if o.EffectiveStatus != model.StatusSuperseded && o.EffectiveStatus != model.StatusInvalidated {
 			continue
 		}
 		for _, comp := range evidence.GovernedComponents(o) {
 			governing[comp] = append(governing[comp], o)
+		}
+		if len(o.AppliesToPaths) > 0 {
+			pathGoverned = append(pathGoverned, o)
 		}
 	}
 	touchedKnowledge := map[string]bool{}
@@ -561,6 +581,31 @@ func checkStaleKnowledge(in Input) []model.Finding {
 				Detail: fmt.Sprintf("%s (%s) is %s and governs %s; this PR changes that code without updating it (%s)",
 					o.ID, o.Path, o.EffectiveStatus, comp, o.Path),
 			})
+		}
+	}
+	// Direct path bindings (ADR-0020): a changed file matching a stale
+	// object's applies_to_paths counts as touching its governed surface.
+	if len(pathGoverned) > 0 {
+		paths := make([]string, 0, len(in.Code.Files))
+		for _, fc := range in.Code.Files {
+			paths = append(paths, fc.Path)
+		}
+		sort.Strings(paths) // deterministic: first matching path (sorted) wins the Title
+		for _, p := range paths {
+			for i := range pathGoverned {
+				o := &pathGoverned[i]
+				if touchedKnowledge[o.ID] || reported[o.ID] || !knowledge.AppliesTo(o, p) {
+					continue
+				}
+				reported[o.ID] = true
+				fs = append(fs, model.Finding{
+					Check:    "stale-knowledge",
+					Severity: model.SevWarn,
+					Title:    fmt.Sprintf("touches %s, governed by %s %s", p, o.EffectiveStatus, o.ID),
+					Detail: fmt.Sprintf("%s (%s) is %s and applies to %s via applies_to_paths; this PR changes that file without updating it",
+						o.ID, o.Path, o.EffectiveStatus, p),
+				})
+			}
 		}
 	}
 	return fs

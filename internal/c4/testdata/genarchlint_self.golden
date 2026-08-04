@@ -204,12 +204,14 @@ deps:
       - "gitutil"
       - "model_"
   "localmem":
-    mayDependOn: []
+    mayDependOn:
+      - "gitutil"
   "mapping":
     mayDependOn:
       - "model_"
   "mcp":
     mayDependOn:
+      - "gitutil"
       - "retrieval"
       - "usage"
   "model_":

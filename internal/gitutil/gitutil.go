@@ -80,11 +80,75 @@ func (r Repo) HooksDir() string {
 // Toplevel returns the absolute path of the git working-tree root, or Dir if it
 // cannot be determined.
 func (r Repo) Toplevel() string {
-	out, err := r.git("rev-parse", "--show-toplevel")
+	top, err := r.WorktreeRoot()
 	if err != nil {
 		return r.Dir
 	}
-	return strings.TrimSpace(out)
+	return top
+}
+
+// WorktreeRoot returns the absolute root of the working tree containing Dir,
+// or an error when Dir is not inside a git working tree — unlike Toplevel,
+// which masks "not a repo" by returning Dir. Per-request MCP root resolution
+// needs the failure visible so it can fall back safely (ADR-0025).
+func (r Repo) WorktreeRoot() (string, error) {
+	out, err := r.git("rev-parse", "--show-toplevel")
+	if err != nil {
+		return "", err
+	}
+	top := strings.TrimSpace(out)
+	if top == "" {
+		return "", fmt.Errorf("git -C %s: no working tree (bare repo?)", r.Dir)
+	}
+	return top, nil
+}
+
+// CommonGitDir returns the absolute, symlink-resolved path of the repository's
+// shared .git directory (`git rev-parse --git-common-dir`) — identical for
+// every linked `git worktree` of one repository — or "" when Dir is not inside
+// a git repo. It is the repo-identity key that per-request root resolution
+// compares before honoring a client-supplied cwd (ADR-0025).
+func (r Repo) CommonGitDir() string {
+	out, err := r.git("rev-parse", "--git-common-dir")
+	if err != nil {
+		return ""
+	}
+	p := strings.TrimSpace(out)
+	if p == "" {
+		return ""
+	}
+	if !filepath.IsAbs(p) {
+		base := r.Dir
+		if abs, aerr := filepath.Abs(base); aerr == nil {
+			base = abs
+		}
+		p = filepath.Join(base, p)
+	}
+	// Normalize symlinked spellings (e.g. macOS /var -> /private/var) so the
+	// same repo reached via different paths compares equal.
+	if resolved, rerr := filepath.EvalSymlinks(p); rerr == nil {
+		p = resolved
+	}
+	return filepath.Clean(p)
+}
+
+// CommonRoot returns the root of the MAIN working tree shared by every linked
+// worktree of the repository — the parent of the common .git directory. From
+// the main checkout it equals Toplevel(); from a linked `git worktree` it is
+// the main checkout's root, NOT the worktree's. It falls back to Toplevel()
+// when the common git dir is detached from any working tree (`git init
+// --separate-git-dir`) and to Dir when not inside a git repo at all. This is
+// where per-machine derived state (.nugit-local/, .nugit/.cache/) resolves so
+// all worktrees of one repo share it (ADR-0025).
+func (r Repo) CommonRoot() string {
+	gd := r.CommonGitDir()
+	if gd == "" {
+		return r.Dir
+	}
+	if filepath.Base(gd) == ".git" {
+		return filepath.Dir(gd)
+	}
+	return r.Toplevel()
 }
 
 // ShowFile returns the contents of path at ref. A genuinely-absent path yields

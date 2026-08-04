@@ -21,10 +21,19 @@ import (
 	"github.com/n8o/nugit/internal/retrieval"
 )
 
-// LogPath is where records land, relative to the repo dir. It lives under
-// .nugit/.cache/ — the designated rebuildable, gitignored local dir; the
+// LogPath is where records land, relative to the repo's COMMON root. It lives
+// under .nugit/.cache/ — the designated rebuildable, gitignored local dir; the
 // canonical store stays git text only.
 const LogPath = ".nugit/.cache/usage.jsonl"
+
+// logFile resolves the log location against the common working-tree root (the
+// main checkout) so every linked worktree of a repo appends to ONE log and
+// `nugit stats` sees all calls regardless of which worktree served them
+// (ADR-0025). Outside a git repo it falls back to repoDir unchanged. For a
+// plain single-worktree repo the resolved path is byte-identical to before.
+func logFile(repoDir string) string {
+	return filepath.Join(gitutil.Repo{Dir: repoDir}.CommonRoot(), LogPath)
+}
 
 // Record is one served context() call.
 type Record struct {
@@ -79,18 +88,22 @@ func Log(repoDir, source, task string, b retrieval.Bundle) error {
 	r := FromBundle(source, task, b)
 	// Best-effort branch stamp: it is what lets per-branch usage be joined
 	// against per-branch outcomes (pr-render findings). "" (not a git repo)
-	// and "HEAD" (detached) are both acceptable — never an error.
+	// and "HEAD" (detached) are both acceptable — never an error. repoDir is
+	// the PER-REQUEST resolved root (the worktree actually being edited), so
+	// under worktree fan-out each record carries that worktree's branch, not
+	// the primary checkout's (ADR-0025).
 	r.Branch = gitutil.Repo{Dir: repoDir}.CurrentBranch()
 	return Append(repoDir, r)
 }
 
-// Append writes one record to the log, creating .nugit/.cache/ if needed.
+// Append writes one record to the shared log, creating .nugit/.cache/ at the
+// common root if needed.
 func Append(repoDir string, r Record) error {
-	dir := filepath.Join(repoDir, ".nugit", ".cache")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	p := logFile(repoDir)
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
 		return err
 	}
-	f, err := os.OpenFile(filepath.Join(repoDir, LogPath), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	f, err := os.OpenFile(p, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
 	if err != nil {
 		return err
 	}
@@ -103,10 +116,11 @@ func Append(repoDir string, r Record) error {
 	return err
 }
 
-// Read loads all records. A missing log yields (nil, nil); malformed lines are
-// skipped (a half-written line from a crashed process must not poison stats).
+// Read loads all records from the shared log. A missing log yields (nil, nil);
+// malformed lines are skipped (a half-written line from a crashed process must
+// not poison stats).
 func Read(repoDir string) ([]Record, error) {
-	f, err := os.Open(filepath.Join(repoDir, LogPath))
+	f, err := os.Open(logFile(repoDir))
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil

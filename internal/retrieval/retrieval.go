@@ -46,6 +46,10 @@ type Item struct {
 	// AmendedBy: this object is live but PARTIALLY overridden — read it together
 	// with these ids (ADR-0015).
 	AmendedBy []string `json:"amended_by,omitempty"`
+	// PathBound: the queried path matches this object's applies_to_paths — a
+	// direct file binding (ADR-0020). The object applies here regardless of
+	// its scope and ranks with component-scoped items.
+	PathBound bool `json:"path_bound,omitempty"`
 	tokens    int
 }
 
@@ -138,40 +142,54 @@ func Context(opt Options) (Bundle, error) {
 
 	for i := range objs {
 		o := &objs[i]
-		if !inScope(o, comp, parent) {
+		// Direct path binding (ADR-0020): a queried path matching the object's
+		// applies_to_paths makes it behave as if component-scoped, regardless
+		// of scope:. The binding substitutes for scope, not for task
+		// relevance — the keyword filters below still apply where they would
+		// for a component-scoped object.
+		bound := knowledge.AppliesTo(o, path)
+		if !bound && !inScope(o, comp, parent) {
 			continue
 		}
 		switch o.Type {
 		case model.KindDecision:
 			// Component-scoped decisions always; global ones only when relevant to
-			// the task (else every global decision floods every path's bundle).
-			if (o.Scope == "" || o.Scope == "global") && len(kw) > 0 && !matches(o, kw) {
+			// the task (else every global decision floods every path's bundle) —
+			// unless the queried path itself matches the decision's binding.
+			if !bound && (o.Scope == "" || o.Scope == "global") && len(kw) > 0 && !matches(o, kw) {
 				continue
 			}
-			decisions = append(decisions, toItem(o, ""))
+			it := toItem(o, "")
+			it.PathBound = bound
+			decisions = append(decisions, it)
 			pulled[o.ID] = true
 		case model.KindSpec:
 			// One spec slot; a ratified spec displaces a proposed placeholder
 			// (ADR-0016) but never the other way around.
-			if relevant(o, comp, parent) &&
+			if (bound || relevant(o, comp, parent)) &&
 				(spec == nil || (spec.Status == string(model.StatusProposed) && o.Status != model.StatusProposed)) {
 				if spec != nil {
 					delete(pulled, spec.ID)
 				}
 				it := toItem(o, "")
+				it.PathBound = bound
 				spec = &it
 				pulled[o.ID] = true
 			}
 		case model.KindLesson:
 			if len(kw) == 0 || matches(o, kw) {
-				lessons = append(lessons, toItem(o, ""))
+				it := toItem(o, "")
+				it.PathBound = bound
+				lessons = append(lessons, it)
 				pulled[o.ID] = true
 			}
 		case model.KindReference:
 			// Same rule as lessons: keyword-matched when a task is given, all
 			// in-scope otherwise (the budget truncates, never silently).
 			if len(kw) == 0 || matches(o, kw) {
-				references = append(references, toItem(o, ""))
+				it := toItem(o, "")
+				it.PathBound = bound
+				references = append(references, it)
 				pulled[o.ID] = true
 			}
 		case model.KindGlossary:

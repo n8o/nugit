@@ -99,3 +99,64 @@ func TestLogPath(t *testing.T) {
 		t.Error("not a repo must return an error (callers degrade best-effort)")
 	}
 }
+
+// resolve normalizes symlinked spellings (macOS t.TempDir is under /var ->
+// /private/var) so paths git reports physically compare equal to ours.
+func resolve(t *testing.T, p string) string {
+	t.Helper()
+	r, err := filepath.EvalSymlinks(p)
+	if err != nil {
+		t.Fatalf("EvalSymlinks(%s): %v", p, err)
+	}
+	return r
+}
+
+// A linked worktree must resolve its own root via WorktreeRoot but the MAIN
+// checkout's root via CommonRoot — that split is what lets per-request MCP
+// resolution read the right checkout while .nugit-local/ and .nugit/.cache/
+// stay shared across all worktrees (ADR-0025).
+func TestCommonRootAcrossWorktrees(t *testing.T) {
+	tmp := t.TempDir()
+	main := filepath.Join(tmp, "repo")
+	wt := filepath.Join(tmp, "wt")
+	if err := os.MkdirAll(main, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	mustGit(t, main, "init")
+	mustGit(t, main, "commit", "--allow-empty", "-m", "root")
+	mustGit(t, main, "worktree", "add", wt, "-b", "feat/wt")
+
+	wantRoot := resolve(t, main)
+	for _, d := range []string{main, wt} {
+		if got := resolve(t, (Repo{Dir: d}).CommonRoot()); got != wantRoot {
+			t.Errorf("CommonRoot from %s: want %s, got %s", d, wantRoot, got)
+		}
+	}
+	top, err := (Repo{Dir: wt}).WorktreeRoot()
+	if err != nil {
+		t.Fatalf("WorktreeRoot(wt): %v", err)
+	}
+	if got := resolve(t, top); got != resolve(t, wt) {
+		t.Errorf("WorktreeRoot from wt: want %s, got %s", resolve(t, wt), got)
+	}
+	if got := (Repo{Dir: wt}).CurrentBranch(); got != "feat/wt" {
+		t.Errorf("branch from wt: want feat/wt, got %q", got)
+	}
+	// The identity key both checkouts share.
+	if a, b := (Repo{Dir: main}).CommonGitDir(), (Repo{Dir: wt}).CommonGitDir(); a == "" || a != b {
+		t.Errorf("CommonGitDir must match across worktrees: main=%q wt=%q", a, b)
+	}
+}
+
+func TestCommonRootFallsBackOutsideGit(t *testing.T) {
+	dir := t.TempDir()
+	if got := (Repo{Dir: dir}).CommonRoot(); got != dir {
+		t.Fatalf("non-repo CommonRoot: want %s, got %s", dir, got)
+	}
+	if _, err := (Repo{Dir: dir}).WorktreeRoot(); err == nil {
+		t.Fatal("non-repo WorktreeRoot: want error, got nil")
+	}
+	if got := (Repo{Dir: dir}).CommonGitDir(); got != "" {
+		t.Fatalf(`non-repo CommonGitDir: want "", got %q`, got)
+	}
+}
