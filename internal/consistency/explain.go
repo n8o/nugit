@@ -30,6 +30,10 @@ var explanations = map[string]string{
 	"model-health": "workspace.dsl has a duplicate element id (components and containers share one namespace), an invalid\n" +
 		"path glob, or a relationship endpoint that names no declared component or container.\n" +
 		"Fix: rename/merge the duplicate, correct the glob, or fix/declare the endpoint.",
+	"prose-supersession": "A knowledge object added/modified by this PR declares in prose (\"Supersedes <id>\") that it replaces a live\n" +
+		"store object, but carries no front-matter `supersedes:`/`amends:` edge. Effective status is derived from edges\n" +
+		"only (ADR-0003), so retrieval keeps serving both the new object and the contradicted one as live (ADR-0022).\n" +
+		"Fix: add `supersedes: <id>` (whole-object) or `relates_to: [amends:<id>]` (partial, ADR-0015) to the superseding object.",
 }
 
 // topics documents cross-cutting concepts that are not check ids (kept apart

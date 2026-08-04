@@ -84,6 +84,12 @@ func adrWith(id, scope, status, supersedes string) string {
 	return s + "provenance:\n  commit: x\n---\n\n# " + id + "\n"
 }
 
+// adrProse is an ADR whose body carries extra prose (for the ADR-0022
+// prose-supersession cases).
+func adrProse(id, scope, supersedes, prose string) string {
+	return adrWith(id, scope, "accepted", supersedes) + "\n" + prose + "\n"
+}
+
 func lesson(id, scope string) string {
 	return "---\nschema_version: 1\nid: " + id + "\ntype: lesson\nscope: " + scope +
 		"\nstatus: active\ncreated: 2026-01-01T00:00:00Z\nprovenance:\n  commit: x\n---\n\n# " + id + "\n"
@@ -198,6 +204,21 @@ var corpus = []Case{
 		Head:      map[string]string{".nugit/lessons/l.md": lesson("LESSON-x", "a")},
 		WantTier:  model.TierFeature, // knowledge changed
 		WantClean: true,
+	},
+	{
+		// ADR-0022: the new ADR SAYS it replaces the old one, but carries no
+		// front-matter edge — the old object would keep serving as live.
+		Name: "prose-supersession-missing-edge",
+		Base: mergeFiles(baseFiles, map[string]string{
+			".nugit/decisions/old.md": adr("ADR-OLD", "a", ""),
+		}),
+		Head: map[string]string{
+			".nugit/decisions/new.md": adrProse("ADR-NEW", "a", "",
+				"Supersedes ADR-OLD — the old rule is stale."),
+		},
+		WantTier:   model.TierFeature, // knowledge changed
+		WantChecks: []string{"prose-supersession"},
+		WantClean:  true,
 	},
 	{
 		Name:      "large-churn-single-component",

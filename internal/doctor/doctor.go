@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/n8o/nugit/internal/bootstrap"
 	"github.com/n8o/nugit/internal/c4"
@@ -97,20 +98,117 @@ func Run(repoDir string) Report {
 	bad := untypedObjects(repoDir)
 	add("knowledge objects are typed", len(bad) == 0, untypedDetail(bad))
 
+	// Lifecycle integrity (ADR-0022), both advisory: a supersession declared
+	// only in prose leaves the target serving as live, and a drifting
+	// provenance block silently loses data.
+	prose := knowledge.ProseOnlySupersessions(objs)
+	r.Checks = append(r.Checks, Check{Name: "supersession edges match prose",
+		OK: len(prose) == 0, Advisory: true, Detail: proseDetail(prose)})
+
+	prov := provenanceIssues(repoDir, objs)
+	r.Checks = append(r.Checks, Check{Name: "provenance is sane",
+		OK: len(prov) == 0, Advisory: true, Detail: provDetail(prov)})
+
 	// Informational, never a pre-flight failure (OK is always true): proposed
 	// objects are a healthy candidate lane (ADR-0016), just one awaiting review.
 	r.Checks = append(r.Checks, Check{Name: "proposed objects pending ratification",
-		OK: true, Advisory: true, Detail: pendingDetail(objs)})
+		OK: true, Advisory: true, Detail: pendingDetail(objs, time.Now())})
 
 	wired, wdetail := mcpWired(repoDir)
 	r.Checks = append(r.Checks, Check{Name: "MCP wired", OK: wired, Advisory: true, Detail: wdetail})
 
 	if kerr == nil {
-		h := storeHealth(m, objs, len(bad))
+		h := storeHealth(m, objs, bad)
 		r.Health = &h
 	}
 
 	return r
+}
+
+// proseDetail words the prose-only supersession check (ADR-0022).
+func proseDetail(ps []knowledge.ProseSupersession) string {
+	if len(ps) == 0 {
+		return "no supersession is declared in prose only"
+	}
+	var items []string
+	for _, p := range ps {
+		items = append(items, fmt.Sprintf("%s says it supersedes %s but declares no edge — add `supersedes: %s` (or `amends:%s`) so EffectiveStatus updates",
+			p.ObjectID, p.Target, p.Target, p.Target))
+	}
+	shown := items
+	if len(shown) > 3 {
+		shown = append(append([]string{}, shown[:3]...), fmt.Sprintf("… %d more", len(items)-3))
+	}
+	return fmt.Sprintf("%d supersession(s) declared in prose only: %s", len(ps), strings.Join(shown, "; "))
+}
+
+// provenanceKnownKeys are the schema fields of a provenance block; anything
+// else is silently dropped by the typed parser (seen in the wild: an `issues:`
+// array that vanished without a sound).
+var provenanceKnownKeys = map[string]bool{"commit": true, "agent": true, "citation": true}
+
+// provenanceIssues audits provenance blocks syntactically (ADR-0022): a
+// literal HEAD or empty commit is meaningless as provenance, and unknown keys
+// are data the schema drops. Deliberately NOT verified: sha resolvability
+// (squash-merge legitimately orphans feature-branch shas — ADR-0005) and slug
+// values like `bootstrap` (the historic bootstrap idiom).
+func provenanceIssues(repoDir string, objs []model.KnowledgeObject) []string {
+	var issues []string
+	for _, o := range objs {
+		if o.ID == "" || o.Type == "" {
+			continue
+		}
+		b, err := os.ReadFile(filepath.Join(repoDir, o.Path))
+		if err != nil {
+			continue
+		}
+		raw, ok := knowledge.RawFrontMatter(string(b))
+		if !ok {
+			continue
+		}
+		pv, present := raw["provenance"]
+		if !present {
+			continue // absent is fine; doctor never demands provenance
+		}
+		pm, isMap := pv.(map[string]any)
+		if !isMap {
+			issues = append(issues, o.Path+": provenance is not a mapping")
+			continue
+		}
+		if cv, has := pm["commit"]; has {
+			s, _ := cv.(string)
+			switch {
+			case strings.EqualFold(s, "HEAD"):
+				issues = append(issues, o.Path+": provenance.commit is literal HEAD (a moving ref) — record the actual sha, or `seed`")
+			case strings.TrimSpace(s) == "":
+				issues = append(issues, o.Path+": provenance.commit is empty — record the sha, use `seed`, or drop the key")
+			}
+		}
+		var unknown []string
+		for k := range pm {
+			if !provenanceKnownKeys[k] {
+				unknown = append(unknown, k)
+			}
+		}
+		if len(unknown) > 0 {
+			sort.Strings(unknown)
+			issues = append(issues, fmt.Sprintf("%s: unknown provenance key(s) %s — the schema drops them silently (known: commit, agent, citation)",
+				o.Path, strings.Join(unknown, ", ")))
+		}
+	}
+	sort.Strings(issues)
+	return issues
+}
+
+func provDetail(issues []string) string {
+	if len(issues) == 0 {
+		return "every provenance block is well-formed"
+	}
+	shown := issues
+	if len(shown) > 3 {
+		shown = append(append([]string{}, shown[:3]...), fmt.Sprintf("… %d more", len(issues)-3))
+	}
+	return fmt.Sprintf("%d provenance issue(s): %s", len(issues), strings.Join(shown, "; "))
 }
 
 // mcpJSON is the subset of .mcp.json doctor inspects.
@@ -162,7 +260,8 @@ func lookPathHint() string {
 // storeHealth summarizes the knowledge store descriptively. The score is a
 // direction indicator with reasons, never a gate — doctor's exit code ignores
 // it by design (a number to move, not a number to fail on).
-func storeHealth(m model.Model, objs []model.KnowledgeObject, untyped int) StoreHealth {
+func storeHealth(m model.Model, objs []model.KnowledgeObject, bad []badFile) StoreHealth {
+	untyped := len(bad)
 	h := StoreHealth{ByType: map[string]int{}, ByStatus: map[string]int{}, Untyped: untyped}
 	scoped := map[string]bool{}
 	for _, o := range objs {
@@ -202,7 +301,29 @@ func storeHealth(m model.Model, objs []model.KnowledgeObject, untyped int) Store
 		if p > 30 {
 			p = 30
 		}
-		deduct(p, fmt.Sprintf("%d file(s) invisible to retrieval (untyped front-matter)", untyped))
+		// A targeted reason when the untype cause is known (ADR-0022): name the
+		// list-authored scalar field instead of the generic message.
+		fieldSet := map[string]bool{}
+		listCount := 0
+		for _, bf := range bad {
+			if len(bf.ListFields) > 0 {
+				listCount++
+				for _, f := range bf.ListFields {
+					fieldSet[f] = true
+				}
+			}
+		}
+		reason := fmt.Sprintf("%d file(s) invisible to retrieval (untyped front-matter)", untyped)
+		if listCount > 0 {
+			fields := make([]string, 0, len(fieldSet))
+			for f := range fieldSet {
+				fields = append(fields, "`"+f+":`")
+			}
+			sort.Strings(fields)
+			reason = fmt.Sprintf("%d file(s) invisible to retrieval (untyped front-matter; %d untyped by a list-valued %s — the schema takes a single string)",
+				untyped, listCount, strings.Join(fields, ", "))
+		}
+		deduct(p, reason)
 	}
 	if n, total := len(h.OrphanComponents), len(m.Components); n > 0 && total > 0 {
 		deduct(int(math.Round(40*float64(n)/float64(total))),
@@ -234,8 +355,11 @@ func (h StoreHealth) CountsLine() string {
 }
 
 // pendingDetail summarizes the candidate lane: proposed objects that are still
-// live (not superseded/invalidated) and awaiting `nugit ratify`.
-func pendingDetail(objs []model.KnowledgeObject) string {
+// live (not superseded/invalidated) and awaiting `nugit ratify`. Each entry
+// carries its age in days from `created:` (ADR-0022) — a proposed object weeks
+// old is drift, not churn — but the line stays informational (ADR-0016).
+func pendingDetail(objs []model.KnowledgeObject, now time.Time) string {
+	byID := map[string]model.KnowledgeObject{}
 	var ids []string
 	for _, o := range objs {
 		if o.ID == "" || o.Status != model.StatusProposed {
@@ -245,6 +369,7 @@ func pendingDetail(objs []model.KnowledgeObject) string {
 			continue
 		}
 		ids = append(ids, o.ID)
+		byID[o.ID] = o
 	}
 	if len(ids) == 0 {
 		return "none"
@@ -254,20 +379,52 @@ func pendingDetail(objs []model.KnowledgeObject) string {
 	if len(shown) > 5 {
 		shown = shown[:5]
 	}
-	s := fmt.Sprintf("%d pending: %s", len(ids), strings.Join(shown, ", "))
+	labels := make([]string, 0, len(shown))
+	for _, id := range shown {
+		labels = append(labels, pendingLabel(byID[id], now))
+	}
+	s := fmt.Sprintf("%d pending: %s", len(ids), strings.Join(labels, ", "))
 	if len(ids) > len(shown) {
 		s += fmt.Sprintf(" (+%d more)", len(ids)-len(shown))
 	}
 	return s + " — run 'nugit ratify -list'"
 }
 
+// pendingLabel renders one pending entry, with its age when `created:` is set.
+func pendingLabel(o model.KnowledgeObject, now time.Time) string {
+	if o.Created.IsZero() {
+		return o.ID
+	}
+	days := int(now.Sub(o.Created).Hours() / 24)
+	if days < 0 {
+		days = 0
+	}
+	return fmt.Sprintf("%s (%dd)", o.ID, days)
+}
+
+// badFile is one knowledge file invisible to retrieval, with the sharpest
+// diagnosis doctor can make of WHY.
+type badFile struct {
+	Rel    string
+	Detail string
+	// ListFields are schema scalar fields authored as YAML lists — the exact
+	// mistake that silently untypes an object (the pilot bug ADR-0022 names:
+	// `supersedes:` as a list downgraded an ADR out of every context() bundle).
+	ListFields []string
+}
+
+// scalarStringFields are front-matter fields the schema types as single
+// strings; authored as YAML lists they fail the typed parse and untype the
+// whole object.
+var scalarStringFields = []string{"id", "type", "scope", "status", "supersedes", "confidence", "source"}
+
 // untypedObjects finds knowledge files that would silently vanish from
-// retrieval: a front-matter block that fails to parse (e.g. `supersedes:` as a
-// YAML list — the schema is a single string) or parses without id/type. Found
-// in the wild on a pilot repo, where a list-form supersedes made an ADR invisible to
-// every context() bundle.
-func untypedObjects(repoDir string) []string {
-	var bad []string
+// retrieval: a front-matter block that fails to parse or parses without
+// id/type. Found in the wild on a pilot repo, where a list-form supersedes
+// made an ADR invisible to every context() bundle — that case is diagnosed
+// specifically, naming the field (ADR-0022).
+func untypedObjects(repoDir string) []badFile {
+	var bad []badFile
 	check := func(rel string) {
 		b, err := os.ReadFile(filepath.Join(repoDir, rel))
 		if err != nil {
@@ -276,9 +433,18 @@ func untypedObjects(repoDir string) []string {
 		obj, ok := knowledge.ParseObject(rel, string(b))
 		switch {
 		case !ok:
-			bad = append(bad, rel+" (no front-matter block)")
+			bad = append(bad, badFile{Rel: rel, Detail: "no front-matter block"})
 		case obj.ID == "" || obj.Type == "":
-			bad = append(bad, rel+" (front-matter fails the schema — e.g. supersedes must be a single string, not a list)")
+			if fields := scalarListFields(string(b)); len(fields) > 0 {
+				quoted := make([]string, len(fields))
+				for i, f := range fields {
+					quoted[i] = "`" + f + ":`"
+				}
+				bad = append(bad, badFile{Rel: rel, ListFields: fields,
+					Detail: strings.Join(quoted, ", ") + " must be a single string, not a YAML list — the list silently untypes the whole object; one supersession per record (split it, or use `relates_to: [amends:<id>]`)"})
+				return
+			}
+			bad = append(bad, badFile{Rel: rel, Detail: "front-matter fails the schema — e.g. supersedes must be a single string, not a list"})
 		}
 	}
 	for _, d := range []string{"decisions", "lessons", "specs", "references"} {
@@ -296,11 +462,31 @@ func untypedObjects(repoDir string) []string {
 	return bad
 }
 
-func untypedDetail(bad []string) string {
+// scalarListFields reports which string-typed schema fields the raw
+// front-matter authored as YAML lists.
+func scalarListFields(content string) []string {
+	raw, ok := knowledge.RawFrontMatter(content)
+	if !ok {
+		return nil
+	}
+	var fields []string
+	for _, f := range scalarStringFields {
+		if _, isList := raw[f].([]any); isList {
+			fields = append(fields, f)
+		}
+	}
+	return fields
+}
+
+func untypedDetail(bad []badFile) string {
 	if len(bad) == 0 {
 		return "every object carries valid typed front-matter"
 	}
-	shown := bad
+	items := make([]string, 0, len(bad))
+	for _, bf := range bad {
+		items = append(items, bf.Rel+" ("+bf.Detail+")")
+	}
+	shown := items
 	if len(shown) > 3 {
 		shown = append(append([]string{}, shown[:3]...), fmt.Sprintf("… %d more", len(bad)-3))
 	}

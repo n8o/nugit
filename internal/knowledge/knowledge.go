@@ -10,6 +10,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -204,6 +205,141 @@ func ResolveAmendedBy(objs []model.KnowledgeObject) {
 			objs[i].AmendedBy = ids
 		}
 	}
+}
+
+// RawFrontMatter parses the front-matter block generically (no schema): the
+// top-level YAML mapping, or ok=false when no parsable block exists. Doctor
+// uses it to diagnose files the typed schema rejects (e.g. `supersedes:`
+// authored as a list) and to inspect keys the schema silently drops.
+func RawFrontMatter(content string) (map[string]any, bool) {
+	fm, _, ok := splitFrontMatter(content)
+	if !ok {
+		return nil, false
+	}
+	var raw map[string]any
+	if yaml.Unmarshal([]byte(fm), &raw) != nil || raw == nil {
+		return nil, false
+	}
+	return raw, true
+}
+
+// ProseSupersession is a supersession an object declares only in body prose —
+// no front-matter edge, so the target's EffectiveStatus never derives to
+// superseded and retrieval keeps serving BOTH texts as live (ADR-0022; found
+// on the pilot, where a stale protocol-draft reference kept surfacing next to
+// the decision that replaced it).
+type ProseSupersession struct {
+	ObjectID   string // the object whose prose declares the supersession
+	ObjectPath string
+	Target     string // the store object the prose names
+	TargetPath string
+}
+
+// proseSupersedeRe matches a prose supersession declaration: the word
+// "supersedes" (optionally with a colon) followed by a dashed identifier
+// (ADR-0003, REF-transport-14, …). The id grammar is permissive on purpose —
+// resolution against the store is the precision filter.
+var proseSupersedeRe = regexp.MustCompile(`(?i)\bsupersedes:?[ \t]+([A-Za-z][A-Za-z0-9]*(?:-[A-Za-z0-9]+)+)`)
+
+// ProseSupersessionTargets returns the candidate ids a body declares it
+// supersedes in prose, in order of first appearance. Fenced code blocks and
+// inline code spans never match — documentation *quoting* `supersedes: <id>`
+// is not a declaration.
+func ProseSupersessionTargets(body string) []string {
+	var ids []string
+	seen := map[string]bool{}
+	inFence := false
+	for _, line := range strings.Split(body, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), "```") {
+			inFence = !inFence
+			continue
+		}
+		if inFence {
+			continue
+		}
+		for _, m := range proseSupersedeRe.FindAllStringSubmatch(stripCodeSpans(line), -1) {
+			if id := m[1]; !seen[id] {
+				seen[id] = true
+				ids = append(ids, id)
+			}
+		}
+	}
+	return ids
+}
+
+// stripCodeSpans removes `inline code` spans from a line. An unbalanced
+// backtick drops the tail: better to under-match prose than to read quoted
+// schema examples as declarations.
+func stripCodeSpans(s string) string {
+	var b strings.Builder
+	for {
+		i := strings.IndexByte(s, '`')
+		if i < 0 {
+			b.WriteString(s)
+			return b.String()
+		}
+		b.WriteString(s[:i])
+		j := strings.IndexByte(s[i+1:], '`')
+		if j < 0 {
+			return b.String()
+		}
+		s = s[i+1+j+1:]
+	}
+}
+
+// ProseOnlySupersessions finds live typed objects whose prose declares a
+// supersession of another live store object without the front-matter
+// `supersedes:`/`amends:` edge that would derive the target's status
+// (ADR-0022). Targets already superseded or invalidated never report — the
+// edge exists elsewhere, so the drift is resolved. Callers must pass a slice
+// that ResolveEffectiveStatus has run over (Load does).
+func ProseOnlySupersessions(objs []model.KnowledgeObject) []ProseSupersession {
+	byID := map[string]*model.KnowledgeObject{}
+	for i := range objs {
+		if objs[i].ID != "" {
+			byID[objs[i].ID] = &objs[i]
+		}
+	}
+	var out []ProseSupersession
+	for i := range objs {
+		o := &objs[i]
+		if o.ID == "" || o.Type == "" || deadStatus(o.EffectiveStatus) {
+			continue
+		}
+		for _, id := range ProseSupersessionTargets(o.Body) {
+			target, ok := byID[id]
+			if !ok || id == o.ID || deadStatus(target.EffectiveStatus) {
+				continue
+			}
+			if o.Supersedes == id || hasAmendsEdge(o, id) {
+				continue
+			}
+			out = append(out, ProseSupersession{
+				ObjectID: o.ID, ObjectPath: o.Path,
+				Target: id, TargetPath: target.Path,
+			})
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].ObjectID != out[j].ObjectID {
+			return out[i].ObjectID < out[j].ObjectID
+		}
+		return out[i].Target < out[j].Target
+	})
+	return out
+}
+
+func deadStatus(s model.Status) bool {
+	return s == model.StatusSuperseded || s == model.StatusInvalidated
+}
+
+func hasAmendsEdge(o *model.KnowledgeObject, target string) bool {
+	for _, e := range o.RelatesTo {
+		if edge := ParseEdge(e); edge.Relation == "amends" && edge.Target == target {
+			return true
+		}
+	}
+	return false
 }
 
 // ParseEdge parses a relates_to entry like "constrains:render" into its parts.
