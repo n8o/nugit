@@ -17,6 +17,11 @@ never silently cancelled): the FTS/vector retrieval index (today: keyword + scop
 in-memory), content-addressing + git merge driver (N/A under ADR-0001's human keys),
 `nugit compact` (erasure/GC), and multi-root orchestration. None block adoption.
 
+Development continued past this milestone: **v0.2.0** added the candidate lane +
+`ratify` (ADR-0016), evidence trust tiers, and per-client agent wiring; **v0.3.0**
+made containers first-class and shipped two-level c4↔code enforcement with
+container roll-up (ADR-0017) over a services-as-containers leveled model (ADR-0012).
+
 The original framing follows.
 
 Where we started: the **Go-targeted unified PR view** (K1/K2/A1 in [PLAN.md](PLAN.md)).
@@ -145,14 +150,16 @@ MONO-1 ─▶ I1-MULTILANG ─▶ R1 ─▶ CAPTURE-LIFECYCLE
 - **I1 slipping L→XL** — per-language backend quirks (TS perf at scale, Python venv).
 - **Distiller promotion policy** — significance/recurrence thresholds need tuning.
 
-## Open decisions for you
+## Open decisions — all resolved
 
-1. **C++ default:** zero-config static `target_link_libraries` parse (works today,
-   ~204 edges on the pilot), or the File API when a build dir is present (accurate,
-   resolves all 1,816 link calls) falling back to static? Recommendation: ship
-   static as the default, File API as an opt-in upgrade.
-2. **Scope:** build all five phases (~4–6 wks), or stop after P1–P2 (any-codebase +
-   multi-lang enforcement incl. C++) and treat retrieval/capture as a later push?
-3. **Pilot granularity:** for C++ the components fall out of CMake targets (122 of
-   them) — keep them 1:1, or group targets into coarser subsystems? For the
-   non-CMake parts, components per `apps/*` + `libs/*` child or per top-level dir?
+1. **C++ default** — *Resolved:* the zero-config static `target_link_libraries`
+   parse shipped as the default (`internal/cmake`); the CMake File API remains the
+   documented accurate upgrade, deferred until the static parse's approximation
+   actually bites (no trigger yet).
+2. **Scope** — *Resolved:* all five phases were built and reviewed (see the status
+   table above); retrieval (P3) and capture (P4) shipped in the same push rather
+   than being split off.
+3. **Pilot granularity** — *Resolved:* components stay 1:1 with CMake targets;
+   the coarser view came as *leveling*, not merging — services-as-containers
+   (ADR-0012) with two-level c4↔code enforcement and container roll-up
+   (ADR-0017, v0.3.0). The pilot adopted the CMake/C++ path in production.
