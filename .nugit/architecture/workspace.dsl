@@ -84,6 +84,11 @@ workspace "nugit" "Git-native typed knowledge & unified PR view — self-model (
                     "paths" "internal/notion/**"
                 }
             }
+            skillopt = component "Skill-optimizer export" "Projects lessons as JSONL eval cases behind a leakage gate (outbound, ADR-0027)" "Go" {
+                properties {
+                    "paths" "internal/skillopt/**"
+                }
+            }
             consistency = component "Consistency checks" "Cross-artifact verification" "Go" {
                 properties {
                     "paths" "internal/consistency/**"
@@ -297,11 +302,15 @@ workspace "nugit" "Git-native typed knowledge & unified PR view — self-model (
             cli -> doctor "doctor command"
             cli -> icepanel "c4 export command"
             cli -> notion "notion publish command"
+            cli -> skillopt "export command"
 
             icepanel -> model_ "uses types"
 
             notion -> model_ "uses types"
             notion -> knowledge "loads the corpus"
+
+            skillopt -> model_ "uses types"
+            skillopt -> knowledge "loads the corpus"
 
             doctor -> config "checks config"
             doctor -> c4 "checks the model parses"
