@@ -81,6 +81,7 @@ func toItem(o *model.KnowledgeObject, via string) Item {
 		Via:          via,
 		AmendedBy:    o.AmendedBy,
 		ReinforcedBy: o.ReinforcedBy,
+		Origin:       o.Origin,
 	}
 	it.tokens = tokensOf(it.Summary) + tokensOf(it.Rejected) + tokensOf(it.ID) +
 		tokensOf(strings.Join(it.AmendedBy, " ")) +
@@ -164,11 +165,21 @@ func glossaryTerms(o *model.KnowledgeObject, task, path string) []string {
 	return out
 }
 
-// sortItems orders nearer-scope (component-scoped or path-bound) before
-// global, current status before superseded, then by ID — so truncation drops
-// the least-relevant first.
+// sortItems orders local before peer, then nearer-scope (component-scoped or
+// path-bound) before global, current status before superseded, then by
+// qualified ID — so truncation drops the least-relevant first.
+//
+// Origin is the OUTERMOST dimension (ADR-0032): local always outranks peer,
+// unconditionally. A component-scoped record from this repo is about this code;
+// the nearest a peer can get is repo-wide advice from somewhere else. Ranking a
+// peer global above a local global on any other dimension would put another
+// repo's word ahead of ours in a bundle read as this repo's context.
 func sortItems(items []Item) {
 	sort.SliceStable(items, func(i, j int) bool {
+		oi, oj := originRank(items[i]), originRank(items[j])
+		if oi != oj {
+			return oi < oj
+		}
 		gi, gj := scopeRank(items[i]), scopeRank(items[j])
 		if gi != gj {
 			return gi < gj
@@ -177,8 +188,17 @@ func sortItems(items []Item) {
 		if si != sj {
 			return si < sj
 		}
-		return items[i].ID < items[j].ID
+		// Qualified, not bare: two stores' ADR-0001s must order deterministically.
+		return items[i].QualifiedID() < items[j].QualifiedID()
 	})
+}
+
+// originRank: local (0) before peer (1).
+func originRank(it Item) int {
+	if it.Origin == "" {
+		return 0
+	}
+	return 1
 }
 
 func scopeRank(it Item) int {

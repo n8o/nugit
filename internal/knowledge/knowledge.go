@@ -21,11 +21,25 @@ import (
 )
 
 // Load walks repoDir/.nugit and returns every parsed knowledge object, with
-// EffectiveStatus already resolved across the set.
+// EffectiveStatus already resolved across the set. Local only: peers are opt-in
+// through LoadWithPeers, so every writer (ratify, reinforce, distill, the
+// projections) keeps seeing exactly this repo's store — a peer store is never
+// written and never edited (ADR-0011, ADR-0032).
 func Load(repoDir string) ([]model.KnowledgeObject, error) {
-	root := filepath.Join(repoDir, ".nugit")
+	objs, err := walkStore(repoDir, "")
+	if err != nil {
+		return nil, err
+	}
+	resolve(objs)
+	return objs, nil
+}
+
+// walkStore parses every .md under root/.nugit, stamping origin on each object.
+// Paths are root-relative, so a foreign object's Path names a file inside the
+// PEER's checkout, never one here.
+func walkStore(root, origin string) ([]model.KnowledgeObject, error) {
 	var objs []model.KnowledgeObject
-	err := filepath.WalkDir(root, func(path string, de fs.DirEntry, err error) error {
+	err := filepath.WalkDir(filepath.Join(root, ".nugit"), func(path string, de fs.DirEntry, err error) error {
 		if err != nil {
 			if os.IsNotExist(err) {
 				return nil
@@ -45,9 +59,9 @@ func Load(repoDir string) ([]model.KnowledgeObject, error) {
 		if err != nil {
 			return err
 		}
-		rel, _ := filepath.Rel(repoDir, path)
-		obj, ok := ParseObject(rel, string(b))
-		if ok {
+		rel, _ := filepath.Rel(root, path)
+		if obj, ok := ParseObject(rel, string(b)); ok {
+			obj.Origin = origin
 			objs = append(objs, *obj)
 		}
 		return nil
@@ -55,10 +69,14 @@ func Load(repoDir string) ([]model.KnowledgeObject, error) {
 	if err != nil {
 		return nil, err
 	}
+	return objs, nil
+}
+
+// resolve runs the three read-time derivations over one store's objects.
+func resolve(objs []model.KnowledgeObject) {
 	ResolveEffectiveStatus(objs)
 	ResolveAmendedBy(objs)
 	ResolveReinforcedBy(objs)
-	return objs, nil
 }
 
 // LoadAtRef reads every knowledge object under the nugit root's .nugit/ tree at
@@ -165,20 +183,39 @@ func indexClosingFence(s string) int {
 	}
 }
 
+// Key is the identity of an object within a set that may merge several stores:
+// the (origin, id) pair, never the bare id (ADR-0032). Every repo mints
+// ADR-0001, so keying on id alone silently cross-links two stores.
+type Key struct {
+	Origin string
+	ID     string
+}
+
+// KeyOf is the object's own identity.
+func KeyOf(o model.KnowledgeObject) Key { return Key{Origin: o.Origin, ID: o.ID} }
+
+// EdgeKeyFrom is the identity an edge declared BY o resolves to. The origin is
+// always the source's own: a peer's `supersedes: ADR-0007` names the peer's
+// ADR-0007, never this repo's (ADR-0032). Edges never cross a store boundary.
+func EdgeKeyFrom(o model.KnowledgeObject, target string) Key {
+	return Key{Origin: o.Origin, ID: target}
+}
+
 // ResolveEffectiveStatus marks any object that another object supersedes as
-// Superseded, in place on the slice.
+// Superseded, in place on the slice. Supersession resolves by (origin, id): a
+// foreign record can never supersede a same-id local one (ADR-0032).
 func ResolveEffectiveStatus(objs []model.KnowledgeObject) {
-	superseded := map[string]bool{}
+	superseded := map[Key]bool{}
 	for _, o := range objs {
 		if o.Supersedes != "" {
-			superseded[o.Supersedes] = true
+			superseded[EdgeKeyFrom(o, o.Supersedes)] = true
 		}
 	}
 	for i := range objs {
 		if objs[i].EffectiveStatus == "" {
 			objs[i].EffectiveStatus = objs[i].Status
 		}
-		if superseded[objs[i].ID] && objs[i].EffectiveStatus != model.StatusInvalidated {
+		if superseded[KeyOf(objs[i])] && objs[i].EffectiveStatus != model.StatusInvalidated {
 			objs[i].EffectiveStatus = model.StatusSuperseded
 		}
 	}
@@ -192,7 +229,7 @@ func ResolveEffectiveStatus(objs []model.KnowledgeObject) {
 func ResolveAmendedBy(objs []model.KnowledgeObject) {
 	amenders := reverseEdges(objs, "amends")
 	for i := range objs {
-		if ids := amenders[objs[i].ID]; len(ids) > 0 {
+		if ids := amenders[KeyOf(objs[i])]; len(ids) > 0 {
 			sort.Strings(ids)
 			objs[i].AmendedBy = ids
 		}
@@ -286,10 +323,10 @@ func stripCodeSpans(s string) string {
 // edge exists elsewhere, so the drift is resolved. Callers must pass a slice
 // that ResolveEffectiveStatus has run over (Load does).
 func ProseOnlySupersessions(objs []model.KnowledgeObject) []ProseSupersession {
-	byID := map[string]*model.KnowledgeObject{}
+	byID := map[Key]*model.KnowledgeObject{}
 	for i := range objs {
 		if objs[i].ID != "" {
-			byID[objs[i].ID] = &objs[i]
+			byID[KeyOf(objs[i])] = &objs[i]
 		}
 	}
 	var out []ProseSupersession
@@ -299,7 +336,7 @@ func ProseOnlySupersessions(objs []model.KnowledgeObject) []ProseSupersession {
 			continue
 		}
 		for _, id := range ProseSupersessionTargets(o.Body) {
-			target, ok := byID[id]
+			target, ok := byID[EdgeKeyFrom(*o, id)]
 			if !ok || id == o.ID || deadStatus(target.EffectiveStatus) {
 				continue
 			}
@@ -391,24 +428,26 @@ func InvalidAppliesGlobs(objs []model.KnowledgeObject) []InvalidAppliesGlob {
 func ResolveReinforcedBy(objs []model.KnowledgeObject) {
 	reinforcers := reverseEdges(objs, "reinforces")
 	for i := range objs {
-		if ids := reinforcers[objs[i].ID]; len(ids) > 0 {
+		if ids := reinforcers[KeyOf(objs[i])]; len(ids) > 0 {
 			sort.Strings(ids)
 			objs[i].ReinforcedBy = ids
 		}
 	}
 }
 
-// reverseEdges indexes live objects by the target of their `relation:` edges.
-// Superseded/invalidated sources are skipped — a dead edge annotates nothing.
-func reverseEdges(objs []model.KnowledgeObject, relation string) map[string][]string {
-	rev := map[string][]string{}
+// reverseEdges indexes live objects by the (origin, target) their `relation:`
+// edges resolve to. Superseded/invalidated sources are skipped — a dead edge
+// annotates nothing. Keying on the SOURCE's origin is what confines an edge to
+// its own store (ADR-0032).
+func reverseEdges(objs []model.KnowledgeObject, relation string) map[Key][]string {
+	rev := map[Key][]string{}
 	for _, o := range objs {
 		if o.ID == "" || o.EffectiveStatus == model.StatusSuperseded || o.EffectiveStatus == model.StatusInvalidated {
 			continue
 		}
 		for _, e := range o.RelatesTo {
 			if edge := ParseEdge(e); edge.Relation == relation && edge.Target != "" {
-				rev[edge.Target] = append(rev[edge.Target], o.ID)
+				rev[EdgeKeyFrom(o, edge.Target)] = append(rev[EdgeKeyFrom(o, edge.Target)], o.QualifiedID())
 			}
 		}
 	}

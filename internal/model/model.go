@@ -142,6 +142,32 @@ type KnowledgeObject struct {
 	// Evidence is the derived trust tier (see the Evidence type). Populated by
 	// evidence.Annotate; empty when no derivation ran (e.g. untyped objects).
 	Evidence Evidence
+	// Origin is the peer name a FOREIGN object was read from, or "" for a local
+	// object (ADR-0032). Never authored and never written back: it is stamped at
+	// load time by the peer loader. Identity within a merged set is (Origin, ID),
+	// never ID alone — every repo mints ADR-0001, so a bare id is ambiguous the
+	// moment two stores are read together.
+	Origin string
+}
+
+// Foreign reports whether the object came from a peer store rather than this
+// repo (ADR-0032).
+func (o KnowledgeObject) Foreign() bool { return o.Origin != "" }
+
+// QualifiedID is the display form of an object's identity: the bare id for a
+// local object, `<peer>:<id>` for a foreign one (ADR-0032). A reader must never
+// mistake peer knowledge for local knowledge, and two stores' ADR-0001s must
+// never render identically.
+func (o KnowledgeObject) QualifiedID() string { return QualifyID(o.Origin, o.ID) }
+
+// QualifyID renders an (origin, id) pair for display. Kept as a free function
+// so item/bundle types that carry the pair without the whole object render it
+// identically.
+func QualifyID(origin, id string) string {
+	if origin == "" {
+		return id
+	}
+	return origin + ":" + id
 }
 
 // Edge is a parsed typed cross-reference from a relates_to entry, e.g.

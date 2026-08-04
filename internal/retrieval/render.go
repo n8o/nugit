@@ -28,13 +28,13 @@ func (b Bundle) Markdown() string {
 	}
 
 	if b.Spec != nil {
-		fmt.Fprintf(&w, "**Active spec** `%s` — %s\n\n", b.Spec.ID, b.Spec.Summary)
+		fmt.Fprintf(&w, "**Active spec** `%s` — %s\n\n", b.Spec.QualifiedID(), b.Spec.Summary)
 	}
 
 	if len(b.Decisions) > 0 {
 		w.WriteString("**Decisions**\n")
 		for _, d := range b.Decisions {
-			fmt.Fprintf(&w, "- `%s` (%s) — %s%s\n", d.ID, statusLabel(d), d.Summary, viaSuffix(d.Via))
+			fmt.Fprintf(&w, "- `%s` (%s) — %s%s\n", d.QualifiedID(), statusLabel(d), d.Summary, viaSuffix(d.Via))
 			if d.Rejected != "" {
 				fmt.Fprintf(&w, "  - 🚫 rejected: %s\n", oneLine(d.Rejected))
 			}
@@ -48,7 +48,7 @@ func (b Bundle) Markdown() string {
 	if len(b.Lessons) > 0 {
 		w.WriteString("**Lessons**\n")
 		for _, l := range b.Lessons {
-			fmt.Fprintf(&w, "- `%s`%s — %s%s\n", l.ID, tierSuffix(l), l.Summary, viaSuffix(l.Via))
+			fmt.Fprintf(&w, "- `%s`%s — %s%s\n", l.QualifiedID(), tierSuffix(l), l.Summary, viaSuffix(l.Via))
 		}
 		w.WriteString("\n")
 	}
@@ -56,7 +56,7 @@ func (b Bundle) Markdown() string {
 	if len(b.References) > 0 {
 		w.WriteString("**References** _(distilled external sources)_\n")
 		for _, r := range b.References {
-			fmt.Fprintf(&w, "- `%s`%s — %s%s\n", r.ID, tierSuffix(r), r.Summary, viaSuffix(r.Via))
+			fmt.Fprintf(&w, "- `%s`%s — %s%s\n", r.QualifiedID(), tierSuffix(r), r.Summary, viaSuffix(r.Via))
 		}
 		w.WriteString("\n")
 	}
@@ -91,6 +91,19 @@ func (b Bundle) Markdown() string {
 		w.WriteString("\n")
 	}
 
+	// A configured peer that contributed nothing is stated, never silent: the
+	// reader must be able to tell "the sibling has no global knowledge" from
+	// "the sibling isn't checked out here" (ADR-0032).
+	var absent []string
+	for _, p := range b.Peers {
+		if !p.Reachable {
+			absent = append(absent, p.Name)
+		}
+	}
+	if len(absent) > 0 {
+		fmt.Fprintf(&w, "_peer store(s) unreachable, contributed nothing: %s_\n\n", strings.Join(absent, ", "))
+	}
+
 	fmt.Fprintf(&w, "_~%d/%d tokens", b.EstimatedTokens, b.BudgetTokens)
 	if b.Truncated {
 		fmt.Fprintf(&w, " · truncated, dropped: %s", strings.Join(b.Dropped, "; "))
@@ -115,19 +128,32 @@ func tierWord(it Item) string {
 // tierSuffix marks items on lines that don't carry a full status label
 // (lessons, references) with their trust tier and, when the queried path
 // matches the item's applies_to_paths, the path-bound marker (ADR-0020).
+// Foreign items lead with their origin (ADR-0032).
 func tierSuffix(it Item) string {
-	t := tierWord(it)
-	if it.PathBound {
-		if t != "" {
-			t += " · path-bound"
-		} else {
-			t = "path-bound"
-		}
+	var parts []string
+	if s := originWord(it); s != "" {
+		parts = append(parts, s)
 	}
-	if t != "" {
-		return " _[" + t + "]_"
+	if t := tierWord(it); t != "" {
+		parts = append(parts, t)
+	}
+	if it.PathBound {
+		parts = append(parts, "path-bound")
+	}
+	if len(parts) > 0 {
+		return " _[" + strings.Join(parts, " · ") + "]_"
 	}
 	return ""
+}
+
+// originWord names the peer an item came from, so no line in a bundle can be
+// read as local knowledge when it isn't (ADR-0032). The qualified id already
+// carries the namespace; this says what the prefix MEANS.
+func originWord(it Item) string {
+	if it.Origin == "" {
+		return ""
+	}
+	return "peer " + it.Origin
 }
 
 // statusLabel renders an item's status · trust tier, annotated when the
@@ -135,6 +161,9 @@ func tierSuffix(it Item) string {
 // the queried path matches its applies_to_paths binding (ADR-0020).
 func statusLabel(it Item) string {
 	s := it.Status
+	if o := originWord(it); o != "" {
+		s = o + " · " + s
+	}
 	if t := tierWord(it); t != "" {
 		s += " · " + t
 	}

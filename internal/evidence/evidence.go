@@ -43,6 +43,17 @@ func TierOf(o model.KnowledgeObject, s Signals) model.Evidence {
 	if o.Status == model.StatusProposed {
 		return model.EvidenceProposed
 	}
+	// A FOREIGN object caps at declared, whatever tier it holds at home
+	// (ADR-0032). Every tier above declared is a claim about THIS repo's
+	// substrate: that the components it governs are path-bound here and that
+	// this repo's edge checks fail on violations. None of that is true of a
+	// peer's record — this repo enforces nothing about it and mechanically
+	// verifies nothing. Re-displaying the peer's own "enforced" would be a lie
+	// about who is checking. Placed below the stale/proposed rules so those
+	// stay honest: declared is a ceiling, not a floor.
+	if o.Foreign() {
+		return model.EvidenceDeclared
+	}
 	comps := GovernedComponents(o)
 	// A direct path binding (applies_to_paths, ADR-0020) counts as a binding:
 	// the object is tied to code, so it is never merely declared.
@@ -122,11 +133,14 @@ func AnnotateDelta(d *model.KnowledgeDelta, resolved map[string]model.Evidence, 
 	}
 }
 
-// Tiers indexes Annotate results by object id, for AnnotateDelta.
+// Tiers indexes Annotate results by object id, for AnnotateDelta. Foreign
+// objects are excluded: this map is keyed by bare id, and a peer's ADR-0001 is
+// not this repo's ADR-0001 (ADR-0032). The delta is local by construction, so
+// nothing is lost.
 func Tiers(objs []model.KnowledgeObject) map[string]model.Evidence {
 	out := make(map[string]model.Evidence, len(objs))
 	for _, o := range objs {
-		if o.ID != "" {
+		if o.ID != "" && !o.Foreign() {
 			out[o.ID] = o.Evidence
 		}
 	}
