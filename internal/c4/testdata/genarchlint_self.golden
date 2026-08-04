@@ -194,6 +194,7 @@ deps:
       - "model_"
   "knowledge":
     mayDependOn:
+      - "gitutil"
       - "model_"
   "localmem":
     mayDependOn: []

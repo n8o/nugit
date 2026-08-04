@@ -79,7 +79,10 @@ func BuildReport(opt Options) (model.Report, error) {
 		commits[i].Trailer = trailers.Parse(commits[i].Body)
 	}
 
-	allObjs, err := knowledge.Load(opt.RepoDir)
+	// Knowledge is read at the reviewed ref, like the DSL, config, and source —
+	// never the working tree (LESSON-read-from-reviewed-ref) — so stale-knowledge
+	// and spec-linkage describe base..head even when the checkout has drifted.
+	allObjs, err := knowledge.LoadAtRef(repo, opt.Head, prefix)
 	if err != nil {
 		return model.Report{}, err
 	}
