@@ -53,8 +53,18 @@ type Item struct {
 	// ReinforcedBy: this object was re-confirmed after a recurrence by these
 	// ids, which widen its applicability (ADR-0019).
 	ReinforcedBy []string `json:"reinforced_by,omitempty"`
-	tokens       int
+	// Origin names the PEER this item came from, or "" for local knowledge
+	// (ADR-0032). A reader must never mistake peer knowledge for local
+	// knowledge: this repo enforces nothing about a foreign object, its Path
+	// names a file in another checkout, and its ID is only unique together with
+	// this field.
+	Origin string `json:"origin,omitempty"`
+	tokens int
 }
+
+// QualifiedID is how an item is NAMED anywhere a human or an agent reads it:
+// the bare id locally, `<peer>:<id>` for a foreign object (ADR-0032).
+func (it Item) QualifiedID() string { return model.QualifyID(it.Origin, it.ID) }
 
 // C4Slice is the component + its immediate relationships.
 type C4Slice struct {
@@ -78,11 +88,15 @@ type Bundle struct {
 	// decision:/learned: trailers), derived from git at read time (ADR-0024).
 	// Lowest fill priority — it exists to spend budget the typed sections left
 	// unused, so it is the first thing dropped when the budget is tight.
-	PathHistory     []HistoryEntry `json:"path_history,omitempty"`
-	Truncated       bool           `json:"truncated"`
-	Dropped         []string       `json:"dropped,omitempty"` // "type id (reason)" — never a silent cut
-	EstimatedTokens int            `json:"estimated_tokens"`
-	BudgetTokens    int            `json:"budget_tokens"`
+	PathHistory []HistoryEntry `json:"path_history,omitempty"`
+	// Peers reports what each configured peer store contributed (ADR-0032),
+	// including the ones that contributed nothing because they are not checked
+	// out here. Absent peers are made visible, never silently empty.
+	Peers           []knowledge.PeerLoad `json:"peers,omitempty"`
+	Truncated       bool                 `json:"truncated"`
+	Dropped         []string             `json:"dropped,omitempty"` // "type id (reason)" — never a silent cut
+	EstimatedTokens int                  `json:"estimated_tokens"`
+	BudgetTokens    int                  `json:"budget_tokens"`
 }
 
 // Context composes the bundle for opt.Path.
@@ -115,21 +129,28 @@ func Context(opt Options) (Bundle, error) {
 	b := Bundle{Path: opt.Path, Component: comp, BudgetTokens: budget}
 	b.C4 = c4Slice(m, comp)
 
-	objs, err := knowledge.Load(opt.RepoDir)
+	// Local store + every reachable peer (ADR-0032). Only the LOCAL load can
+	// error: an absent sibling degrades to "contributed nothing" so pr-render
+	// and context() never fail because CI didn't check the peer out.
+	objs, peers, err := knowledge.LoadWithPeers(opt.RepoDir, peerSources(opt.RepoDir, cfg))
 	if err != nil {
 		return b, err
 	}
+	b.Peers = peers
 	// Trust tiers (never authored): the agent reading this bundle sees how much
-	// of each item nugit mechanically verifies.
+	// of each item nugit mechanically verifies. A foreign object caps at
+	// declared — these signals describe THIS repo's substrate.
 	evidence.Annotate(objs, evidence.Signals{
 		Model:   m,
 		Enforce: !cfg.C4Warn(),
 		Backend: evidence.BackendActive(opt.RepoDir),
 	})
-	byKey := map[string]*model.KnowledgeObject{}
+	// Identity in a merged set is (origin, id), never id: every repo mints
+	// ADR-0001, so a bare-id index silently cross-links two stores.
+	byKey := map[knowledge.Key]*model.KnowledgeObject{}
 	for i := range objs {
 		if objs[i].ID != "" {
-			byKey[objs[i].ID] = &objs[i]
+			byKey[knowledge.KeyOf(objs[i])] = &objs[i]
 		}
 	}
 
@@ -141,16 +162,23 @@ func Context(opt Options) (Bundle, error) {
 	var decisions, lessons, references []Item
 	var spec *Item
 	var glossary []string
-	pulled := map[string]bool{}
+	pulled := map[knowledge.Key]bool{}
 
 	for i := range objs {
 		o := &objs[i]
+		if o.Foreign() && !peerEligible(o) {
+			continue
+		}
 		// Direct path binding (ADR-0020): a queried path matching the object's
 		// applies_to_paths makes it behave as if component-scoped, regardless
 		// of scope:. The binding substitutes for scope, not for task
 		// relevance — the keyword filters below still apply where they would
 		// for a component-scoped object.
-		bound := knowledge.AppliesTo(o, path)
+		//
+		// A FOREIGN object never path-binds: its globs address files in the
+		// peer's checkout, and `internal/render/**` matching here would be a
+		// coincidence of layout, not a binding (ADR-0032).
+		bound := !o.Foreign() && knowledge.AppliesTo(o, path)
 		if !bound && !inScope(o, comp, parent) {
 			continue
 		}
@@ -165,26 +193,26 @@ func Context(opt Options) (Bundle, error) {
 			it := toItem(o, "")
 			it.PathBound = bound
 			decisions = append(decisions, it)
-			pulled[o.ID] = true
+			pulled[knowledge.KeyOf(*o)] = true
 		case model.KindSpec:
 			// One spec slot; a ratified spec displaces a proposed placeholder
 			// (ADR-0016) but never the other way around.
 			if (bound || relevant(o, comp, parent)) &&
 				(spec == nil || (spec.Status == string(model.StatusProposed) && o.Status != model.StatusProposed)) {
 				if spec != nil {
-					delete(pulled, spec.ID)
+					delete(pulled, itemKey(*spec))
 				}
 				it := toItem(o, "")
 				it.PathBound = bound
 				spec = &it
-				pulled[o.ID] = true
+				pulled[knowledge.KeyOf(*o)] = true
 			}
 		case model.KindLesson:
 			if len(kw) == 0 || matches(o, kw) {
 				it := toItem(o, "")
 				it.PathBound = bound
 				lessons = append(lessons, it)
-				pulled[o.ID] = true
+				pulled[knowledge.KeyOf(*o)] = true
 			}
 		case model.KindReference:
 			// Same rule as lessons: keyword-matched when a task is given, all
@@ -193,7 +221,7 @@ func Context(opt Options) (Bundle, error) {
 				it := toItem(o, "")
 				it.PathBound = bound
 				references = append(references, it)
-				pulled[o.ID] = true
+				pulled[knowledge.KeyOf(*o)] = true
 			}
 		case model.KindGlossary:
 			glossary = append(glossary, glossaryTerms(o, opt.Task, path)...)
@@ -208,24 +236,32 @@ func Context(opt Options) (Bundle, error) {
 		seeds = append(seeds, *spec)
 	}
 	for _, src := range seeds {
-		o := byKey[src.ID]
+		o := byKey[itemKey(src)]
 		if o == nil {
 			continue
 		}
 		for _, e := range o.RelatesTo {
 			edge := knowledge.ParseEdge(e)
-			tgt := byKey[edge.Target]
-			if tgt == nil || pulled[tgt.ID] {
+			// The traversal resolves the edge WITHIN the seed's own store: a
+			// peer's `relates_to: [prevents:ADR-0007]` names the peer's
+			// ADR-0007, never this repo's (ADR-0032).
+			tgt := byKey[knowledge.EdgeKeyFrom(*o, edge.Target)]
+			if tgt == nil || pulled[knowledge.KeyOf(*tgt)] {
 				continue
 			}
-			pulled[tgt.ID] = true
+			// A foreign target must clear the same peer gate as a foreign seed —
+			// traversal is not a back door around global+ratified.
+			if tgt.Foreign() && !peerEligible(tgt) {
+				continue
+			}
+			pulled[knowledge.KeyOf(*tgt)] = true
 			// Never surface a superseded/invalidated rationale as live context.
 			// Proposed stays IN, labeled (ADR-0016): superseded is known-wrong;
 			// proposed is merely unratified and often the only recorded why.
 			if st := effectiveStatus(tgt); st == model.StatusSuperseded || st == model.StatusInvalidated {
 				continue
 			}
-			via := edge.Relation + ":" + src.ID
+			via := edge.Relation + ":" + src.QualifiedID()
 			if tgt.Type == model.KindDecision {
 				decisions = append(decisions, toItem(tgt, via))
 			} else if tgt.Type == model.KindLesson {
@@ -242,17 +278,22 @@ func Context(opt Options) (Bundle, error) {
 	// the bundle.
 	for i := range objs {
 		o := &objs[i]
-		if o.Type != model.KindReference || pulled[o.ID] {
+		if o.Type != model.KindReference || pulled[knowledge.KeyOf(*o)] {
 			continue
 		}
 		if st := effectiveStatus(o); st == model.StatusSuperseded || st == model.StatusInvalidated {
 			continue
 		}
+		if o.Foreign() && !peerEligible(o) {
+			continue
+		}
 		for _, e := range o.RelatesTo {
 			edge := knowledge.ParseEdge(e)
-			if edge.Relation == "informs" && pulled[edge.Target] {
-				references = append(references, toItem(o, "informs:"+edge.Target))
-				pulled[o.ID] = true
+			// Same-store resolution as the forward pass: a peer reference can
+			// only inform an object from its OWN store (ADR-0032).
+			if edge.Relation == "informs" && pulled[knowledge.EdgeKeyFrom(*o, edge.Target)] {
+				references = append(references, toItem(o, "informs:"+model.QualifyID(o.Origin, edge.Target)))
+				pulled[knowledge.KeyOf(*o)] = true
 				break
 			}
 		}
@@ -294,9 +335,76 @@ func hasKeyword(e localmem.Entry, kw map[string]bool) bool {
 	return overlaps(e.Text+" "+strings.Join(e.Keywords, " "), kw)
 }
 
-// truncate enforces the token budget by type priority (c4 > spec > decisions >
-// lessons > references > glossary > working memory > path history), dropping
-// lowest-priority items first and recording each drop — never a silent cut.
+// peerSources maps the configured peers onto the loader's input, resolving each
+// peer path against the nugit root.
+func peerSources(repoDir string, cfg config.Config) []knowledge.PeerSource {
+	if len(cfg.Peers) == 0 {
+		return nil
+	}
+	out := make([]knowledge.PeerSource, 0, len(cfg.Peers))
+	for _, p := range cfg.Peers {
+		out = append(out, knowledge.PeerSource{Name: p.Name, Dir: p.Dir(repoDir)})
+	}
+	return out
+}
+
+// peerEligible is the admission rule for FOREIGN knowledge (ADR-0032). A peer
+// object is a bundle candidate only when all three hold:
+//
+//   - it is a decision, lesson, or reference — the kinds whose value is the
+//     recorded "why". The single spec slot and the glossary stay local: a
+//     peer's spec is not the active spec for a path in THIS repo, and its
+//     glossary defines its own terms;
+//   - it is GLOBALLY scoped. A peer's component-scoped record names a component
+//     id that means nothing here — `scope: transport` in the sibling and
+//     `transport` in this model are two unrelated strings that happen to match,
+//     and scope is compared by string equality. Only what the peer declared
+//     repo-wide is safely repo-agnostic;
+//   - it is RATIFIED (effective status accepted/active). Someone else's
+//     unreviewed candidate is not context; the candidate lane is a local
+//     review queue (ADR-0016), and nobody here can ratify a foreign draft.
+func peerEligible(o *model.KnowledgeObject) bool {
+	switch o.Type {
+	case model.KindDecision, model.KindLesson, model.KindReference:
+	default:
+		return false
+	}
+	if o.Scope != "" && o.Scope != "global" {
+		return false
+	}
+	switch effectiveStatus(o) {
+	case model.StatusAccepted, model.StatusActive:
+		return true
+	}
+	return false
+}
+
+// itemKey is an item's (origin, id) identity, matching knowledge.KeyOf for the
+// object it was built from.
+func itemKey(it Item) knowledge.Key { return knowledge.Key{Origin: it.Origin, ID: it.ID} }
+
+// splitOrigin partitions a sorted item slice into its local and foreign runs.
+// sortItems already ranks local before peer, so the two runs concatenate back
+// into the original order — the split reorders nothing, it only lets the budget
+// spend on local knowledge first.
+func splitOrigin(items []Item) (local, peer []Item) {
+	for _, it := range items {
+		if it.Origin == "" {
+			local = append(local, it)
+		} else {
+			peer = append(peer, it)
+		}
+	}
+	return local, peer
+}
+
+// truncate enforces the token budget by priority: c4 > spec > local decisions >
+// local lessons > local references > PEER decisions > peer lessons > peer
+// references > glossary > working memory > path history. Peer knowledge sits at
+// the bottom of the typed ladder — dropped before any local item, including
+// local items of a lower kind — because it is context from another repo and
+// cannot be more relevant here than this repo's own record. Every drop is
+// recorded; never a silent cut.
 func truncate(b *Bundle, budget int) {
 	used := tokensOf(b.C4.Component) + 20
 	if b.Spec != nil {
@@ -316,14 +424,24 @@ func truncate(b *Bundle, budget int) {
 				kept = append(kept, it)
 			} else {
 				b.Truncated = true
-				b.Dropped = append(b.Dropped, kind+" "+it.ID+" (over budget)")
+				b.Dropped = append(b.Dropped, kind+" "+it.QualifiedID()+" (over budget)")
 			}
 		}
 		return kept
 	}
-	b.Decisions = add(b.Decisions, "decision")
-	b.Lessons = add(b.Lessons, "lesson")
-	b.References = add(b.References, "reference")
+	// Local knowledge fills first, in kind priority; peer knowledge fills what
+	// is left, in the same kind priority. Concatenating kept-local ++ kept-peer
+	// restores each section's sorted order exactly (sortItems ranks local
+	// first), so this changes what SURVIVES the budget, never the order.
+	localD, peerD := splitOrigin(b.Decisions)
+	localL, peerL := splitOrigin(b.Lessons)
+	localR, peerR := splitOrigin(b.References)
+	localD = add(localD, "decision")
+	localL = add(localL, "lesson")
+	localR = add(localR, "reference")
+	b.Decisions = append(localD, add(peerD, "decision")...)
+	b.Lessons = append(localL, add(peerL, "lesson")...)
+	b.References = append(localR, add(peerR, "reference")...)
 	// glossary is lowest priority
 	var g []string
 	for _, t := range b.Glossary {

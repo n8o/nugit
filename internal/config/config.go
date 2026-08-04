@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -42,6 +43,75 @@ type Config struct {
 		WindowDays int    `yaml:"window_days"` // history window scanned for fix churn (default 90)
 		MinFixes   int    `yaml:"min_fixes"`   // fix-typed commits that trigger the warn (default 3)
 	} `yaml:"recurrence"`
+	// Peers are sibling repos in the same organization whose knowledge is
+	// readable from here (ADR-0032, phase 1: read-only, local paths only).
+	Peers PeerList `yaml:"peers"`
+}
+
+// Peer is one sibling repo's store, read-only.
+type Peer struct {
+	// Name is the display namespace a foreign object is qualified with
+	// (`platform:ADR-0020`). Short, unique, [a-z0-9-].
+	Name string `yaml:"name"`
+	// Path is the peer's local checkout, relative to the nugit root (or absolute).
+	// Phase 1 never fetches: a path that is not checked out contributes nothing.
+	Path string `yaml:"path"`
+}
+
+// Dir resolves the peer's checkout against the nugit root.
+func (p Peer) Dir(repoDir string) string {
+	if filepath.IsAbs(p.Path) {
+		return p.Path
+	}
+	return filepath.Join(repoDir, p.Path)
+}
+
+// PeerList decodes the `peers:` block WITHOUT ever failing the whole config.
+// A malformed block, or one malformed entry inside a good block, degrades to
+// "no peers" / "that entry is skipped" — federation is additive context, so it
+// must never be able to take config.yml (and with it c4.mode, fail_on, the
+// capture mode) down with it. Same fail-closed discipline as the enum knobs
+// above: an unusable value never silently becomes a mode nobody asked for.
+type PeerList []Peer
+
+// UnmarshalYAML implements the lenient decode. It returns nil error always by
+// design; see the type doc.
+func (l *PeerList) UnmarshalYAML(n *yaml.Node) error {
+	*l = nil
+	if n.Kind != yaml.SequenceNode {
+		return nil // scalar/mapping authored where a list belongs: no peers
+	}
+	for _, item := range n.Content {
+		var p Peer
+		if item.Decode(&p) != nil {
+			continue // one bad entry never voids the good ones
+		}
+		*l = append(*l, p)
+	}
+	return nil
+}
+
+// peerNameRe is the peer-name grammar: a short lowercase namespace safe to
+// prefix onto an id (`platform:ADR-0020`) and safe in a file/JSON context.
+var peerNameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
+
+// validPeers filters the decoded list to the entries that can actually be used:
+// a well-formed unique name and a non-empty path. Rejected entries are dropped
+// silently-but-closed (doctor is where they become visible), never promoted to
+// a config error.
+func validPeers(in PeerList) PeerList {
+	seen := map[string]bool{}
+	var out PeerList
+	for _, p := range in {
+		p.Name = strings.TrimSpace(p.Name)
+		p.Path = strings.TrimSpace(p.Path)
+		if !peerNameRe.MatchString(p.Name) || p.Path == "" || seen[p.Name] {
+			continue
+		}
+		seen[p.Name] = true
+		out = append(out, p)
+	}
+	return out
 }
 
 // Default returns the built-in defaults used when config.yml is absent or a key
@@ -127,6 +197,7 @@ func LoadBytes(b []byte) (Config, error) {
 	if c.Recurrence.MinFixes <= 0 {
 		c.Recurrence.MinFixes = 3
 	}
+	c.Peers = validPeers(c.Peers)
 	return c, nil
 }
 

@@ -119,6 +119,12 @@ func Run(repoDir string) Report {
 	wired, wdetail := mcpWired(repoDir)
 	r.Checks = append(r.Checks, Check{Name: "MCP wired", OK: wired, Advisory: true, Detail: wdetail})
 
+	// Peer stores (ADR-0032). Always advisory: an unreachable peer is the normal
+	// CI state (only the repo under review is checked out) and must never gate.
+	pok, pdetail := peerStores(repoDir, cfg)
+	r.Checks = append(r.Checks, Check{Name: "peer stores reachable",
+		OK: pok, Advisory: true, Detail: pdetail})
+
 	// ADR-0026: wiring coherence between config.yml and the artifacts that
 	// invoke nugit (CI workflows, CLAUDE.md, skill files). Advisory only.
 	r.Checks = append(r.Checks, wiringChecks(repoDir, cfg)...)
@@ -255,6 +261,49 @@ func modelCoverage(repoDir string, m model.Model) (bool, string) {
 		s += fmt.Sprintf(" (+%d more)", len(dirs)-len(shown))
 	}
 	return false, s + " — run the nugit-model skill or add stubs"
+}
+
+// peerStores reports what each configured peer contributed (ADR-0032): whether
+// its checkout is readable here and how many objects it carries. Advisory by
+// construction — federation is additive context, so a missing sibling is a
+// note, never a failure. A repo with no `peers:` block says exactly that.
+func peerStores(repoDir string, cfg config.Config) (bool, string) {
+	if len(cfg.Peers) == 0 {
+		return true, "no peers configured"
+	}
+	ok := true
+	items := make([]string, 0, len(cfg.Peers))
+	for _, p := range cfg.Peers {
+		objs, load := knowledge.LoadPeer(knowledge.PeerSource{Name: p.Name, Dir: p.Dir(repoDir)})
+		if !load.Reachable {
+			ok = false
+			items = append(items, fmt.Sprintf("%s: unreachable (%s) — contributes nothing", p.Name, load.Note))
+			continue
+		}
+		items = append(items, fmt.Sprintf("%s: %d object(s), %d global+ratified", p.Name, len(objs), federatable(objs)))
+	}
+	sort.Strings(items)
+	return ok, strings.Join(items, "; ")
+}
+
+// federatable counts the peer objects retrieval would actually consider: global
+// scope, ratified status. It is the honest number — total object count overstates
+// reach, because a peer's component-scoped knowledge names nothing here.
+func federatable(objs []model.KnowledgeObject) int {
+	n := 0
+	for _, o := range objs {
+		if o.ID == "" || (o.Scope != "" && o.Scope != "global") {
+			continue
+		}
+		st := o.EffectiveStatus
+		if st == "" {
+			st = o.Status
+		}
+		if st == model.StatusAccepted || st == model.StatusActive {
+			n++
+		}
+	}
+	return n
 }
 
 // mcpJSON is the subset of .mcp.json doctor inspects.
