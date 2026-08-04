@@ -260,6 +260,8 @@ workspace "nugit" "Git-native typed knowledge & unified PR view — self-model (
             retrieval -> mapping "resolves the component"
             retrieval -> model_ "uses types"
             retrieval -> localmem "pulls ephemeral notes"
+            retrieval -> gitutil "derives path history (bounded git log)"
+            retrieval -> trailers "reads decision/learned trailers in path history"
 
             mcp -> retrieval "serves context()"
             mcp -> usage "logs served bundles"

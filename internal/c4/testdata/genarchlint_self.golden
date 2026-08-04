@@ -237,10 +237,12 @@ deps:
       - "c4"
       - "config"
       - "evidence"
+      - "gitutil"
       - "knowledge"
       - "localmem"
       - "mapping"
       - "model_"
+      - "trailers"
   "scaffold":
     mayDependOn:
       - "bootstrap"
