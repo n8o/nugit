@@ -246,6 +246,97 @@ func TestAmendedDecisionStaysLiveAndAnnotated(t *testing.T) {
 	}
 }
 
+// objPaths is obj() plus a direct applies_to_paths binding (ADR-0020).
+func objPaths(id, typ, scope, body, glob string) string {
+	s := "---\nschema_version: 1\nid: " + id + "\ntype: " + typ + "\nscope: " + scope +
+		"\nstatus: accepted\ncreated: 2026-01-01T00:00:00Z\napplies_to_paths:\n  - \"" + glob + "\"\n"
+	return s + "provenance:\n  commit: x\n---\n\n# " + id + " title\n\n" + body + "\n"
+}
+
+// ADR-0020, the #1923 shape: a global decision bound to an infra file the C4
+// model doesn't map must surface for that path WITHOUT a task-keyword match —
+// path binding substitutes for the keyword gate on global decisions.
+func TestAppliesToPathsSurfacesOnUnmappedPath(t *testing.T) {
+	dir := setup(t)
+	wf(t, dir, ".nugit/decisions/pin.md",
+		objPaths("ADR-PIN", "decision", "global", "lock the draft version pin", "third_party/**"))
+	// Task keywords deliberately match NOTHING in either global decision.
+	b, err := Context(Options{RepoDir: dir, Path: "third_party/versions.env", Task: "bump zzz qqq"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b.Component != "" {
+		t.Fatalf("component = %q, want \"\" (infra path is unmapped)", b.Component)
+	}
+	d := ids(b.Decisions)
+	if !d["ADR-PIN"] {
+		t.Fatalf("path-bound decision must surface on a matched path despite no keyword match: %v", d)
+	}
+	if d["ADR-G"] {
+		t.Error("a plain global decision must still be keyword-gated on an unmapped path")
+	}
+	for _, it := range b.Decisions {
+		if it.ID == "ADR-PIN" && !it.PathBound {
+			t.Error("matched item must be marked PathBound")
+		}
+	}
+	if md := b.Markdown(); !strings.Contains(md, "path-bound") {
+		t.Errorf("markdown must annotate the path binding:\n%s", md)
+	}
+	js, err := json.Marshal(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(js), `"path_bound":true`) {
+		t.Errorf("bundle JSON must carry path_bound: %s", js)
+	}
+
+	// A path OUTSIDE the globs must not pull the object in.
+	b2, err := Context(Options{RepoDir: dir, Path: "helm/values.yaml", Task: "bump zzz qqq"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ids(b2.Decisions)["ADR-PIN"] {
+		t.Error("path-bound decision must NOT surface for a non-matching path")
+	}
+}
+
+// A matched path admits an object even when its scope names a DIFFERENT
+// component, and path-bound items rank with component-scoped ones (scopeRank 0,
+// ahead of plain global).
+func TestAppliesToPathsCrossScopeAndRanking(t *testing.T) {
+	dir := setup(t)
+	// Scoped to util, but bound to a render file: must surface for render.
+	wf(t, dir, ".nugit/lessons/x.md",
+		objPaths("LESSON-X", "lesson", "util", "cross-scope lesson", "internal/render/render.go"))
+	// Global decision bound to the render tree: must rank before plain global.
+	wf(t, dir, ".nugit/decisions/zz.md",
+		objPaths("ADR-ZZPIN", "decision", "global", "bound global decision", "internal/render/**"))
+	b, err := Context(Options{RepoDir: dir, Path: "internal/render/render.go"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ids(b.Lessons)["LESSON-X"] {
+		t.Errorf("lesson scoped elsewhere but path-bound here must surface: %v", ids(b.Lessons))
+	}
+	iPin, iG := -1, -1
+	for i, it := range b.Decisions {
+		switch it.ID {
+		case "ADR-ZZPIN":
+			iPin = i
+		case "ADR-G":
+			iG = i
+		}
+	}
+	if iPin < 0 || iG < 0 {
+		t.Fatalf("both decisions must be present, got %v", ids(b.Decisions))
+	}
+	// ADR-ZZPIN sorts after ADR-G by id, so ordering before it proves rank.
+	if iPin > iG {
+		t.Errorf("path-bound decision must rank with component-scoped items, ahead of plain global (pin=%d, g=%d)", iPin, iG)
+	}
+}
+
 func objWith(id, typ, scope, status, body string) string {
 	return "---\nschema_version: 1\nid: " + id + "\ntype: " + typ + "\nscope: " + scope +
 		"\nstatus: " + status + "\ncreated: 2026-01-01T00:00:00Z\nprovenance:\n  commit: x\n---\n\n# " + id + " title\n\n" + body + "\n"

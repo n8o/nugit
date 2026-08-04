@@ -75,6 +75,67 @@ func TestParseEdge(t *testing.T) {
 	}
 }
 
+const pathBoundDecision = `---
+schema_version: 1
+id: ADR-0020
+type: decision
+scope: global
+status: accepted
+created: 2026-08-01T00:00:00Z
+applies_to_paths:
+  - "third_party/versions.env"
+  - "k8s/registry-local/**"
+provenance:
+  commit: abc123
+---
+
+# ADR-0020 — Pin the draft version
+`
+
+func TestAppliesToPathsParsing(t *testing.T) {
+	obj, ok := ParseObject(".nugit/decisions/0020.md", pathBoundDecision)
+	if !ok {
+		t.Fatal("expected ok")
+	}
+	want := []string{"third_party/versions.env", "k8s/registry-local/**"}
+	if len(obj.AppliesToPaths) != 2 || obj.AppliesToPaths[0] != want[0] || obj.AppliesToPaths[1] != want[1] {
+		t.Fatalf("applies_to_paths = %v, want %v", obj.AppliesToPaths, want)
+	}
+	for path, want := range map[string]bool{
+		"third_party/versions.env":          true,
+		"./third_party/versions.env":        true, // "./" prefix normalized
+		"k8s/registry-local/configmap.yaml": true,
+		"k8s/other/configmap.yaml":          false,
+		"third_party/other.env":             false,
+	} {
+		if got := AppliesTo(obj, path); got != want {
+			t.Errorf("AppliesTo(%q) = %v, want %v", path, got, want)
+		}
+	}
+}
+
+func TestInvalidAppliesGlobReportedNeverMatches(t *testing.T) {
+	o := &model.KnowledgeObject{
+		FrontMatter: model.FrontMatter{ID: "ADR-BAD", AppliesToPaths: []string{"third_party/[bad", "helm/**"}},
+		Path:        ".nugit/decisions/bad.md",
+	}
+	// The invalid glob must never match (and never panic); the valid one still works.
+	if AppliesTo(o, "third_party/[bad") {
+		t.Error("an invalid glob must match nothing")
+	}
+	if !AppliesTo(o, "helm/values.yaml") {
+		t.Error("the valid sibling glob must still match")
+	}
+	bad := InvalidAppliesGlobs([]model.KnowledgeObject{*o})
+	if len(bad) != 1 || bad[0].ID != "ADR-BAD" || bad[0].Pattern != "third_party/[bad" ||
+		bad[0].Path != ".nugit/decisions/bad.md" {
+		t.Fatalf("InvalidAppliesGlobs = %+v, want the one bad glob reported (never silently dropped)", bad)
+	}
+	if got := InvalidAppliesGlobs(nil); len(got) != 0 {
+		t.Errorf("no objects -> no reports, got %+v", got)
+	}
+}
+
 func TestResolveAmendedBy(t *testing.T) {
 	objs := []model.KnowledgeObject{
 		{FrontMatter: model.FrontMatter{ID: "ADR-1", Status: model.StatusAccepted}},

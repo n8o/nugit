@@ -23,7 +23,9 @@ pr_render:
   fail_on: fail
 
 capture:
-  # commit_msg: warn | block | off — validate the trailer block on commit
+  # commit_msg: warn | nudge | block | off — validate the trailer block on commit
+  #   nudge — additionally print a copy-pasteable trailer stub when a significant
+  #   staged change carries no capture (advisory only, never blocks — ADR-0023)
   commit_msg: warn
 
 narrative:

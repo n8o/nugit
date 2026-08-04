@@ -25,9 +25,11 @@ graph LR
   modelfacts["Model facts"]
   narrative["LLM narrative"]
   notion["Notion projection"]
+  nudge["Capture nudge"]
   obsidian["Obsidian vault"]
   pyimports["Python analyzer"]
   ratify["Ratifier"]
+  reinforce["Reinforcer"]
   render["Renderer"]
   retrieval["Retrieval"]
   scaffold["Scaffold"]
@@ -60,8 +62,10 @@ graph LR
   cli --> model_
   cli --> modelfacts
   cli --> notion
+  cli --> nudge
   cli --> obsidian
   cli --> ratify
+  cli --> reinforce
   cli --> render
   cli --> retrieval
   cli --> scaffold
@@ -75,6 +79,7 @@ graph LR
   consistency --> knowledge
   consistency --> mapping
   consistency --> model_
+  consistency --> modelfacts
   consistency --> pyimports
   consistency --> trailers
   consistency --> tsdeps
@@ -93,7 +98,9 @@ graph LR
   doctor --> config
   doctor --> gitutil
   doctor --> knowledge
+  doctor --> mapping
   doctor --> model_
+  doctor --> modelfacts
   engine --> config
   engine --> consistency
   engine --> delta
@@ -117,7 +124,9 @@ graph LR
   icepanel --> model_
   knowledge --> gitutil
   knowledge --> model_
+  localmem --> gitutil
   mapping --> model_
+  mcp --> gitutil
   mcp --> retrieval
   mcp --> usage
   modelfacts --> cmake
@@ -125,10 +134,19 @@ graph LR
   narrative --> model_
   notion --> knowledge
   notion --> model_
+  nudge --> c4
+  nudge --> config
+  nudge --> gitutil
+  nudge --> mapping
+  nudge --> model_
+  nudge --> significance
+  nudge --> trailers
   obsidian --> knowledge
   obsidian --> model_
   ratify --> knowledge
   ratify --> model_
+  reinforce --> knowledge
+  reinforce --> model_
   render --> c4
   render --> model_
   retrieval --> c4

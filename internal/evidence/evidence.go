@@ -44,21 +44,26 @@ func TierOf(o model.KnowledgeObject, s Signals) model.Evidence {
 		return model.EvidenceProposed
 	}
 	comps := GovernedComponents(o)
-	if len(comps) == 0 {
-		return model.EvidenceDeclared
-	}
+	// A direct path binding (applies_to_paths, ADR-0020) counts as a binding:
+	// the object is tied to code, so it is never merely declared.
+	direct := len(o.AppliesToPaths) > 0
 	bound := 0
 	for _, id := range comps {
 		if pathBound(s.Model, id) {
 			bound++
 		}
 	}
-	if bound == 0 {
+	if bound == 0 && !direct {
 		return model.EvidenceDeclared
 	}
 	// Glob VALIDITY is not re-checked here — an invalid glob is already a
 	// model-health warning; the tier trusts the binding it can see.
-	if bound == len(comps) && s.Enforce && s.Backend && !s.Model.Structural() {
+	//
+	// A direct path binding caps the tier at checked: it is verified only by
+	// the warn-severity stale-knowledge check, never by a fail-severity edge
+	// check, so an object declaring applies_to_paths is not fully enforced —
+	// mirroring the partially-bound component rule.
+	if !direct && bound == len(comps) && s.Enforce && s.Backend && !s.Model.Structural() {
 		return model.EvidenceEnforced
 	}
 	return model.EvidenceChecked

@@ -1,6 +1,10 @@
 package eval
 
-import "github.com/n8o/nugit/internal/model"
+import (
+	"time"
+
+	"github.com/n8o/nugit/internal/model"
+)
 
 // Shared base: three components (a,b,c); a depends on b (declared). Clean.
 const baseDSL = `workspace "m" {
@@ -23,6 +27,19 @@ const dslWithAC = `workspace "m" {
       c = component "C" { properties { paths "c/**" } }
       a -> b
       a -> c
+    }
+  }
+}`
+
+// baseDSL + a component mapping the d/** unit (model-drift twin case).
+const baseDSLWithD = `workspace "m" {
+  model {
+    s = softwareSystem "m" {
+      a = component "A" { properties { paths "a/**" } }
+      b = component "B" { properties { paths "b/**" } }
+      c = component "C" { properties { paths "c/**" } }
+      d = component "D" { properties { paths "d/**" } }
+      a -> b
     }
   }
 }`
@@ -90,9 +107,23 @@ func adrProse(id, scope, supersedes, prose string) string {
 	return adrWith(id, scope, "accepted", supersedes) + "\n" + prose + "\n"
 }
 
+// adrPaths is adrWith() plus a direct applies_to_paths binding (ADR-0020).
+func adrPaths(id, scope, status, supersedes, glob string) string {
+	s := "---\nschema_version: 1\nid: " + id + "\ntype: decision\nscope: " + scope +
+		"\nstatus: " + status + "\ncreated: 2026-01-01T00:00:00Z\napplies_to_paths:\n  - \"" + glob + "\"\n"
+	if supersedes != "" {
+		s += "supersedes: " + supersedes + "\n"
+	}
+	return s + "provenance:\n  commit: x\n---\n\n# " + id + "\n"
+}
+
 func lesson(id, scope string) string {
+	return lessonAt(id, scope, "2026-01-01T00:00:00Z")
+}
+
+func lessonAt(id, scope, created string) string {
 	return "---\nschema_version: 1\nid: " + id + "\ntype: lesson\nscope: " + scope +
-		"\nstatus: active\ncreated: 2026-01-01T00:00:00Z\nprovenance:\n  commit: x\n---\n\n# " + id + "\n"
+		"\nstatus: active\ncreated: " + created + "\nprovenance:\n  commit: x\n---\n\n# " + id + "\n"
 }
 
 const warnConfig = "schema_version: 1\nc4:\n  mode: warn\n"
@@ -151,6 +182,22 @@ var corpus = []Case{
 			".nugit/decisions/new.md": adr("ADR-NEW", "a", "ADR-OLD"),
 		}),
 		Head:       map[string]string{"a/a.go": "package a\n\nimport _ \"example.com/m/b\"\n\n// touch governed code.\nfunc A() {}\n"},
+		WantTier:   model.TierTrivial,
+		WantChecks: []string{"stale-knowledge"},
+		WantClean:  true,
+	},
+	{
+		// ADR-0020: a stale object bound DIRECTLY to an infra file via
+		// applies_to_paths is touched when the PR changes that file — no C4
+		// component involved (the file is unmapped, like the pilot's
+		// third_party/ surface).
+		Name: "stale-knowledge-path-bound",
+		Base: mergeFiles(baseFiles, map[string]string{
+			"third_party/versions.env": "PIN=1\n",
+			".nugit/decisions/old.md":  adrPaths("ADR-OLD", "global", "accepted", "", "third_party/**"),
+			".nugit/decisions/new.md":  adr("ADR-NEW", "global", "ADR-OLD"),
+		}),
+		Head:       map[string]string{"third_party/versions.env": "PIN=2\n"},
 		WantTier:   model.TierTrivial,
 		WantChecks: []string{"stale-knowledge"},
 		WantClean:  true,
@@ -237,6 +284,71 @@ var corpus = []Case{
 		WantClean: true,
 	},
 
+	// ---- model drift (ADR-0021): detected units vs the DSL ----
+	{
+		// A new Go package the model doesn't map, touched by this PR: the
+		// facts-vs-DSL diff must warn (the pilot's decay signature).
+		Name:       "model-drift-new-unit",
+		Head:       map[string]string{"d/d.go": "package d\n\nfunc D() {}\n"},
+		WantTier:   model.TierTrivial,
+		WantChecks: []string{"model-drift"},
+		WantClean:  true,
+	},
+	{
+		// Twin: the same new package, but the model already maps it — silent.
+		Name:      "model-drift-unit-modeled",
+		DSL:       baseDSLWithD,
+		Head:      map[string]string{"d/d.go": "package d\n\nfunc D() {}\n"},
+		WantTier:  model.TierTrivial,
+		WantClean: true,
+	},
+	// ---- recurrence (ADR-0019): fix churn with no knowledge delta ----
+	{
+		// Third fix-typed commit on one component inside the window, nothing
+		// captured: the recurrence check must warn (warn-severity: still clean).
+		Name: "recurrence-uncaptured-fixes",
+		History: []Step{
+			{Msg: "fix(a): first regression", Files: map[string]string{"a/a.go": aEdit("r1")}},
+			{Msg: "fix(a): second regression", Files: map[string]string{"a/a.go": aEdit("r2")}},
+		},
+		Head:       map[string]string{"a/a.go": aEdit("r3")},
+		HeadMsg:    "fix(a): third regression",
+		WantTier:   model.TierTrivial,
+		WantChecks: []string{"recurrence"},
+		WantClean:  true,
+	},
+	{
+		// Same churn, but a lesson governing the component was captured inside
+		// the window — the loop closed; recurrence must stay silent.
+		Name: "recurrence-captured-lesson",
+		Base: mergeFiles(baseFiles, map[string]string{
+			".nugit/lessons/fresh.md": lessonAt("LESSON-fresh", "a",
+				time.Now().UTC().Format("2006-01-02T15:04:05Z")),
+		}),
+		History: []Step{
+			{Msg: "fix(a): first regression", Files: map[string]string{"a/a.go": aEdit("r1")}},
+			{Msg: "fix(a): second regression", Files: map[string]string{"a/a.go": aEdit("r2")}},
+		},
+		Head:      map[string]string{"a/a.go": aEdit("r3")},
+		HeadMsg:   "fix(a): third regression",
+		WantTier:  model.TierTrivial,
+		WantClean: true,
+	},
+	{
+		// Same churn, but one in-window commit carried a learned: trailer —
+		// the ADR-0005 capture primitive counts; recurrence must stay silent.
+		Name: "recurrence-trailer-captured",
+		History: []Step{
+			{Msg: "fix(a): first regression", Files: map[string]string{"a/a.go": aEdit("r1")}},
+			{Msg: "fix(a): second regression\n\nlearned: the real invariant\nkeywords: a, invariant",
+				Files: map[string]string{"a/a.go": aEdit("r2")}},
+		},
+		Head:      map[string]string{"a/a.go": aEdit("r3")},
+		HeadMsg:   "fix(a): third regression",
+		WantTier:  model.TierTrivial,
+		WantClean: true,
+	},
+
 	// ---- two-level enforcement (ADR-0017): containers + roll-up ----
 	{
 		// Cross-container dependency declared at COMPONENT level: clean.
@@ -287,6 +399,12 @@ var corpus = []Case{
 		WantTier:  model.TierTrivial,
 		WantClean: true,
 	},
+}
+
+// aEdit is a small distinct edit to component a (keeps the declared a->b
+// import, one file, tiny churn — trivial tier by construction).
+func aEdit(tag string) string {
+	return "package a\n\nimport _ \"example.com/m/b\"\n\n// " + tag + "\nfunc A() {}\n"
 }
 
 func mergeFiles(a, b map[string]string) map[string]string {
