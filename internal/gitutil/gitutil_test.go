@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // mustGit runs git in dir with identity/signing pinned so the test is hermetic.
@@ -97,5 +98,181 @@ func TestLogPath(t *testing.T) {
 
 	if _, err := (Repo{Dir: t.TempDir()}).LogPath("a.txt", 5, ""); err == nil {
 		t.Error("not a repo must return an error (callers degrade best-effort)")
+	}
+}
+
+// resolve normalizes symlinked spellings (macOS t.TempDir is under /var ->
+// /private/var) so paths git reports physically compare equal to ours.
+func resolve(t *testing.T, p string) string {
+	t.Helper()
+	r, err := filepath.EvalSymlinks(p)
+	if err != nil {
+		t.Fatalf("EvalSymlinks(%s): %v", p, err)
+	}
+	return r
+}
+
+// A linked worktree must resolve its own root via WorktreeRoot but the MAIN
+// checkout's root via CommonRoot — that split is what lets per-request MCP
+// resolution read the right checkout while .nugit-local/ and .nugit/.cache/
+// stay shared across all worktrees (ADR-0025).
+func TestCommonRootAcrossWorktrees(t *testing.T) {
+	tmp := t.TempDir()
+	main := filepath.Join(tmp, "repo")
+	wt := filepath.Join(tmp, "wt")
+	if err := os.MkdirAll(main, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	mustGit(t, main, "init")
+	mustGit(t, main, "commit", "--allow-empty", "-m", "root")
+	mustGit(t, main, "worktree", "add", wt, "-b", "feat/wt")
+
+	wantRoot := resolve(t, main)
+	for _, d := range []string{main, wt} {
+		if got := resolve(t, (Repo{Dir: d}).CommonRoot()); got != wantRoot {
+			t.Errorf("CommonRoot from %s: want %s, got %s", d, wantRoot, got)
+		}
+	}
+	top, err := (Repo{Dir: wt}).WorktreeRoot()
+	if err != nil {
+		t.Fatalf("WorktreeRoot(wt): %v", err)
+	}
+	if got := resolve(t, top); got != resolve(t, wt) {
+		t.Errorf("WorktreeRoot from wt: want %s, got %s", resolve(t, wt), got)
+	}
+	if got := (Repo{Dir: wt}).CurrentBranch(); got != "feat/wt" {
+		t.Errorf("branch from wt: want feat/wt, got %q", got)
+	}
+	// The identity key both checkouts share.
+	if a, b := (Repo{Dir: main}).CommonGitDir(), (Repo{Dir: wt}).CommonGitDir(); a == "" || a != b {
+		t.Errorf("CommonGitDir must match across worktrees: main=%q wt=%q", a, b)
+	}
+}
+
+func TestCommonRootFallsBackOutsideGit(t *testing.T) {
+	dir := t.TempDir()
+	if got := (Repo{Dir: dir}).CommonRoot(); got != dir {
+		t.Fatalf("non-repo CommonRoot: want %s, got %s", dir, got)
+	}
+	if _, err := (Repo{Dir: dir}).WorktreeRoot(); err == nil {
+		t.Fatal("non-repo WorktreeRoot: want error, got nil")
+	}
+	if got := (Repo{Dir: dir}).CommonGitDir(); got != "" {
+		t.Fatalf(`non-repo CommonGitDir: want "", got %q`, got)
+	}
+}
+
+// mustGitAt is mustGit with the commit date pinned (window-boundary tests).
+func mustGitAt(t *testing.T, dir, date string, args ...string) {
+	t.Helper()
+	base := []string{"-C", dir,
+		"-c", "user.name=test", "-c", "user.email=test@example.com",
+		"-c", "commit.gpgsign=false"}
+	cmd := exec.Command("git", append(base, args...)...)
+	cmd.Env = append(os.Environ(), "GIT_AUTHOR_DATE="+date, "GIT_COMMITTER_DATE="+date)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %v: %v: %s", args, err, out)
+	}
+}
+
+func TestLogSince(t *testing.T) {
+	dir := t.TempDir()
+	mustGit(t, dir, "init")
+	write := func(rel, content string) {
+		t.Helper()
+		p := filepath.Join(dir, rel)
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		mustGit(t, dir, "add", "-A")
+	}
+	old := time.Now().AddDate(0, 0, -120).Format(time.RFC3339)
+	write("a/a.go", "package a // v1\n")
+	mustGitAt(t, dir, old, "commit", "-m", "fix(a): ancient — outside the window")
+	write("a/a.go", "package a // v2\n")
+	mustGit(t, dir, "commit", "-m", "fix(a): recent\n\nlearned: something\nkeywords: a")
+	write("b/b.go", "package b\n")
+	mustGit(t, dir, "commit", "-m", "fix(b): other component")
+
+	r := Repo{Dir: dir}
+
+	got, err := r.LogSince("HEAD", 90, 200, "a/**")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Subject != "fix(a): recent" {
+		t.Fatalf("since+pathspec filter: got %+v", got)
+	}
+	if got[0].Body == "" {
+		t.Error("LogSince must return full bodies (trailer parsing needs them)")
+	}
+
+	// No pathspec: both in-window commits, newest first.
+	got, err = r.LogSince("HEAD", 90, 200)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got[0].Subject != "fix(b): other component" {
+		t.Fatalf("unfiltered: got %+v", got)
+	}
+
+	// max-count bounds the scan.
+	got, err = r.LogSince("HEAD", 90, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("max-count: got %d commits", len(got))
+	}
+}
+
+func TestNumstatCached(t *testing.T) {
+	dir := t.TempDir()
+	mustGit(t, dir, "init")
+	if err := os.WriteFile(filepath.Join(dir, "a.txt"), []byte("one\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mustGit(t, dir, "add", ".")
+	mustGit(t, dir, "commit", "-m", "root")
+
+	// clean index: empty map, no error
+	counts, err := (Repo{Dir: dir}).NumstatCached(5 * time.Second)
+	if err != nil || len(counts) != 0 {
+		t.Fatalf("clean index: want empty, got %v err=%v", counts, err)
+	}
+
+	// staged change appears; unstaged change does not
+	if err := os.WriteFile(filepath.Join(dir, "a.txt"), []byte("one\ntwo\nthree\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "b.txt"), []byte("unstaged\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mustGit(t, dir, "add", "a.txt") // b.txt stays unstaged (untracked)
+	counts, err = (Repo{Dir: dir}).NumstatCached(5 * time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := counts["a.txt"]; !ok || got != [2]int{2, 0} {
+		t.Errorf("a.txt: want [2 0], got %v (ok=%v)", got, ok)
+	}
+	if _, ok := counts["b.txt"]; ok {
+		t.Error("unstaged b.txt must not appear in the cached diff")
+	}
+}
+
+func TestNumstatCachedErrors(t *testing.T) {
+	// not a git repo: error, never a silent empty result
+	if _, err := (Repo{Dir: t.TempDir()}).NumstatCached(5 * time.Second); err == nil {
+		t.Error("non-repo must return an error")
+	}
+	// expired timeout: bounded — returns an error instead of stalling the commit
+	dir := t.TempDir()
+	mustGit(t, dir, "init")
+	if _, err := (Repo{Dir: dir}).NumstatCached(time.Nanosecond); err == nil {
+		t.Error("an already-expired timeout must surface as an error")
 	}
 }

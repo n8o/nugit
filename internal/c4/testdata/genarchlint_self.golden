@@ -57,12 +57,16 @@ components:
     in: "internal/narrative/**"
   "notion":
     in: "internal/notion/**"
+  "nudge":
+    in: "internal/nudge/**"
   "obsidian":
     in: "internal/obsidian/**"
   "pyimports":
     in: "internal/pyimports/**"
   "ratify":
     in: "internal/ratify/**"
+  "reinforce":
+    in: "internal/reinforce/**"
   "render":
     in: "internal/render/**"
   "retrieval":
@@ -115,8 +119,10 @@ deps:
       - "model_"
       - "modelfacts"
       - "notion"
+      - "nudge"
       - "obsidian"
       - "ratify"
+      - "reinforce"
       - "render"
       - "retrieval"
       - "scaffold"
@@ -136,6 +142,7 @@ deps:
       - "knowledge"
       - "mapping"
       - "model_"
+      - "modelfacts"
       - "pyimports"
       - "trailers"
       - "tsdeps"
@@ -162,7 +169,9 @@ deps:
       - "config"
       - "gitutil"
       - "knowledge"
+      - "mapping"
       - "model_"
+      - "modelfacts"
   "engine":
     mayDependOn:
       - "config"
@@ -201,12 +210,14 @@ deps:
       - "gitutil"
       - "model_"
   "localmem":
-    mayDependOn: []
+    mayDependOn:
+      - "gitutil"
   "mapping":
     mayDependOn:
       - "model_"
   "mcp":
     mayDependOn:
+      - "gitutil"
       - "retrieval"
       - "usage"
   "model_":
@@ -222,6 +233,15 @@ deps:
     mayDependOn:
       - "knowledge"
       - "model_"
+  "nudge":
+    mayDependOn:
+      - "c4"
+      - "config"
+      - "gitutil"
+      - "mapping"
+      - "model_"
+      - "significance"
+      - "trailers"
   "obsidian":
     mayDependOn:
       - "knowledge"
@@ -229,6 +249,10 @@ deps:
   "pyimports":
     mayDependOn: []
   "ratify":
+    mayDependOn:
+      - "knowledge"
+      - "model_"
+  "reinforce":
     mayDependOn:
       - "knowledge"
       - "model_"

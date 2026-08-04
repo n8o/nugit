@@ -113,20 +113,33 @@ func tierWord(it Item) string {
 }
 
 // tierSuffix marks items on lines that don't carry a full status label
-// (lessons, references) with their trust tier.
+// (lessons, references) with their trust tier and, when the queried path
+// matches the item's applies_to_paths, the path-bound marker (ADR-0020).
 func tierSuffix(it Item) string {
-	if t := tierWord(it); t != "" {
+	t := tierWord(it)
+	if it.PathBound {
+		if t != "" {
+			t += " · path-bound"
+		} else {
+			t = "path-bound"
+		}
+	}
+	if t != "" {
 		return " _[" + t + "]_"
 	}
 	return ""
 }
 
 // statusLabel renders an item's status · trust tier, annotated when the
-// object is live but partially overridden by amendments (ADR-0015).
+// object is live but partially overridden by amendments (ADR-0015) and when
+// the queried path matches its applies_to_paths binding (ADR-0020).
 func statusLabel(it Item) string {
 	s := it.Status
 	if t := tierWord(it); t != "" {
 		s += " · " + t
+	}
+	if it.PathBound {
+		s += " · path-bound"
 	}
 	if len(it.AmendedBy) == 0 {
 		return s

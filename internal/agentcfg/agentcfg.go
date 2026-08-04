@@ -43,6 +43,10 @@ type server struct {
 // `-C "."` — the client launches the server from the project root. User-global
 // configs (cursor, codex) bake the resolved absolute repoDir into -C, because
 // "." would resolve to whatever cwd the client happens to launch from.
+//
+// Git-worktree fan-out needs NO per-worktree wiring: one server started from
+// any checkout serves every linked worktree, because the context tool accepts
+// a per-request `cwd` and resolves the repo root/branch from it (ADR-0025).
 func Snippet(client Client, repoDir, bin string) (text, dest string, err error) {
 	if bin == "" {
 		bin = "nugit"

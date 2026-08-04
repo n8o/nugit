@@ -134,9 +134,19 @@ workspace "nugit" "Git-native typed knowledge & unified PR view — self-model (
                     "paths" "internal/distill/**"
                 }
             }
+            nudge = component "Capture nudge" "Significance-aware capture prompt in the commit-msg hook (ADR-0023)" "Go" {
+                properties {
+                    "paths" "internal/nudge/**"
+                }
+            }
             ratify = component "Ratifier" "Promotes proposed knowledge to the ratified corpus (ADR-0016)" "Go" {
                 properties {
                     "paths" "internal/ratify/**"
+                }
+            }
+            reinforce = component "Reinforcer" "Mints append-only reinforcements of recurring knowledge (ADR-0019)" "Go" {
+                properties {
+                    "paths" "internal/reinforce/**"
                 }
             }
             evidence = component "Evidence tiers" "Derives the per-object trust tier (enforced/checked/declared/proposed/stale)" "Go" {
@@ -225,6 +235,7 @@ workspace "nugit" "Git-native typed knowledge & unified PR view — self-model (
             consistency -> cmake "re-derives the CMake graph for enforcement"
             consistency -> pyimports "re-derives the Python graph for enforcement"
             consistency -> tsdeps "re-derives the TS graph for enforcement"
+            consistency -> modelfacts "diffs the detected-unit inventory (model-drift, ADR-0021)"
 
             engine -> model_ "uses types"
             engine -> consistency "runs checks"
@@ -257,6 +268,14 @@ workspace "nugit" "Git-native typed knowledge & unified PR view — self-model (
             distill -> model_ "uses types"
             engine -> distill "computes the PR-time proposal set (ADR-0018)"
 
+            nudge -> model_ "uses types"
+            nudge -> gitutil "bounded staged-diff numstat"
+            nudge -> c4 "parses the working-tree model"
+            nudge -> mapping "seeds keywords from components"
+            nudge -> significance "classifies the staged change"
+            nudge -> config "mode + trivial thresholds"
+            nudge -> trailers "detects an existing capture block"
+
             eval -> engine "runs the corpus"
             eval -> model_ "uses types"
 
@@ -268,9 +287,11 @@ workspace "nugit" "Git-native typed knowledge & unified PR view — self-model (
             retrieval -> localmem "pulls ephemeral notes"
             retrieval -> gitutil "derives path history (bounded git log)"
             retrieval -> trailers "reads decision/learned trailers in path history"
+            localmem -> gitutil "resolves the shared common-root journal"
 
             mcp -> retrieval "serves context()"
             mcp -> usage "logs served bundles"
+            mcp -> gitutil "per-request worktree root resolution"
 
             usage -> retrieval "summarizes bundles"
             usage -> config "honors the usage.log knob"
@@ -288,6 +309,9 @@ workspace "nugit" "Git-native typed knowledge & unified PR view — self-model (
             cli -> ratify "ratify command"
             ratify -> model_ "uses types"
             ratify -> knowledge "loads + resolves objects"
+            cli -> reinforce "reinforce command"
+            reinforce -> model_ "uses types"
+            reinforce -> knowledge "loads + resolves objects"
             evidence -> model_ "uses types"
             evidence -> knowledge "parses relates_to edges"
             evidence -> bootstrap "detects edge-check backends"
@@ -297,6 +321,7 @@ workspace "nugit" "Git-native typed knowledge & unified PR view — self-model (
             retrieval -> evidence "annotates bundle items"
             cli -> localmem "remember command"
             cli -> trailers "commit-msg hook validation"
+            cli -> nudge "commit-msg hook capture nudge"
             cli -> c4 "c4 render command"
             cli -> consistency "explain command"
             cli -> doctor "doctor command"
@@ -318,6 +343,8 @@ workspace "nugit" "Git-native typed knowledge & unified PR view — self-model (
             doctor -> bootstrap "detects the backend"
             doctor -> knowledge "checks the store"
             doctor -> model_ "uses types"
+            doctor -> mapping "resolves unit dirs for the coverage scan"
+            doctor -> modelfacts "full-repo facts-vs-DSL diff (ADR-0021)"
 
             cli -> obsidian "obsidian command"
             cli -> deploy "deploy command"

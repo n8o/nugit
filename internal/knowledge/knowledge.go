@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/bmatcuk/doublestar/v4"
 	"github.com/n8o/nugit/internal/gitutil"
 	"github.com/n8o/nugit/internal/model"
 	"gopkg.in/yaml.v3"
@@ -56,6 +57,7 @@ func Load(repoDir string) ([]model.KnowledgeObject, error) {
 	}
 	ResolveEffectiveStatus(objs)
 	ResolveAmendedBy(objs)
+	ResolveReinforcedBy(objs)
 	return objs, nil
 }
 
@@ -188,17 +190,7 @@ func ResolveEffectiveStatus(objs []model.KnowledgeObject) {
 // is read together with what overrides part of it. Superseded/invalidated
 // amenders don't annotate (a dead amendment amends nothing).
 func ResolveAmendedBy(objs []model.KnowledgeObject) {
-	amenders := map[string][]string{}
-	for _, o := range objs {
-		if o.ID == "" || o.EffectiveStatus == model.StatusSuperseded || o.EffectiveStatus == model.StatusInvalidated {
-			continue
-		}
-		for _, e := range o.RelatesTo {
-			if edge := ParseEdge(e); edge.Relation == "amends" && edge.Target != "" {
-				amenders[edge.Target] = append(amenders[edge.Target], o.ID)
-			}
-		}
-	}
+	amenders := reverseEdges(objs, "amends")
 	for i := range objs {
 		if ids := amenders[objs[i].ID]; len(ids) > 0 {
 			sort.Strings(ids)
@@ -340,6 +332,87 @@ func hasAmendsEdge(o *model.KnowledgeObject, target string) bool {
 		}
 	}
 	return false
+}
+
+// AppliesTo reports whether the repo-relative path matches any of the object's
+// applies_to_paths globs (ADR-0020) — the direct path binding that needs no C4
+// component in between. Syntactically invalid globs never match; they are
+// surfaced as model-health findings via InvalidAppliesGlobs, never silently
+// dropped.
+func AppliesTo(o *model.KnowledgeObject, path string) bool {
+	path = strings.TrimPrefix(path, "./")
+	for _, g := range o.AppliesToPaths {
+		if !doublestar.ValidatePattern(g) {
+			continue
+		}
+		if ok, _ := doublestar.Match(g, path); ok {
+			return true
+		}
+	}
+	return false
+}
+
+// InvalidAppliesGlob names a syntactically invalid applies_to_paths glob on a
+// knowledge object — it can never match, so the binding is dead.
+type InvalidAppliesGlob struct {
+	ID      string // object id ("" for untyped objects)
+	Path    string // record file path
+	Pattern string
+}
+
+// InvalidAppliesGlobs returns every invalid applies_to_paths glob across the
+// set, sorted for deterministic output — the knowledge-side mirror of
+// mapping.InvalidPatterns (report, never silently drop).
+func InvalidAppliesGlobs(objs []model.KnowledgeObject) []InvalidAppliesGlob {
+	var out []InvalidAppliesGlob
+	for _, o := range objs {
+		for _, g := range o.AppliesToPaths {
+			if !doublestar.ValidatePattern(g) {
+				out = append(out, InvalidAppliesGlob{ID: o.ID, Path: o.Path, Pattern: g})
+			}
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].ID != out[j].ID {
+			return out[i].ID < out[j].ID
+		}
+		if out[i].Path != out[j].Path {
+			return out[i].Path < out[j].Path
+		}
+		return out[i].Pattern < out[j].Pattern
+	})
+	return out
+}
+
+// ResolveReinforcedBy computes each object's ReinforcedBy from reverse
+// `reinforces:` edges, in place on the slice (ADR-0019). The exact mirror of
+// ResolveAmendedBy: additive, status untouched, dead reinforcers annotate
+// nothing.
+func ResolveReinforcedBy(objs []model.KnowledgeObject) {
+	reinforcers := reverseEdges(objs, "reinforces")
+	for i := range objs {
+		if ids := reinforcers[objs[i].ID]; len(ids) > 0 {
+			sort.Strings(ids)
+			objs[i].ReinforcedBy = ids
+		}
+	}
+}
+
+// reverseEdges indexes live objects by the target of their `relation:` edges.
+// Superseded/invalidated sources are skipped — a dead edge annotates nothing.
+func reverseEdges(objs []model.KnowledgeObject, relation string) map[string][]string {
+	rev := map[string][]string{}
+	for _, o := range objs {
+		if o.ID == "" || o.EffectiveStatus == model.StatusSuperseded || o.EffectiveStatus == model.StatusInvalidated {
+			continue
+		}
+		for _, e := range o.RelatesTo {
+			if edge := ParseEdge(e); edge.Relation == relation && edge.Target != "" {
+				rev[edge.Target] = append(rev[edge.Target], o.ID)
+			}
+		}
+	}
+	return rev
 }
 
 // ParseEdge parses a relates_to entry like "constrains:render" into its parts.

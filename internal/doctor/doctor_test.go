@@ -131,6 +131,61 @@ func TestUntypedObjectsCheckInRun(t *testing.T) {
 	}
 }
 
+// ADR-0021: the full-repo drift scan lists detected units the model misses,
+// but stays advisory — modeling debt never fails the pre-flight.
+func TestModelCoverageScanIsAdvisory(t *testing.T) {
+	dir := t.TempDir()
+	write(t, dir, ".nugit/architecture/workspace.dsl",
+		"workspace \"m\" {\n  model {\n    s = softwareSystem \"m\" {\n"+
+			"      core = component \"Core\" { properties { paths \"libs/core/**\" } }\n"+
+			"    }\n  }\n}\n")
+	write(t, dir, "libs/core/CMakeLists.txt", "add_library(core core.cpp)\n")
+	write(t, dir, "libs/core/core.cpp", "int core(){return 0;}\n")
+	write(t, dir, "libs/newlib/CMakeLists.txt", "add_library(newlib newlib.cpp)\n")
+	write(t, dir, "libs/newlib/newlib.cpp", "int newlib(){return 0;}\n")
+
+	rep := Run(dir)
+	var found *Check
+	for i := range rep.Checks {
+		if rep.Checks[i].Name == "model covers detected units" {
+			found = &rep.Checks[i]
+		}
+	}
+	if found == nil {
+		t.Fatal("model-coverage check missing from doctor report")
+	}
+	if found.OK {
+		t.Error("an unmodeled detected unit must surface in the coverage scan")
+	}
+	if !found.Advisory {
+		t.Error("the coverage scan must be advisory (never gates the exit code)")
+	}
+	if !strings.Contains(found.Detail, "libs/newlib") || !strings.Contains(found.Detail, "nugit-model") {
+		t.Errorf("detail must name the unit and the remedy, got %q", found.Detail)
+	}
+	if strings.Contains(found.Detail, "libs/core") {
+		t.Errorf("mapped unit must not be listed, got %q", found.Detail)
+	}
+}
+
+// The twin: every detected unit mapped -> the scan reports OK.
+func TestModelCoverageScanCleanWhenMapped(t *testing.T) {
+	dir := t.TempDir()
+	write(t, dir, ".nugit/architecture/workspace.dsl",
+		"workspace \"m\" {\n  model {\n    s = softwareSystem \"m\" {\n"+
+			"      core = component \"Core\" { properties { paths \"libs/core/**\" } }\n"+
+			"    }\n  }\n}\n")
+	write(t, dir, "libs/core/CMakeLists.txt", "add_library(core core.cpp)\n")
+	write(t, dir, "libs/core/core.cpp", "int core(){return 0;}\n")
+
+	rep := Run(dir)
+	for _, c := range rep.Checks {
+		if c.Name == "model covers detected units" && !c.OK {
+			t.Fatalf("fully mapped inventory must be OK, got %q", c.Detail)
+		}
+	}
+}
+
 // ADR-0016: the pending-ratification line is informational — it names the
 // proposed objects but never fails the pre-flight.
 func TestPendingRatificationIsInformational(t *testing.T) {

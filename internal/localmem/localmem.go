@@ -2,7 +2,7 @@
 // jots mid-session into .nugit-local/ (gitignored, never committed), retrievable
 // by context() within the workspace. Distinct from the durable .nugit/ store —
 // this is scratch that a human/distiller later promotes, or discards. Append-only
-// NDJSON, dependency-free.
+// NDJSON; its only sibling dependency is gitutil, for shared-root resolution.
 package localmem
 
 import (
@@ -12,10 +12,23 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/n8o/nugit/internal/gitutil"
 )
 
 const dir = ".nugit-local"
 const journal = "journal.ndjson"
+
+// root resolves where .nugit-local/ lives: the COMMON working-tree root shared
+// by all linked worktrees (the main checkout, parent of `git rev-parse
+// --git-common-dir`), NOT the current worktree — so N agents in N worktrees of
+// one repo read and write ONE journal instead of N amnesiac silos (ADR-0025).
+// Outside a git repo it falls back to repoDir unchanged. Concurrency across
+// agents is safe by construction: each note is a single O_APPEND write of one
+// NDJSON line, and Recent tolerates a torn trailing line.
+func root(repoDir string) string {
+	return gitutil.Repo{Dir: repoDir}.CommonRoot()
+}
 
 // Entry is one ephemeral note.
 type Entry struct {
@@ -26,7 +39,8 @@ type Entry struct {
 	Keywords []string `json:"keywords,omitempty"`
 }
 
-// Append writes e (stamping Time if unset) to .nugit-local/journal.ndjson.
+// Append writes e (stamping Time if unset) to .nugit-local/journal.ndjson at
+// the repo's common root, shared by every worktree.
 func Append(repoDir string, e Entry) error {
 	if e.Time == "" {
 		e.Time = time.Now().UTC().Format(time.RFC3339)
@@ -34,7 +48,7 @@ func Append(repoDir string, e Entry) error {
 	if e.Kind == "" {
 		e.Kind = "note"
 	}
-	d := filepath.Join(repoDir, dir)
+	d := filepath.Join(root(repoDir), dir)
 	if err := os.MkdirAll(d, 0o755); err != nil {
 		return err
 	}
@@ -51,9 +65,10 @@ func Append(repoDir string, e Entry) error {
 	return err
 }
 
-// Recent returns up to max entries, newest first.
+// Recent returns up to max entries, newest first — from the shared journal at
+// the repo's common root, so a note jotted in one worktree is visible in all.
 func Recent(repoDir string, max int) []Entry {
-	f, err := os.Open(filepath.Join(repoDir, dir, journal))
+	f, err := os.Open(filepath.Join(root(repoDir), dir, journal))
 	if err != nil {
 		return nil
 	}

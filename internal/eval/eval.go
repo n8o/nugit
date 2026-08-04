@@ -25,16 +25,26 @@ const del = "\x00DELETE"
 // Case is one labeled scenario: a base repo state, a head change, and the
 // expected significance tier + which consistency checks should fire.
 type Case struct {
-	Name       string
-	DSL        string            // workspace.dsl at base (defaults to baseDSL)
-	DSLHead    string            // optional: model at head (for architectural cases)
-	Base       map[string]string // path -> content at base (defaults to baseFiles)
-	Head       map[string]string // path -> content changed/added at head (del to remove)
-	Config     string            // optional .nugit/config.yml
-	HeadMsg    string            // head commit message (for trailer-driven checks)
+	Name    string
+	DSL     string            // workspace.dsl at base (defaults to baseDSL)
+	DSLHead string            // optional: model at head (for architectural cases)
+	Base    map[string]string // path -> content at base (defaults to baseFiles)
+	Head    map[string]string // path -> content changed/added at head (del to remove)
+	Config  string            // optional .nugit/config.yml
+	HeadMsg string            // head commit message (for trailer-driven checks)
+	// History are commits made AFTER the initial state but BEFORE the PR base
+	// marker, so a case can carry pre-PR repo history (e.g. the fix churn the
+	// recurrence check scans). The PR range stays (last history commit, head].
+	History    []Step
 	WantTier   model.Tier
 	WantChecks []string // consistency-check names that SHOULD fire
 	WantClean  bool     // true if no fail-severity finding is expected
+}
+
+// Step is one pre-PR history commit: a message plus file edits.
+type Step struct {
+	Msg   string
+	Files map[string]string
 }
 
 // CaseResult is the scored outcome of one case.
@@ -120,6 +130,13 @@ func runCase(c Case) CaseResult {
 	}
 	must(gitRun(dir, "add", "-A"))
 	must(gitRun(dir, "commit", "-q", "-m", "base"))
+	for _, st := range c.History {
+		for p, content := range st.Files {
+			must(writeF(dir, p, content))
+		}
+		must(gitRun(dir, "add", "-A"))
+		must(gitRun(dir, "commit", "-q", "-m", st.Msg))
+	}
 	if firstErr != nil {
 		res.Err = firstErr
 		return res
