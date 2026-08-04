@@ -50,6 +50,9 @@ func Markdown(rep model.Report) string {
 	b.WriteString(details("🏛 Architecture delta (C4)", arch, expandArch))
 	b.WriteString(details("📝 Code delta (grouped by component)", codeSection(rep.Code), expandCode))
 	b.WriteString(details("📚 Knowledge delta", knowledgeSection(rep.Knowledge), expandKnow))
+	if len(rep.Proposals) > 0 {
+		b.WriteString(details("🧪 Proposed knowledge (uncaptured trailers in this PR)", proposalSection(rep), tier != model.TierTrivial))
+	}
 	if rep.Plan.Present {
 		b.WriteString(details("📍 Plan position", planSection(rep.Plan), tier == model.TierArchitectural))
 	}
@@ -198,6 +201,40 @@ func knowledgeSection(d model.KnowledgeDelta) string {
 			fmt.Fprintf(&b, "  - 🚫 rejected: %s\n", esc(oneLine(o.Rejected)))
 		}
 	}
+	return b.String()
+}
+
+// maxProposals caps the rendered proposal list (ADR-0006 budget discipline);
+// overflow and store-dedupe are counted, never listed.
+const maxProposals = 5
+
+// proposalSection renders the PR-time distill candidates (ADR-0018): each
+// trailer `nugit distill` would promote, as a two-line ready-to-apply stub.
+func proposalSection(rep model.Report) string {
+	var b strings.Builder
+	shown := rep.Proposals
+	if len(shown) > maxProposals {
+		shown = shown[:maxProposals]
+	}
+	for _, p := range shown {
+		fmt.Fprintf(&b, "- 🧪 **%s** — %s\n", p.Kind, esc(oneLine(p.Text)))
+		meta := []string{fmt.Sprintf("from `%s` %s", p.Commit, esc(oneLine(p.Subject)))}
+		if p.Scope != "" {
+			meta = append(meta, "scope: "+esc(p.Scope))
+		}
+		if len(p.Keywords) > 0 {
+			meta = append(meta, "keywords: "+esc(oneLine(strings.Join(p.Keywords, ", "))))
+		}
+		fmt.Fprintf(&b, "  - %s\n", strings.Join(meta, " · "))
+	}
+	if n := len(rep.Proposals) - len(shown); n > 0 {
+		fmt.Fprintf(&b, "\n_…and %d more candidate(s) not shown._\n", n)
+	}
+	if rep.ProposalsDeduped > 0 {
+		fmt.Fprintf(&b, "\n_%d candidate(s) skipped — already covered by the store._\n", rep.ProposalsDeduped)
+	}
+	fmt.Fprintf(&b, "\nApply: `nugit distill -base %s -head %s` writes these as `status: proposed` (candidate lane, ADR-0016); promote with `nugit ratify <id>`.\n",
+		rep.BaseRef, rep.HeadRef)
 	return b.String()
 }
 
