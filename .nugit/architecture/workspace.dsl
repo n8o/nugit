@@ -236,6 +236,7 @@ workspace "nugit" "Git-native typed knowledge & unified PR view — self-model (
             consistency -> pyimports "re-derives the Python graph for enforcement"
             consistency -> tsdeps "re-derives the TS graph for enforcement"
             consistency -> modelfacts "diffs the detected-unit inventory (model-drift, ADR-0021)"
+            consistency -> c4 "parses the org landscape for the ownership check (ADR-0034)"
 
             engine -> model_ "uses types"
             engine -> consistency "runs checks"

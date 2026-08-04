@@ -428,6 +428,45 @@ var corpus = []Case{
 		WantChecks: []string{"contract-obligation"},
 		WantClean:  true,
 	},
+	{
+		// ADR-0034 (positive): the PR changes files that configure a system the
+		// org landscape says ANOTHER repo owns. No per-repo model can state
+		// this, which is the whole reason the landscape exists. Warn, so clean
+		// in the fail-severity sense.
+		Name:   "landscape-ownership-foreign",
+		Config: orgConfig,
+		Base: mergeFiles(baseFiles, map[string]string{
+			".nugit/architecture/landscape.dsl": landscapeObj("other-service"),
+			"infra/cluster.yaml":                "schedulingPriority: 10\n",
+		}),
+		Head:       map[string]string{"infra/cluster.yaml": "schedulingPriority: 100\n"},
+		WantTier:   model.TierTrivial,
+		WantChecks: []string{"landscape-ownership"},
+		WantClean:  true,
+	},
+	{
+		// Negative twin: same landscape, same paths, but THIS repo is the
+		// declared owner — editing your own infrastructure is silent.
+		Name:   "landscape-ownership-owned",
+		Config: orgConfig,
+		Base: mergeFiles(baseFiles, map[string]string{
+			".nugit/architecture/landscape.dsl": landscapeObj("demo-service"),
+			"infra/cluster.yaml":                "schedulingPriority: 10\n",
+		}),
+		Head:      map[string]string{"infra/cluster.yaml": "schedulingPriority: 100\n"},
+		WantTier:  model.TierTrivial,
+		WantClean: true,
+	},
+}
+
+// landscapeObj is an org landscape declaring one shared system owned by
+// `owner`, configured through infra/** in whichever repo is reading (ADR-0034).
+func landscapeObj(owner string) string {
+	return "workspace {\n  model {\n" +
+		"    demo = softwareSystem \"Demo service\" { properties { \"nugit_repo\" \"demo-service\" } }\n" +
+		"    cluster = softwareSystem \"Shared build cluster\" {\n" +
+		"      properties { \"nugit_owner\" \"" + owner + "\" \"nugit_paths\" \"infra/**\" }\n" +
+		"    }\n    demo -> cluster \"runs CI on\"\n  }\n}\n"
 }
 
 // orgConfig declares this repo's org-wide identity (ADR-0033). Without it the

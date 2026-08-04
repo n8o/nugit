@@ -59,6 +59,7 @@ usage:
   nugit c4 gen-rules [flags]   generate go-arch-lint YAML from the C4 model
   nugit c4 export [flags]      export the C4 model (-format icepanel) as an import payload
   nugit c4 preview [flags]     live C4 diagrams via local Structurizr renderer (Docker)
+  nugit landscape render [flags] render the ORG landscape (shared systems + owners) as Mermaid
   nugit deploy [flags]        deterministic deployable-container inventory (Dockerfiles + CMake)
   nugit model facts [flags]   deterministic grounding bundle for the bootstrap agent
   nugit doctor [flags]        setup pre-flight health checks
@@ -135,6 +136,8 @@ func main() {
 		os.Exit(cmdRatify(os.Args[2:]))
 	case "reinforce":
 		os.Exit(cmdReinforce(os.Args[2:]))
+	case "landscape":
+		os.Exit(cmdLandscape(os.Args[2:]))
 	case "c4":
 		os.Exit(cmdC4(os.Args[2:]))
 	case "export":
@@ -386,6 +389,42 @@ func cmdC4(args []string) int {
 		fmt.Fprintf(os.Stderr, "nugit c4 render: unknown format %q\n", *format)
 		return 2
 	}
+	return 0
+}
+
+// cmdLandscape renders the ORG-level landscape (ADR-0034) — a different
+// artifact from the per-repo C4 model, resolved to the one authoritative source
+// for this repo's view (local first, otherwise the single peer that declares
+// one; two claimants is ambiguous and renders nothing, by design).
+func cmdLandscape(args []string) int {
+	if len(args) < 1 || args[0] != "render" {
+		fmt.Fprintln(os.Stderr, "nugit landscape: usage: nugit landscape render [-C dir] [-format mermaid]")
+		return 2
+	}
+	fs := flag.NewFlagSet("landscape render", flag.ExitOnError)
+	dir := fs.String("C", ".", "repo directory")
+	format := fs.String("format", "mermaid", "mermaid")
+	_ = fs.Parse(args[1:])
+	if *format != "mermaid" {
+		fmt.Fprintf(os.Stderr, "nugit landscape render: unknown format %q (want: mermaid)\n", *format)
+		return 2
+	}
+	cfg, _ := config.Load(*dir)
+	dirs := []c4.LandscapeDir{{Dir: *dir}}
+	for _, p := range cfg.Peers {
+		dirs = append(dirs, c4.LandscapeDir{Name: p.Name, Dir: p.Dir(*dir)})
+	}
+	res := c4.ResolveLandscape(c4.LandscapeSourcesFromDirs(dirs))
+	if len(res.Ambiguous) > 0 {
+		fmt.Fprintf(os.Stderr, "nugit landscape render: peers %s each declare a landscape and this repo declares none; "+
+			"exactly one must be authoritative (ADR-0011)\n", strings.Join(res.Ambiguous, ", "))
+		return 1
+	}
+	if !res.Found {
+		fmt.Fprintf(os.Stderr, "nugit landscape render: no %s here or in any configured peer\n", c4.LandscapePath)
+		return 1
+	}
+	fmt.Print(c4.LandscapeMermaid(res.Landscape))
 	return 0
 }
 
