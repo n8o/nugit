@@ -92,34 +92,75 @@ func scavengeSymptom(body, answer string) string {
 // observationUnits splits a commit body into the units a symptom could be: one
 // sentence of prose, one list item, or one line of quoted log output. Trailer
 // lines, headings and fence markers are structure, never observations.
+//
+// A unit is a whole THOUGHT, never a physical line: commit bodies are hard
+// wrapped at ~72 columns, and scoring a wrapped line on its own both truncates
+// the candidate mid-clause and orphans its tail as a fragment that starts
+// mid-sentence. Prose is joined into paragraphs; the same treatment extends to
+// the two other blocks a wrap can cut — a list item (bullet or numbered, at any
+// nesting depth) and a trailer line, whose indented tail is trailer text and so
+// is structure, not an observation.
+//
+// A continuation line is an INDENTED line following the block it continues; an
+// indented line carrying its own list marker opens a nested item instead.
 func observationUnits(body string) []string {
 	var units []string
-	var para []string
+	var para []string  // the prose paragraph being accumulated
+	var item []string  // the list item being accumulated, marker stripped
+	itemIndent := 0    // indent of that item's marker; its tail is indented past it
+	inTrailer := false // last block opened was a trailer line
 	inFence := false
-	flush := func() {
+
+	flushItem := func() {
+		if len(item) > 0 {
+			units = append(units, splitSentences(strings.Join(item, " "))...)
+			item = nil
+		}
+	}
+	flushPara := func() {
 		if len(para) > 0 {
 			units = append(units, splitSentences(strings.Join(para, " "))...)
 			para = nil
 		}
 	}
+	// para and item are never both open, so flushing both preserves document order.
+	flush := func() { flushItem(); flushPara() }
+
 	for _, raw := range strings.Split(body, "\n") {
-		t := strings.TrimSpace(strings.TrimRight(raw, "\r"))
+		line := strings.TrimRight(raw, "\r")
+		t := strings.TrimSpace(line)
 		switch {
 		case strings.HasPrefix(t, "```"), strings.HasPrefix(t, "~~~"):
 			flush()
-			inFence = !inFence
+			inTrailer, inFence = false, !inFence
 		case inFence:
 			if t != "" {
 				units = append(units, t) // a pasted log line stands alone
 			}
-		case t == "", strings.HasPrefix(t, "#"), trailers.IsTrailerLine(t):
+		case t == "", strings.HasPrefix(t, "#"):
 			flush()
+			inTrailer = false
+		case trailers.IsTrailerLine(t):
+			flush()
+			inTrailer = true // whatever is indented under it is still the trailer
 		default:
-			if item, ok := listItem(t); ok {
+			if li, ok := listItem(t); ok {
 				flush()
-				units = append(units, splitSentences(item)...)
+				inTrailer = false
+				item, itemIndent = []string{li}, indentOf(line)
 				continue
 			}
+			if in := indentOf(line); in > 0 {
+				if len(item) > 0 && in > itemIndent {
+					item = append(item, t) // the rest of this bullet
+					continue
+				}
+				if inTrailer {
+					continue // the rest of a wrapped trailer value
+				}
+			}
+			flushItem()
+			inTrailer = false
 			para = append(para, strings.TrimSpace(strings.TrimPrefix(t, ">")))
 		}
 	}
@@ -136,6 +177,23 @@ func listItem(t string) (string, bool) {
 		return "", false
 	}
 	return strings.TrimSpace(t[len(m):]), true
+}
+
+// indentOf returns a line's leading-whitespace width (tab = 4), the only signal
+// separating a wrapped continuation from the next top-level block.
+func indentOf(line string) int {
+	n := 0
+	for _, r := range line {
+		switch r {
+		case ' ':
+			n++
+		case '\t':
+			n += 4
+		default:
+			return n
+		}
+	}
+	return n
 }
 
 // splitSentences breaks a paragraph at ".", "!" or "?" followed by whitespace.
@@ -180,7 +238,10 @@ func isSymptom(u string) bool {
 	if s == "" || len(s) > maxSymptomChars {
 		return false
 	}
-	if conventionalSubject.MatchString(s) || prescriptive(s) {
+	if conventionalSubject.MatchString(s) || prescriptive(s) || describesChange(s) {
+		return false
+	}
+	if cutOff(s) {
 		return false
 	}
 	w := contentWords(s)
@@ -204,6 +265,61 @@ var planPhrase = regexp.MustCompile(`(?i)\b(this (commit|change|pr|patch|branch|
 
 func prescriptive(s string) bool {
 	return planLead.MatchString(s) || planPhrase.MatchString(s)
+}
+
+// labelHead matches a changelog bullet's leading "<component>:" label — up to
+// three identifier-shaped words naming a package, command or file, and the
+// colon that introduces what happened to it. Deliberately narrow: a real
+// observation may also carry a label ("cache: 4 of 21 lookups returned nothing"),
+// so the label alone decides nothing — only what FOLLOWS it does.
+var labelHead = regexp.MustCompile(`(?i)^[a-z0-9][a-z0-9._/-]*(\s+[a-z0-9][a-z0-9._/-]*){0,2}\s*:\s+`)
+
+// changeHead matches the phrase heads that announce a modification rather than
+// a behavior: "new X", "now does Z", "extended to …". planLead covers the
+// imperative verbs; these are the shapes it cannot see, because they are not
+// verbs ("new") or because they sit behind a label.
+var changeHead = regexp.MustCompile(`(?i)^(new|now|extended|extends|extend|dropped|drops|removed|removes|renamed|gains|gained|becomes|became|promoted|promotes|replaces|replaced|folded|folds|reused|reuses|unified|unifies)\b`)
+
+// describesChange rejects a unit that describes the patch instead of what was
+// observed — the changelog bullet a commit body is full of. It is the same
+// judgement prescriptive() makes, applied where the bullet's "<component>:"
+// label hides the verb from a leading-word test, plus the non-verb heads
+// ("new …") that announce a change without one.
+//
+// Precision over recall, per ADR-0028: a bullet that lists what the patch adds
+// is never the symptom that made someone write it, and refusing costs only the
+// author one `symptom:` line.
+func describesChange(s string) bool {
+	if changeHead.MatchString(s) {
+		return true
+	}
+	if m := labelHead.FindString(s); m != "" {
+		rest := s[len(m):]
+		return changeHead.MatchString(rest) || planLead.MatchString(rest)
+	}
+	return false
+}
+
+// danglingTail matches a candidate whose last word is a function word — what a
+// clause cut at a line wrap ends on ("… whose dirs the").
+var danglingTail = regexp.MustCompile("(?i)(?:^|\\s)(a|an|the|of|to|and|or|that|which|whose|with|for|in|on|at|by|from)[\"'`)\\]]*$")
+
+// unterminatedTail matches a candidate that stops on connective punctuation —
+// an unfinished clause promising a continuation that a Trigger will never have.
+var unterminatedTail = regexp.MustCompile(`[,;:(\[{–—-]$`)
+
+// cutOff is the structural backstop: a Trigger must never end mid-clause. It is
+// independent of how the candidate was assembled, so a wrap this file failed to
+// join, a truncation upstream, or a body written by hand in half a sentence all
+// land here rather than in the store. A fragment is not a symptom — the TODO
+// placeholder is a better outcome than half of one.
+//
+// Scavenged candidates only. The `symptom:` trailer is taken verbatim (ADR-0028
+// second-guesses nothing the author states outright), and an authored sentence
+// may legitimately end on a particle — "the subject distill had pasted in".
+func cutOff(s string) bool {
+	s = strings.TrimSpace(s)
+	return s == "" || danglingTail.MatchString(s) || unterminatedTail.MatchString(s)
 }
 
 // negatedObservation catches symptoms whose cue is the negation itself

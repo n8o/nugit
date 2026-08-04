@@ -159,6 +159,189 @@ func TestScavengeMisses(t *testing.T) {
 	}
 }
 
+// --- hard-wrapped units, change descriptions, and cut-off candidates ---
+
+// A commit body is hard wrapped at ~72 columns, so a list item's continuation
+// lines belong to the item: scoring the first physical line truncates the
+// candidate ("… whose dirs the") and orphans its tail as a second unit that
+// starts mid-sentence. Numbered items, nested items and wrapped trailer values
+// all obey the same rule.
+func TestObservationUnitsJoinHardWraps(t *testing.T) {
+	body := strings.Join([]string{
+		"The loader stalled for six hours before anyone looked at the",
+		"queue depth.",
+		"",
+		"1. the nightly loader timed out after ten minutes and left the",
+		"   staging table half written",
+		"   - the retry then crashed with a nil map write on the same rows",
+		"* the digest job reported success to the scheduler even though",
+		"  nothing at all had been written that night",
+		"",
+		"learned: initialize the accumulator before the first write and",
+		"  verify the row count after every batch",
+		"keywords: loader, batch",
+	}, "\n")
+	want := []string{
+		"The loader stalled for six hours before anyone looked at the queue depth.",
+		"the nightly loader timed out after ten minutes and left the staging table half written",
+		"the retry then crashed with a nil map write on the same rows",
+		"the digest job reported success to the scheduler even though nothing at all had been written that night",
+	}
+	got := observationUnits(body)
+	if len(got) != len(want) {
+		t.Fatalf("observationUnits = %#v, want %#v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("unit %d = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
+// The wrapped bullet is judged as a WHOLE — and a whole observation is kept
+// whole, not cut at the wrap.
+func TestScavengeJoinsWrappedListItem(t *testing.T) {
+	body := strings.Join([]string{
+		"Seen twice on the release train:",
+		"",
+		"- the nightly loader timed out after ten minutes and left the",
+		"  staging table half written, while the run still reported success",
+		"  to the scheduler",
+		"",
+		"learned: verify the row count after every batch",
+		"keywords: loader, batch",
+	}, "\n")
+	want := "the nightly loader timed out after ten minutes and left the staging table half written, while the run still reported success to the scheduler"
+	if got := scavengeSymptom(body, "verify the row count after every batch"); got != want {
+		t.Errorf("scavengeSymptom = %q, want the joined bullet %q", got, want)
+	}
+}
+
+// ...and once whole, a bullet that describes what the patch DOES is refused,
+// even though it carries a failure-lexicon word. Its head is a component label
+// plus a change verb phrase: a changelog entry, not something anyone observed.
+// Before the fix this body yielded the item's first physical line, truncated at
+// the wrap on a dangling "the".
+func TestScavengeRefusesChangeDescriptionBullet(t *testing.T) {
+	bodies := []struct{ name, body string }{
+		{
+			name: "label plus a new-thing head",
+			body: "Two things move here:\n\n" +
+				"- ledger: new `stale-batch` warn, scoped to accounts whose rows the\n" +
+				"  import touches and whose totals reconcile to nothing; excluded\n" +
+				"  from the nightly digest\n",
+		},
+		{
+			name: "label plus an imperative head",
+			body: "- loader: add a crash-safe checkpoint so a timed-out batch never\n" +
+				"  leaves the staging table half written\n",
+		},
+		{
+			name: "label plus a now-does head",
+			body: "- digest: now reports the failed batch count instead of swallowing\n" +
+				"  it, so a stalled night is visible the next morning\n",
+		},
+		{
+			name: "change verb heading the item, label after it",
+			body: "- new checkpoint-is-sane check: a timed-out batch and a crashed\n" +
+				"  retry both flag, while a clean run stays silent\n",
+		},
+	}
+	for _, tc := range bodies {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := scavengeSymptom(tc.body, ""); got != "" {
+				t.Errorf("scavengeSymptom = %q, want no symptom (the bullet describes the change)", got)
+			}
+		})
+	}
+}
+
+// The label is not the tell — what follows it is. A genuine observation keeps
+// its component label and is still accepted.
+func TestScavengeAcceptsLabelledObservation(t *testing.T) {
+	body := "- loader: every batch after the first timed out against the staging\n" +
+		"  table, and the scheduler still recorded the night as clean\n"
+	want := "loader: every batch after the first timed out against the staging table, and the scheduler still recorded the night as clean"
+	if got := scavengeSymptom(body, ""); got != want {
+		t.Errorf("scavengeSymptom = %q, want the labelled observation %q", got, want)
+	}
+}
+
+// The structural backstop, independent of how the candidate was assembled: a
+// Trigger that stops mid-clause is refused outright.
+func TestCutOffGuard(t *testing.T) {
+	cases := []struct {
+		s   string
+		cut bool
+	}{
+		{"the batch failed on every retry while the queue depth climbed to", true},
+		{"the batch failed on every retry while the queue depth climbed from", true},
+		{"every write to the staging table was silently dropped by the", true},
+		{"the loader timed out and the digest job reported success,", true},
+		{"the loader timed out and the digest job reported success;", true},
+		{"the loader timed out and the digest job reported success —", true},
+		{"the loader timed out on the third batch of the night", false},
+		{"the loader timed out on the third batch of the night.", false},
+		{`level=error msg="batch aborted" attempts=5 last_error=DEADLINE_EXCEEDED`, false},
+		{"half the rows went missing (the run still exited clean)", false},
+	}
+	for _, tc := range cases {
+		if got := cutOff(tc.s); got != tc.cut {
+			t.Errorf("cutOff(%q) = %v, want %v", tc.s, got, tc.cut)
+		}
+	}
+}
+
+// A cut-off candidate is refused by the scavenger even when it carries a cue,
+// and finishing the same clause makes it acceptable.
+func TestScavengeRefusesCutOffCandidate(t *testing.T) {
+	cut := "- the importer crashed on every retry while the staging queue depth climbed steadily to\n"
+	if got := scavengeSymptom(cut, ""); got != "" {
+		t.Errorf("scavengeSymptom = %q, want no symptom (candidate ends mid-clause)", got)
+	}
+	whole := "- the importer crashed on every retry while the staging queue depth climbed steadily to four thousand\n"
+	want := "the importer crashed on every retry while the staging queue depth climbed steadily to four thousand"
+	if got := scavengeSymptom(whole, ""); got != want {
+		t.Errorf("scavengeSymptom = %q, want %q", got, want)
+	}
+}
+
+// Nothing this package produces may end on a dangling function word — the
+// end-to-end statement of the defect, asserted with a check written
+// independently of the implementation's own regexes.
+func TestNoTriggerEndsOnADanglingWord(t *testing.T) {
+	bodies := []string{
+		"Seen twice on the release train:\n\n" +
+			"- the nightly loader timed out after ten minutes and left the\n" +
+			"  staging table half written\n\n" +
+			"learned: verify the row count after every batch\nkeywords: loader\n",
+		"- ledger: new `stale-batch` warn, scoped to accounts whose rows the\n" +
+			"  import touches and whose totals reconcile to nothing\n\n" +
+			"learned: reconcile before publishing\nkeywords: ledger\n",
+		"The digest job reported success to the scheduler even though\n" +
+			"nothing at all had been written that night.\n\n" +
+			"learned: assert the row count, never the exit code\nkeywords: digest\n",
+		"1. every retry after the first crashed with a nil map write on the\n" +
+			"   same rows, and the run still exited clean\n\n" +
+			"learned: initialize the accumulator at construction\nkeywords: retry\n",
+		"Reproduced on a clean checkout:\n\n```\n" +
+			"level=error msg=\"batch aborted\" attempts=5 last_error=DEADLINE_EXCEEDED\n" +
+			"```\n\nlearned: fail the run when a batch aborts\nkeywords: batch\n",
+	}
+	dangling := map[string]bool{}
+	for _, w := range strings.Fields("a an the of to and or that which whose with for in on at by from") {
+		dangling[w] = true
+	}
+	for _, body := range bodies {
+		got := triggerFor(commitOf("fix(loader): checkpoint every batch", body))
+		fields := strings.Fields(strings.Trim(got, " \t.)\"'`"))
+		last := strings.ToLower(fields[len(fields)-1])
+		if dangling[last] {
+			t.Errorf("trigger ends on the dangling word %q: %q", last, got)
+		}
+	}
+}
+
 // End to end through Distill: the written lesson file carries the symptom, and
 // the commit subject appears nowhere in it.
 func TestDistillWritesSymptomTrigger(t *testing.T) {
