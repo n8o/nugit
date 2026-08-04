@@ -117,6 +117,10 @@ func Run(repoDir string) Report {
 	wired, wdetail := mcpWired(repoDir)
 	r.Checks = append(r.Checks, Check{Name: "MCP wired", OK: wired, Advisory: true, Detail: wdetail})
 
+	// ADR-0026: wiring coherence between config.yml and the artifacts that
+	// invoke nugit (CI workflows, CLAUDE.md, skill files). Advisory only.
+	r.Checks = append(r.Checks, wiringChecks(repoDir, cfg)...)
+
 	if kerr == nil {
 		h := storeHealth(m, objs, bad)
 		r.Health = &h
