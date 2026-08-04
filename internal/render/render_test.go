@@ -75,6 +75,49 @@ func TestStructuredJSONExcludesHeadModel(t *testing.T) {
 	}
 }
 
+// ADR-0018: the proposed-knowledge section renders each candidate, caps at
+// maxProposals with an overflow count, notes store-dedupes, and names the
+// exact apply command. Absent when the range proposes nothing.
+func TestMarkdownProposedKnowledge(t *testing.T) {
+	var props []model.Proposal
+	for i := 0; i < 7; i++ {
+		props = append(props, model.Proposal{
+			Kind: model.KindLesson, Text: "insight number " + string(rune('A'+i)),
+			Commit: "abc1234" + string(rune('0'+i)), Subject: "fix: thing",
+			Scope: "pkg", Keywords: []string{"k1", "k2"},
+		})
+	}
+	rep := model.Report{
+		BaseRef: "basesha", HeadRef: "headsha",
+		Code:             model.CodeDelta{ByComp: map[string][]model.FileChange{}},
+		Significance:     model.Significance{Tier: model.TierFeature, Reasons: []string{"x"}},
+		Proposals:        props,
+		ProposalsDeduped: 2,
+	}
+	md := Markdown(rep)
+	for _, want := range []string{
+		"Proposed knowledge",
+		"insight number A",
+		"insight number E", // the 5th (cap boundary)
+		"…and 2 more candidate(s) not shown",
+		"2 candidate(s) skipped — already covered by the store",
+		"`nugit distill -base basesha -head headsha`",
+		"nugit ratify",
+	} {
+		if !strings.Contains(md, want) {
+			t.Errorf("proposal section missing %q\n---\n%s", want, md)
+		}
+	}
+	if strings.Contains(md, "insight number F") {
+		t.Errorf("proposal section must cap at %d items:\n%s", maxProposals, md)
+	}
+
+	rep.Proposals, rep.ProposalsDeduped = nil, 0
+	if strings.Contains(Markdown(rep), "Proposed knowledge") {
+		t.Error("no proposals -> no section")
+	}
+}
+
 // The knowledge bullet carries the tier when the object is annotated.
 func TestMarkdownKnowledgeTier(t *testing.T) {
 	o := model.KnowledgeObject{FrontMatter: model.FrontMatter{ID: "ADR-1", Type: model.KindDecision, Scope: "a", Status: model.StatusAccepted}}

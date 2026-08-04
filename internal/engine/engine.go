@@ -8,6 +8,7 @@ import (
 	"github.com/n8o/nugit/internal/config"
 	"github.com/n8o/nugit/internal/consistency"
 	"github.com/n8o/nugit/internal/delta"
+	"github.com/n8o/nugit/internal/distill"
 	"github.com/n8o/nugit/internal/evidence"
 	"github.com/n8o/nugit/internal/gitutil"
 	"github.com/n8o/nugit/internal/goimports"
@@ -143,17 +144,24 @@ func BuildReport(opt Options) (model.Report, error) {
 	other := consistency.OtherFindings(in)
 	findings := consistency.Sort(append(c4Findings, other...))
 
+	// PR-time distill (ADR-0018): surface what `nugit distill` would promote
+	// for this range. Pure selection over already-loaded inputs — nothing is
+	// written at render time, and proposals never become findings.
+	proposals, deduped := distill.Propose(commits, allObjs, 1)
+
 	rep := model.Report{
-		BaseRef:      base,
-		HeadRef:      opt.Head,
-		Commits:      commits,
-		C4:           c4Delta,
-		Code:         codeDelta,
-		Knowledge:    knowDelta,
-		Plan:         plan,
-		Findings:     findings,
-		Significance: sig,
-		HeadModel:    headModel,
+		BaseRef:          base,
+		HeadRef:          opt.Head,
+		Commits:          commits,
+		C4:               c4Delta,
+		Code:             codeDelta,
+		Knowledge:        knowDelta,
+		Plan:             plan,
+		Findings:         findings,
+		Significance:     sig,
+		HeadModel:        headModel,
+		Proposals:        proposals,
+		ProposalsDeduped: deduped,
 	}
 	// Opt-in, off by default: inert (no network) unless explicitly enabled +
 	// architectural + ANTHROPIC_API_KEY set. Never alters the deterministic facts.

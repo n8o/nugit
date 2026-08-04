@@ -22,10 +22,13 @@ import (
 
 // Options configure a distill run.
 type Options struct {
-	RepoDir  string
-	Base     string
-	Head     string
-	MinRecur int    // a `learned:` must recur ≥ this to promote (default 2)
+	RepoDir string
+	Base    string
+	Head    string
+	// MinRecur is the recurrence a lone `learned:` needs to promote. Default 1
+	// (ADR-0018): within a single PR range one excellent trailer is worth
+	// proposing — the candidate lane, not recurrence, is the quality gate.
+	MinRecur int
 	Now      string // ISO timestamp for created: (testable); "" -> time.Now()
 	// Status controls the minted status: "proposed" (default — the candidate
 	// lane of ADR-0016: machine-drafted records await `nugit ratify`) or
@@ -42,12 +45,150 @@ type Result struct {
 
 var slugRE = regexp.MustCompile(`[^a-z0-9]+`)
 
+// candidate is one promotable trailer selected from the range, with any
+// existing-store match marked (dup) rather than dropped — so the PR-time
+// proposal set (ADR-0018) and the distill write path agree on what is fresh.
+type candidate struct {
+	kind model.Kind
+	c    model.Commit
+	text string
+	dup  bool
+}
+
+// index is the dedup view of the existing store, built from the EXACT field a
+// distilled object carries (its Decision section / Insight line), not a
+// whole-body substring scan — that wrongly skipped any candidate whose text
+// appeared anywhere in a body. Lessons additionally record their keyword sets
+// for the ADR-0018 overlap rule.
+type index struct {
+	decisionText map[string]bool
+	lessonText   map[string]bool
+	lessonKw     []map[string]bool
+	maxADR       int
+}
+
+func indexStore(objs []model.KnowledgeObject) index {
+	ix := index{decisionText: map[string]bool{}, lessonText: map[string]bool{}}
+	for _, o := range objs {
+		if n := adrNum(o.ID); n > ix.maxADR {
+			ix.maxADR = n
+		}
+		switch o.Type {
+		case model.KindDecision:
+			if t := sectionText(o.Body, "## Decision"); t != "" {
+				ix.decisionText[norm(t)] = true
+			}
+		case model.KindLesson:
+			if t := insightText(o.Body); t != "" {
+				ix.lessonText[norm(t)] = true
+			}
+			if kws := keywordsText(o.Body); len(kws) > 0 {
+				set := map[string]bool{}
+				for _, k := range kws {
+					set[norm(k)] = true
+				}
+				ix.lessonKw = append(ix.lessonKw, set)
+			}
+		}
+	}
+	return ix
+}
+
+// dupLesson reports whether the store already carries this lesson: an exact
+// normalized-insight match, or the ADR-0018 keyword-overlap rule — a single
+// existing lesson shares ≥2 keywords covering ≥ half the candidate's set.
+func (ix index) dupLesson(normText string, kws []string) bool {
+	if ix.lessonText[normText] {
+		return true
+	}
+	if len(kws) < 2 {
+		return false
+	}
+	for _, set := range ix.lessonKw {
+		shared := 0
+		for _, k := range kws {
+			if set[norm(k)] {
+				shared++
+			}
+		}
+		if shared >= 2 && shared*2 >= len(kws) {
+			return true
+		}
+	}
+	return false
+}
+
+// selectCandidates walks the range in commit order: every unique `decision:`
+// trailer (a deliberate, significant act), then every unique `learned:` that
+// recurs ≥ minRecur times or rides a decision/rejected-bearing commit.
+// In-range duplicates collapse to the first occurrence.
+func selectCandidates(commits []model.Commit, ix index, minRecur int) []candidate {
+	var out []candidate
+	learnedCount := map[string]int{}
+	for _, c := range commits {
+		if l := strings.TrimSpace(c.Trailer.Learned); l != "" {
+			learnedCount[norm(l)]++ // norm key: whitespace/case variants are one lesson
+		}
+	}
+	seen := map[string]bool{}
+	for _, c := range commits {
+		d := strings.TrimSpace(c.Trailer.Decision)
+		if d == "" || seen[norm(d)] {
+			continue
+		}
+		seen[norm(d)] = true
+		out = append(out, candidate{kind: model.KindDecision, c: c, text: d, dup: ix.decisionText[norm(d)]})
+	}
+	seenL := map[string]bool{}
+	for _, c := range commits {
+		l := strings.TrimSpace(c.Trailer.Learned)
+		if l == "" || seenL[norm(l)] {
+			continue
+		}
+		significant := strings.TrimSpace(c.Trailer.Decision) != "" || strings.TrimSpace(c.Trailer.Rejected) != ""
+		if learnedCount[norm(l)] < minRecur && !significant {
+			continue
+		}
+		seenL[norm(l)] = true
+		out = append(out, candidate{kind: model.KindLesson, c: c, text: l, dup: ix.dupLesson(norm(l), c.Trailer.Keywords)})
+	}
+	return out
+}
+
+// Propose computes — without touching the filesystem or git — the PR-time
+// proposal set (ADR-0018): what Distill would write for this range of parsed
+// commits against this store, plus how many candidates the store already
+// covers. minRecur ≤ 0 defaults to 1, matching Distill.
+func Propose(commits []model.Commit, existing []model.KnowledgeObject, minRecur int) (props []model.Proposal, deduped int) {
+	if minRecur <= 0 {
+		minRecur = 1
+	}
+	for _, cand := range selectCandidates(commits, indexStore(existing), minRecur) {
+		if cand.dup {
+			deduped++
+			continue
+		}
+		t := cand.c.Trailer
+		props = append(props, model.Proposal{
+			Kind:     cand.kind,
+			Title:    title(cand.text),
+			Text:     cand.text,
+			Rejected: strings.TrimSpace(t.Rejected),
+			Scope:    scopeOf(t.Affects),
+			Keywords: t.Keywords,
+			Commit:   short(cand.c.SHA),
+			Subject:  firstLine(cand.c.Subject),
+		})
+	}
+	return props, deduped
+}
+
 // Distill reads trailers over (base, head] and writes promotable decisions and
-// recurring lessons into .nugit/. Idempotent: a decision/lesson whose exact
-// normalized text already backs a stored object is skipped.
+// lessons into .nugit/. Idempotent: a decision/lesson the store already covers
+// (exact normalized text, or keyword overlap for lessons) is skipped.
 func Distill(opt Options) (Result, error) {
 	if opt.MinRecur <= 0 {
-		opt.MinRecur = 2
+		opt.MinRecur = 1
 	}
 	adrStatus, lessonStatus := string(model.StatusProposed), string(model.StatusProposed)
 	switch opt.Status {
@@ -70,93 +211,46 @@ func Distill(opt Options) (Result, error) {
 		commits[i].Trailer = trailers.Parse(commits[i].Body)
 	}
 
-	// Build dedup sets from the EXACT field a distilled object carries (its
-	// Decision section / Insight line), not a whole-body substring scan — that
-	// wrongly skipped any candidate whose text appeared anywhere in a body.
 	existing, _ := knowledge.Load(opt.RepoDir)
-	haveDecision := map[string]bool{}
-	haveLesson := map[string]bool{}
-	maxADR := 0
-	for _, o := range existing {
-		if n := adrNum(o.ID); n > maxADR {
-			maxADR = n
-		}
-		switch o.Type {
-		case model.KindDecision:
-			if t := sectionText(o.Body, "## Decision"); t != "" {
-				haveDecision[norm(t)] = true
-			}
-		case model.KindLesson:
-			if t := insightText(o.Body); t != "" {
-				haveLesson[norm(t)] = true
-			}
-		}
-	}
+	ix := indexStore(existing)
 
 	var res Result
-	learnedCount := map[string]int{}
-	for _, c := range commits {
-		if l := strings.TrimSpace(c.Trailer.Learned); l != "" {
-			learnedCount[norm(l)]++ // norm key: whitespace/case variants are one lesson
-		}
-	}
-
-	// Promote decisions (a `decision:` trailer is a deliberate, significant act).
-	seen := map[string]bool{}
-	for _, c := range commits {
-		d := strings.TrimSpace(c.Trailer.Decision)
-		if d == "" || seen[norm(d)] {
-			continue
-		}
-		seen[norm(d)] = true
-		if haveDecision[norm(d)] {
-			res.Skipped++
-			continue
-		}
-		maxADR++
-		key := fmt.Sprintf("ADR-%04d", maxADR)
-		path := filepath.Join(".nugit", "decisions", fmt.Sprintf("%04d-%s.md", maxADR, slug(d)))
-		wrote, err := writeObj(opt.RepoDir, path, adrBody(key, c, now, adrStatus))
-		if err != nil {
-			return res, err
-		}
-		if wrote {
-			res.Decisions = append(res.Decisions, path)
-		} else {
-			res.Skipped++
-		}
-	}
-
-	// Promote recurring (or decision-accompanied) lessons.
-	seenL := map[string]bool{}
+	maxADR := ix.maxADR
 	usedSlug := map[string]bool{}
-	for _, c := range commits {
-		l := strings.TrimSpace(c.Trailer.Learned)
-		if l == "" || seenL[norm(l)] {
-			continue
-		}
-		significant := strings.TrimSpace(c.Trailer.Decision) != "" || strings.TrimSpace(c.Trailer.Rejected) != ""
-		if learnedCount[norm(l)] < opt.MinRecur && !significant {
-			continue
-		}
-		seenL[norm(l)] = true
-		if haveLesson[norm(l)] {
+	for _, cand := range selectCandidates(commits, ix, opt.MinRecur) {
+		if cand.dup {
 			res.Skipped++
 			continue
 		}
-		// Disambiguate colliding slugs so two distinct lessons never overwrite or
-		// share an id.
-		s := uniqueSlug(slug(l), usedSlug, opt.RepoDir)
-		usedSlug[s] = true
-		path := filepath.Join(".nugit", "lessons", s+".md")
-		wrote, err := writeObj(opt.RepoDir, path, lessonBody(c, now, s, lessonStatus))
-		if err != nil {
-			return res, err
-		}
-		if wrote {
-			res.Lessons = append(res.Lessons, path)
-		} else {
-			res.Skipped++
+		switch cand.kind {
+		case model.KindDecision:
+			maxADR++
+			key := fmt.Sprintf("ADR-%04d", maxADR)
+			path := filepath.Join(".nugit", "decisions", fmt.Sprintf("%04d-%s.md", maxADR, slug(cand.text)))
+			wrote, err := writeObj(opt.RepoDir, path, adrBody(key, cand.c, now, adrStatus))
+			if err != nil {
+				return res, err
+			}
+			if wrote {
+				res.Decisions = append(res.Decisions, path)
+			} else {
+				res.Skipped++
+			}
+		case model.KindLesson:
+			// Disambiguate colliding slugs so two distinct lessons never
+			// overwrite or share an id.
+			s := uniqueSlug(slug(cand.text), usedSlug, opt.RepoDir)
+			usedSlug[s] = true
+			path := filepath.Join(".nugit", "lessons", s+".md")
+			wrote, err := writeObj(opt.RepoDir, path, lessonBody(cand.c, now, s, lessonStatus))
+			if err != nil {
+				return res, err
+			}
+			if wrote {
+				res.Lessons = append(res.Lessons, path)
+			} else {
+				res.Skipped++
+			}
 		}
 	}
 	return res, nil
@@ -309,6 +403,24 @@ func insightText(body string) string {
 		}
 	}
 	return ""
+}
+
+// keywordsText returns the "**Keywords:** a, b" line of a distilled lesson as
+// a list (empty when absent — hand-written lessons need not carry one).
+func keywordsText(body string) []string {
+	for _, ln := range strings.Split(body, "\n") {
+		t := strings.TrimSpace(ln)
+		if strings.HasPrefix(t, "**Keywords:**") {
+			var out []string
+			for _, f := range strings.Split(strings.TrimPrefix(t, "**Keywords:**"), ",") {
+				if f = strings.TrimSpace(f); f != "" {
+					out = append(out, f)
+				}
+			}
+			return out
+		}
+	}
+	return nil
 }
 
 var adrNumRE = regexp.MustCompile(`(?i)^ADR-(\d+)$`)

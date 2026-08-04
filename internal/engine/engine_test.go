@@ -110,6 +110,34 @@ func TestDeclaredEdgePasses(t *testing.T) {
 	}
 }
 
+// ADR-0018: BuildReport surfaces the PR-time proposal set — every distillable
+// trailer in the range, as a proposal, without minting any finding.
+func TestReportProposals(t *testing.T) {
+	dir, base := seed(t, false)
+	write(t, dir, "a/a.go", "package a\n\n// A does more.\nfunc A() {}\n")
+	git(t, dir, "add", "-A")
+	git(t, dir, "commit", "-q", "-m",
+		"feat: a thing\n\ndecision: pick X\nrejected: Y — slower\nlearned: X beats Y here\naffects: compa\nkeywords: x, y")
+	head := git(t, dir, "rev-parse", "HEAD")
+
+	rep, err := BuildReport(Options{RepoDir: dir, Base: base, Head: head})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rep.Proposals) != 2 {
+		t.Fatalf("want a decision + a lesson proposal, got %+v", rep.Proposals)
+	}
+	if rep.Proposals[0].Kind != model.KindDecision || rep.Proposals[1].Kind != model.KindLesson {
+		t.Errorf("proposal kinds wrong: %+v", rep.Proposals)
+	}
+	if rep.Proposals[0].Scope != "compa" || rep.Proposals[0].Commit != head[:8] {
+		t.Errorf("proposal metadata wrong: %+v", rep.Proposals[0])
+	}
+	if hasC4Fail(rep) != nil {
+		t.Error("proposals must not mint findings")
+	}
+}
+
 // AC3: a tiny single-component change is trivial.
 func TestTrivialChange(t *testing.T) {
 	dir, base := seed(t, false)

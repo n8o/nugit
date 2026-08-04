@@ -165,6 +165,7 @@ deps:
       - "config"
       - "consistency"
       - "delta"
+      - "distill"
       - "evidence"
       - "gitutil"
       - "goimports"

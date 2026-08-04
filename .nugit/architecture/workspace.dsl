@@ -250,6 +250,7 @@ workspace "nugit" "Git-native typed knowledge & unified PR view — self-model (
             distill -> trailers "parses trailers"
             distill -> knowledge "dedups against the store"
             distill -> model_ "uses types"
+            engine -> distill "computes the PR-time proposal set (ADR-0018)"
 
             eval -> engine "runs the corpus"
             eval -> model_ "uses types"

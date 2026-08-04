@@ -551,7 +551,7 @@ func cmdDistill(args []string) int {
 	dir := fs.String("C", ".", "repo directory")
 	base := fs.String("base", "HEAD~1", "base ref")
 	head := fs.String("head", "HEAD", "head ref")
-	min := fs.Int("min-recur", 2, "min recurrences for a lesson to promote")
+	min := fs.Int("min-recur", 1, "min recurrences for a lone learned: to promote (decision-bearing commits always promote; ADR-0018)")
 	status := fs.String("status", "proposed", "minted status: proposed | ratified")
 	_ = fs.Parse(args)
 	res, err := distill.Distill(distill.Options{RepoDir: *dir, Base: *base, Head: *head, MinRecur: *min, Status: *status})
