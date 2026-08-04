@@ -35,6 +35,7 @@ func Index(objs []model.KnowledgeObject) string {
 		{model.KindDecision, "Decisions"},
 		{model.KindLesson, "Lessons"},
 		{model.KindReference, "References"},
+		{model.KindContract, "Contracts"},
 		{model.KindGlossary, "Glossary"},
 	}
 

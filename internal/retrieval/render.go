@@ -31,6 +31,16 @@ func (b Bundle) Markdown() string {
 		fmt.Fprintf(&w, "**Active spec** `%s` — %s\n\n", b.Spec.QualifiedID(), b.Spec.Summary)
 	}
 
+	// Obligations first among the typed sections (ADR-0033): everything below is
+	// what this repo knows; this is what this repo OWES.
+	if len(b.Contracts) > 0 {
+		w.WriteString("**Contracts** _(cross-repo obligations naming this repo)_\n")
+		for _, c := range b.Contracts {
+			fmt.Fprintf(&w, "- `%s` (%s) — %s\n", c.QualifiedID(), statusLabel(c), c.Summary)
+		}
+		w.WriteString("\n")
+	}
+
 	if len(b.Decisions) > 0 {
 		w.WriteString("**Decisions**\n")
 		for _, d := range b.Decisions {

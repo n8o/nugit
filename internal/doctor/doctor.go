@@ -125,6 +125,13 @@ func Run(repoDir string) Report {
 	r.Checks = append(r.Checks, Check{Name: "peer stores reachable",
 		OK: pok, Advisory: true, Detail: pdetail})
 
+	// Cross-repo contracts (ADR-0033). Advisory, always: enforcing an obligation
+	// is `pr-render`'s job at the reviewed ref, and doctor is a pre-flight — an
+	// unmet obligation is a backlog item, never a reason to block setup.
+	cok, cdetail := contractObligations(repoDir, cfg, objs)
+	r.Checks = append(r.Checks, Check{Name: "cross-repo contract obligations",
+		OK: cok, Advisory: true, Detail: cdetail})
+
 	// ADR-0026: wiring coherence between config.yml and the artifacts that
 	// invoke nugit (CI workflows, CLAUDE.md, skill files). Advisory only.
 	r.Checks = append(r.Checks, wiringChecks(repoDir, cfg)...)
@@ -304,6 +311,59 @@ func federatable(objs []model.KnowledgeObject) int {
 		}
 	}
 	return n
+}
+
+// contractObligations reports how many ratified contracts — local or from a
+// peer — name THIS repo as a party, and how many of their obligations are
+// currently unmet (ADR-0033). Advisory by construction, and inert without an
+// `org.repo` identity: nugit never guesses which party a repo is, so "not
+// configured" is a distinct, stated outcome rather than a silent zero.
+//
+// Doctor reads the WORKING TREE, unlike the PR-time check which reads the
+// reviewed ref: doctor's question is "how does this checkout stand right now",
+// and its answer gates nothing.
+func contractObligations(repoDir string, cfg config.Config, local []model.KnowledgeObject) (bool, string) {
+	if cfg.Org.Repo == "" {
+		return true, "org.repo is not configured — contract checking is inert (nugit never guesses which party this repo is)"
+	}
+	if cfg.Contracts.Mode == "off" {
+		return true, "contracts.mode: off — obligations are not checked (org.repo=" + cfg.Org.Repo + ")"
+	}
+	objs := append([]model.KnowledgeObject{}, local...)
+	srcs := make([]knowledge.PeerSource, 0, len(cfg.Peers))
+	for _, p := range cfg.Peers {
+		srcs = append(srcs, knowledge.PeerSource{Name: p.Name, Dir: p.Dir(repoDir)})
+	}
+	objs = append(objs, knowledge.PeerContracts(srcs)...)
+
+	naming := knowledge.ContractsNaming(objs, cfg.Org.Repo)
+	if len(naming) == 0 {
+		return true, fmt.Sprintf("no ratified contract names %q as a party", cfg.Org.Repo)
+	}
+	obs := knowledge.Obligations(objs, cfg.Org.Repo, treeReader(repoDir))
+	unmet := knowledge.UnmetObligations(obs)
+	s := fmt.Sprintf("%d contract(s) name %q, %d obligation(s), %d unmet",
+		len(naming), cfg.Org.Repo, len(obs), len(unmet))
+	if len(unmet) == 0 {
+		return true, s
+	}
+	items := make([]string, 0, len(unmet))
+	for _, ob := range unmet {
+		items = append(items, fmt.Sprintf("%s (%s): %s", ob.QualifiedID(), ob.OriginLabel(), ob.Must.Name))
+	}
+	sort.Strings(items)
+	return false, s + " — " + strings.Join(items, "; ")
+}
+
+// treeReader reads asserted files from the working tree, for doctor only.
+func treeReader(repoDir string) knowledge.FileReader {
+	return func(rel string) (string, bool) {
+		b, err := os.ReadFile(filepath.Join(repoDir, filepath.FromSlash(strings.TrimPrefix(rel, "./"))))
+		if err != nil {
+			return "", false
+		}
+		return string(b), true
+	}
 }
 
 // mcpJSON is the subset of .mcp.json doctor inspects.

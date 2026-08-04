@@ -26,7 +26,43 @@ const (
 	// the `source` front-matter link out. Enters via reviewed PR (ADR-0011's
 	// inbound-proposal path); see .nugit/decisions/0014-reference-type.md.
 	KindReference Kind = "reference"
+	// KindContract is a TWO-SIDED invariant between repos in one organization
+	// (ADR-0033): the repo that owns the invariant declares it once, names every
+	// party by its stable org-wide repo id, and each counterparty reads it via
+	// `peers:` (ADR-0032) and checks its OWN obligations. Lives under
+	// .nugit/contracts/. Needs no hub: phase 1 already gives each repo read
+	// access to its peers' stores.
+	KindContract Kind = "contract"
 )
+
+// Must is one mechanically checkable obligation a Party owes under a contract
+// (ADR-0033). It is DECLARATIVE and always will be: `matches` is a Go RE2
+// pattern (linear time, no catastrophic backtracking) applied to the bytes of
+// one named file. There is deliberately no verb that executes anything — a
+// contract is text this repo reads out of ANOTHER repo's checkout, so running
+// it would hand a sibling repo this repo's CI credentials. That is a security
+// boundary, not a trade-off; see ADR-0033's Rejected.
+type Must struct {
+	// Name is the human sentence a finding quotes, so a reader can act without
+	// opening the contract. Required.
+	Name string `yaml:"name"`
+	// File is the asserted file, git-root-relative in the PARTY's own repo (the
+	// ADR-0002 path dialect). Required.
+	File string `yaml:"file"`
+	// Matches is the RE2 pattern the file's content must match. Required.
+	Matches string `yaml:"matches"`
+	// Absent inverts the assertion: the pattern must NOT appear in the file.
+	Absent bool `yaml:"absent,omitempty"`
+}
+
+// Party is one signatory of a contract: a stable org-wide repo id plus the
+// obligations that repo owes (ADR-0033). The id is deliberately NOT a peer name
+// from `peers:` — a peer name is the READER's private label for a sibling,
+// while a party id is a bilateral fact both repos must spell identically.
+type Party struct {
+	Repo string `yaml:"repo"`
+	Must []Must `yaml:"must"`
+}
 
 // Status is the lifecycle marker carried in a knowledge object's front-matter.
 //
@@ -114,6 +150,11 @@ type FrontMatter struct {
 	// stale-knowledge check treats a PR touching a matched path as touching
 	// the object's governed surface.
 	AppliesToPaths []string `yaml:"applies_to_paths,omitempty"`
+	// Parties are the signatories of a `contract` object (ADR-0033) — ignored on
+	// every other kind. Each party names a repo by its stable org-wide id and the
+	// obligations that repo owes; a repo checks ONLY the party matching its own
+	// configured `org.repo`.
+	Parties []Party `yaml:"parties,omitempty"`
 }
 
 // KnowledgeObject is one parsed durable record (a markdown file under .nugit/**).

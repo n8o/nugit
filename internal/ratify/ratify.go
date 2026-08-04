@@ -34,7 +34,10 @@ var statusLineRE = regexp.MustCompile(`(?m)^status:[ \t]*proposed[ \t]*(\r?)$`)
 // ratifiedStatus maps a kind to the status ratification grants it.
 func ratifiedStatus(k model.Kind) (model.Status, error) {
 	switch k {
-	case model.KindDecision, model.KindSpec:
+	case model.KindDecision, model.KindSpec, model.KindContract:
+		// A contract ratifies like a decision: `accepted` is what makes it able
+		// to fire an obligation check, so a two-sided invariant gets reviewed
+		// before it can fail anyone's build (ADR-0033 point 9, ADR-0016).
 		return model.StatusAccepted, nil
 	case model.KindLesson, model.KindReference:
 		return model.StatusActive, nil

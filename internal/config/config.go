@@ -46,6 +46,20 @@ type Config struct {
 	// Peers are sibling repos in the same organization whose knowledge is
 	// readable from here (ADR-0032, phase 1: read-only, local paths only).
 	Peers PeerList `yaml:"peers"`
+	// Org declares this repo's own identity within the organization (ADR-0033).
+	Org struct {
+		// Repo is the stable org-wide id other repos name this one by in a
+		// contract's `parties:`. Deliberately NOT a peer name: a peer name is
+		// the READER's private label for a sibling and can change at will, while
+		// a party id is a bilateral fact both repos must spell identically.
+		// Empty (or malformed) means contract checking is INERT — nugit never
+		// guesses which party this repo is from the remote, directory, or module.
+		Repo string `yaml:"repo"`
+	} `yaml:"org"`
+	// Contracts configures cross-repo obligation checking (ADR-0033).
+	Contracts struct {
+		Mode string `yaml:"mode"` // warn (default) | fail | off
+	} `yaml:"contracts"`
 }
 
 // Peer is one sibling repo's store, read-only.
@@ -130,6 +144,7 @@ func Default() Config {
 	c.Recurrence.Mode = "warn"
 	c.Recurrence.WindowDays = 90
 	c.Recurrence.MinFixes = 3
+	c.Contracts.Mode = "warn"
 	return c
 }
 
@@ -198,8 +213,32 @@ func LoadBytes(b []byte) (Config, error) {
 		c.Recurrence.MinFixes = 3
 	}
 	c.Peers = validPeers(c.Peers)
+	// This repo's org-wide identity (ADR-0033). A malformed id degrades to ""
+	// (inert), never to a guess: binding this repo to the WRONG party's
+	// obligations is strictly worse than checking nothing, and doctor makes the
+	// absence visible.
+	c.Org.Repo = strings.TrimSpace(c.Org.Repo)
+	if !orgRepoRe.MatchString(c.Org.Repo) {
+		c.Org.Repo = ""
+	}
+	c.Contracts.Mode = strings.ToLower(strings.TrimSpace(c.Contracts.Mode))
+	switch c.Contracts.Mode {
+	case "fail", "off":
+	default:
+		// Unknown value: fall back to the DEFAULT (warn), not to strict. Unlike
+		// c4.mode and -fail-on — whose strict state is this repo's own declared
+		// policy — a typo here must never silently hand another repo the power
+		// to fail this repo's build (ADR-0033 point 7).
+		c.Contracts.Mode = "warn"
+	}
 	return c, nil
 }
+
+// orgRepoRe is the party-id grammar: a stable org-wide repo id, optionally
+// namespaced (`myorg/consumer-gateway`). Lowercase and punctuation-limited so
+// two repos cannot "agree" on ids that differ only in case or whitespace. The
+// empty string matches nothing, which is how an absent id stays inert.
+var orgRepoRe = regexp.MustCompile(`^[a-z0-9][a-z0-9._/-]*$`)
 
 // C4Warn reports whether the c4<->code check should warn (adoption) rather than
 // fail (ratified enforcement).
@@ -221,3 +260,13 @@ func FailOnRank(s string) int {
 
 // RecurrenceOn reports whether the recurrence check runs (ADR-0019).
 func (c Config) RecurrenceOn() bool { return c.Recurrence.Mode != "off" }
+
+// ContractsOn reports whether cross-repo obligation checking runs at all
+// (ADR-0033). It needs BOTH an explicit mode that isn't `off` and a configured
+// identity — with no identity nugit cannot know which party it is, and guessing
+// is the one thing it must never do.
+func (c Config) ContractsOn() bool { return c.Contracts.Mode != "off" && c.Org.Repo != "" }
+
+// ContractsFail reports whether an unmet obligation is a `fail` finding rather
+// than the default `warn` (the ADR-0016 candidate-lane ramp).
+func (c Config) ContractsFail() bool { return c.Contracts.Mode == "fail" }

@@ -49,6 +49,9 @@ type Input struct {
 	C4Warn bool
 	// Recurrence configures the recurrence check (ADR-0019); zero value disables.
 	Recurrence RecurrenceOpts
+	// Contracts configures the cross-repo obligation check (ADR-0033); the zero
+	// value is inert (no configured identity ⇒ nothing is checked).
+	Contracts ContractOpts
 }
 
 // C4CodeFindings runs the C4<->code check plus model-health checks. The
@@ -346,6 +349,7 @@ func OtherFindings(in Input) []model.Finding {
 	fs = append(fs, checkCaptureHygiene(in)...)
 	fs = append(fs, checkProseSupersession(in)...)
 	fs = append(fs, checkRecurrence(in)...)
+	fs = append(fs, checkContractObligations(in)...)
 	return Sort(fs)
 }
 

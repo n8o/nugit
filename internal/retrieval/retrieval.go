@@ -75,11 +75,16 @@ type C4Slice struct {
 
 // Bundle is the composed result.
 type Bundle struct {
-	Path          string   `json:"path"`
-	Component     string   `json:"component"`
-	C4            C4Slice  `json:"c4_slice"`
-	Decisions     []Item   `json:"decisions"`
-	Spec          *Item    `json:"spec,omitempty"`
+	Path      string  `json:"path"`
+	Component string  `json:"component"`
+	C4        C4Slice `json:"c4_slice"`
+	Decisions []Item  `json:"decisions"`
+	Spec      *Item   `json:"spec,omitempty"`
+	// Contracts are the ratified cross-repo contracts naming THIS repo as a
+	// party (ADR-0033), local or from a peer, each labelled with its origin. An
+	// obligation ON this code outranks advice ABOUT it, so they fill right after
+	// the single spec slot — which they never displace.
+	Contracts     []Item   `json:"contracts,omitempty"`
 	Lessons       []Item   `json:"lessons"`
 	References    []Item   `json:"references,omitempty"` // distilled external sources
 	Glossary      []string `json:"glossary"`
@@ -159,7 +164,7 @@ func Context(opt Options) (Bundle, error) {
 	// In-scope objects: scope == component or "global". Nearer scope (component)
 	// is preferred when both a global and a component-scoped object would fill the
 	// same slot (handled by stable sort: component-scoped first).
-	var decisions, lessons, references []Item
+	var decisions, lessons, references, contracts []Item
 	var spec *Item
 	var glossary []string
 	pulled := map[knowledge.Key]bool{}
@@ -221,6 +226,20 @@ func Context(opt Options) (Bundle, error) {
 				it := toItem(o, "")
 				it.PathBound = bound
 				references = append(references, it)
+				pulled[knowledge.KeyOf(*o)] = true
+			}
+		case model.KindContract:
+			// Only a RATIFIED contract that names this repo by its configured
+			// `org.repo` (ADR-0033). Deliberately not keyword-gated the way a
+			// global decision is: this is not repo-wide advice that could flood
+			// a bundle, it is the set of things this repo owes someone — bounded
+			// by "contracts that named us", and an agent editing any file here
+			// wants to know before it trips one. With no configured identity the
+			// section is empty: nugit never guesses which party it is.
+			if knowledge.NamesParty(o, cfg.Org.Repo) && knowledge.Ratified(o) {
+				it := toItem(o, "")
+				it.PathBound = bound
+				contracts = append(contracts, it)
 				pulled[knowledge.KeyOf(*o)] = true
 			}
 		case model.KindGlossary:
@@ -302,10 +321,12 @@ func Context(opt Options) (Bundle, error) {
 	sortItems(decisions)
 	sortItems(lessons)
 	sortItems(references)
+	sortItems(contracts)
 	sort.Strings(glossary)
 	glossary = dedup(glossary)
 
 	b.Decisions, b.Spec, b.Lessons, b.References, b.Glossary = decisions, spec, lessons, references, glossary
+	b.Contracts = contracts
 	b.WorkingMemory = workingMemory(opt.RepoDir, comp, kw)
 	b.PathHistory = pathHistory(opt.RepoDir, path)
 	truncate(&b, budget)
@@ -348,36 +369,11 @@ func peerSources(repoDir string, cfg config.Config) []knowledge.PeerSource {
 	return out
 }
 
-// peerEligible is the admission rule for FOREIGN knowledge (ADR-0032). A peer
-// object is a bundle candidate only when all three hold:
-//
-//   - it is a decision, lesson, or reference — the kinds whose value is the
-//     recorded "why". The single spec slot and the glossary stay local: a
-//     peer's spec is not the active spec for a path in THIS repo, and its
-//     glossary defines its own terms;
-//   - it is GLOBALLY scoped. A peer's component-scoped record names a component
-//     id that means nothing here — `scope: transport` in the sibling and
-//     `transport` in this model are two unrelated strings that happen to match,
-//     and scope is compared by string equality. Only what the peer declared
-//     repo-wide is safely repo-agnostic;
-//   - it is RATIFIED (effective status accepted/active). Someone else's
-//     unreviewed candidate is not context; the candidate lane is a local
-//     review queue (ADR-0016), and nobody here can ratify a foreign draft.
-func peerEligible(o *model.KnowledgeObject) bool {
-	switch o.Type {
-	case model.KindDecision, model.KindLesson, model.KindReference:
-	default:
-		return false
-	}
-	if o.Scope != "" && o.Scope != "global" {
-		return false
-	}
-	switch effectiveStatus(o) {
-	case model.StatusAccepted, model.StatusActive:
-		return true
-	}
-	return false
-}
+// peerEligible is the admission rule for FOREIGN knowledge — global + ratified
+// + decision/lesson/reference/contract. The rule lives in `knowledge` so the
+// bundle and the PR-time obligation check can never drift apart about what a
+// peer is allowed to say here (ADR-0032, extended for contracts by ADR-0033).
+func peerEligible(o *model.KnowledgeObject) bool { return knowledge.PeerEligible(o) }
 
 // itemKey is an item's (origin, id) identity, matching knowledge.KeyOf for the
 // object it was built from.
@@ -398,13 +394,19 @@ func splitOrigin(items []Item) (local, peer []Item) {
 	return local, peer
 }
 
-// truncate enforces the token budget by priority: c4 > spec > local decisions >
-// local lessons > local references > PEER decisions > peer lessons > peer
-// references > glossary > working memory > path history. Peer knowledge sits at
-// the bottom of the typed ladder — dropped before any local item, including
-// local items of a lower kind — because it is context from another repo and
-// cannot be more relevant here than this repo's own record. Every drop is
-// recorded; never a silent cut.
+// truncate enforces the token budget by priority: c4 > spec > CONTRACTS >
+// local decisions > local lessons > local references > PEER decisions > peer
+// lessons > peer references > glossary > working memory > path history. Peer
+// knowledge sits at the bottom of the typed ladder — dropped before any local
+// item, including local items of a lower kind — because it is context from
+// another repo and cannot be more relevant here than this repo's own record.
+// Every drop is recorded; never a silent cut.
+//
+// Contracts are the one exception to origin-outranks-kind, and deliberately so
+// (ADR-0033): a contract naming this repo is an OBLIGATION on this code, not
+// advice about it, so a peer-declared contract still outranks a local decision.
+// The set is bounded by "contracts that named us", it never displaces the spec,
+// and local still sorts before peer within the section.
 func truncate(b *Bundle, budget int) {
 	used := tokensOf(b.C4.Component) + 20
 	if b.Spec != nil {
@@ -433,6 +435,7 @@ func truncate(b *Bundle, budget int) {
 	// is left, in the same kind priority. Concatenating kept-local ++ kept-peer
 	// restores each section's sorted order exactly (sortItems ranks local
 	// first), so this changes what SURVIVES the budget, never the order.
+	b.Contracts = add(b.Contracts, "contract")
 	localD, peerD := splitOrigin(b.Decisions)
 	localL, peerL := splitOrigin(b.Lessons)
 	localR, peerR := splitOrigin(b.References)
