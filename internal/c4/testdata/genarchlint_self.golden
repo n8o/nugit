@@ -61,6 +61,8 @@ components:
     in: "internal/nudge/**"
   "obsidian":
     in: "internal/obsidian/**"
+  "promote":
+    in: "internal/promote/**"
   "pyimports":
     in: "internal/pyimports/**"
   "ratify":
@@ -77,6 +79,8 @@ components:
     in: "internal/significance/**"
   "skillopt":
     in: "internal/skillopt/**"
+  "skills":
+    in: "internal/skills/**"
   "trailers":
     in: "internal/trailers/**"
   "tsdeps":
@@ -114,6 +118,7 @@ deps:
       - "doctor"
       - "engine"
       - "icepanel"
+      - "knowledge"
       - "localmem"
       - "mcp"
       - "model_"
@@ -121,12 +126,14 @@ deps:
       - "notion"
       - "nudge"
       - "obsidian"
+      - "promote"
       - "ratify"
       - "reinforce"
       - "render"
       - "retrieval"
       - "scaffold"
       - "skillopt"
+      - "skills"
       - "trailers"
       - "usage"
   "cmake":
@@ -247,6 +254,13 @@ deps:
     mayDependOn:
       - "knowledge"
       - "model_"
+  "promote":
+    mayDependOn:
+      - "config"
+      - "distill"
+      - "gitutil"
+      - "knowledge"
+      - "model_"
   "pyimports":
     mayDependOn: []
   "ratify":
@@ -283,6 +297,8 @@ deps:
     mayDependOn:
       - "knowledge"
       - "model_"
+  "skills":
+    mayDependOn: []
   "trailers":
     mayDependOn:
       - "model_"

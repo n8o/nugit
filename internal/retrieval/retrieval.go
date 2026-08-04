@@ -419,7 +419,7 @@ func hasKeyword(e localmem.Entry, kw map[string]bool) bool {
 func resolveLandscape(repoDir string, cfg config.Config) c4.LandscapeResolution {
 	dirs := []c4.LandscapeDir{{Dir: repoDir}}
 	for _, p := range cfg.Peers {
-		dirs = append(dirs, c4.LandscapeDir{Name: p.Name, Dir: p.Dir(repoDir)})
+		dirs = append(dirs, c4.LandscapeDir{Name: p.Name, Dir: p.Dir(repoDir), Hub: p.Hub})
 	}
 	return c4.ResolveLandscape(c4.LandscapeSourcesFromDirs(dirs))
 }

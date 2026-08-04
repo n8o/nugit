@@ -362,6 +362,10 @@ type LandscapeSource struct {
 	Name string
 	Path string
 	Src  string
+	// Hub marks this source as the organization's designated canonical store
+	// (config `org.hub`, ADR-0035). A hub's landscape wins outright over any
+	// other peer's — see ResolveLandscape.
+	Hub bool
 }
 
 // LandscapeResolution is the single authoritative landscape for one repo's
@@ -377,25 +381,33 @@ type LandscapeResolution struct {
 	// none and more than one peer claimed it. When set, Found is FALSE and
 	// nothing is used — see ResolveLandscape.
 	Ambiguous []string
+	// FromHub reports that the winning landscape came from the designated org
+	// hub (ADR-0035) rather than from an ordinary peer.
+	FromHub bool
 }
 
-// ResolveLandscape picks the one authoritative landscape (ADR-0034 point 3):
+// ResolveLandscape picks the one authoritative landscape (ADR-0034 point 3, as
+// narrowed by ADR-0035 point 1):
 //
 //  1. a LOCAL landscape (Name == "") always wins;
-//  2. otherwise, exactly one peer declaring one wins;
-//  3. otherwise — two or more peers each declaring one — NOTHING is used and
-//     every claimant is named in Ambiguous.
+//  2. otherwise, the designated HUB's landscape wins outright — over any number
+//     of other peers, with no ambiguity;
+//  3. otherwise, exactly one peer declaring one wins;
+//  4. otherwise — two or more non-hub peers each declaring one — NOTHING is used
+//     and every claimant is named in Ambiguous.
 //
-// Rule 3 is the load-bearing one. Picking the first peer in configured order
-// would make the org's shared model depend on the READER's private, reorderable
-// peer list — the same conflation ADR-0033 point 3 refused when it kept a peer
-// name out of the party-id space. Two peers declaring a landscape means the org
-// has two writers for one fact (ADR-0011), which is a finding, not a tie to
-// break. Failing closed to "no landscape" costs a missing warning, never a
-// wrong one.
+// Rule 4 is what rule 2 exists to retire. ADR-0034 had to fail closed on two
+// claimants because no peer was privileged: picking the first in configured
+// order would have made the org's shared model depend on the READER's private,
+// reorderable peer list. A hub IS privileged, by an explicit act of designation
+// in this repo's own config, so "which of these is canonical" stops being a tie
+// for nugit to break and becomes a fact the reader stated. Without a hub the old
+// rule stands unchanged, and a hub that declares no landscape (or is not checked
+// out) resolves exactly as if it were an ordinary peer.
 //
 // A source whose Src parses to zero systems does not count as a declaration:
-// an empty or unparseable file is not a claim.
+// an empty or unparseable file is not a claim. That applies to the hub too — a
+// hub with no landscape.dsl does not suppress a single other peer's.
 func ResolveLandscape(srcs []LandscapeSource) LandscapeResolution {
 	var res LandscapeResolution
 	type cand struct {
@@ -413,6 +425,13 @@ func ResolveLandscape(srcs []LandscapeSource) LandscapeResolution {
 			return LandscapeResolution{Landscape: l, Found: true, Path: s.Path}
 		}
 		peers = append(peers, cand{s, l})
+	}
+	for _, c := range peers {
+		if c.src.Hub {
+			l := c.l
+			l.Origin, l.Path = c.src.Name, c.src.Path
+			return LandscapeResolution{Landscape: l, Found: true, From: l.Origin, Path: l.Path, FromHub: true}
+		}
 	}
 	switch len(peers) {
 	case 0:
@@ -446,6 +465,8 @@ func ReadLandscape(dir string) (path, src string, ok bool) {
 type LandscapeDir struct {
 	Name string
 	Dir  string
+	// Hub marks the org's designated canonical store (ADR-0035).
+	Hub bool
 }
 
 // LandscapeSourcesFromDirs builds ResolveLandscape's input by reading each
@@ -462,7 +483,7 @@ func LandscapeSourcesFromDirs(dirs []LandscapeDir) []LandscapeSource {
 		if !ok {
 			continue
 		}
-		out = append(out, LandscapeSource{Name: d.Name, Path: path, Src: src})
+		out = append(out, LandscapeSource{Name: d.Name, Path: path, Src: src, Hub: d.Hub})
 	}
 	return out
 }

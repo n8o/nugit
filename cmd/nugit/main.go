@@ -24,6 +24,7 @@ import (
 	"github.com/n8o/nugit/internal/doctor"
 	"github.com/n8o/nugit/internal/engine"
 	"github.com/n8o/nugit/internal/icepanel"
+	"github.com/n8o/nugit/internal/knowledge"
 	"github.com/n8o/nugit/internal/localmem"
 	"github.com/n8o/nugit/internal/mcp"
 	"github.com/n8o/nugit/internal/model"
@@ -31,12 +32,14 @@ import (
 	"github.com/n8o/nugit/internal/notion"
 	"github.com/n8o/nugit/internal/nudge"
 	"github.com/n8o/nugit/internal/obsidian"
+	"github.com/n8o/nugit/internal/promote"
 	"github.com/n8o/nugit/internal/ratify"
 	"github.com/n8o/nugit/internal/reinforce"
 	"github.com/n8o/nugit/internal/render"
 	"github.com/n8o/nugit/internal/retrieval"
 	"github.com/n8o/nugit/internal/scaffold"
 	"github.com/n8o/nugit/internal/skillopt"
+	"github.com/n8o/nugit/internal/skills"
 	"github.com/n8o/nugit/internal/trailers"
 	usagelog "github.com/n8o/nugit/internal/usage"
 )
@@ -46,6 +49,7 @@ const usage = `nugit — git-native PR view (thin keystone)
 usage:
   nugit init [flags]          scaffold .nugit/ and bootstrap a C4 model
   nugit agent [flags]         print/install the MCP wiring config for a coding agent
+  nugit skill [flags]         print/install the agent skill files that teach an agent to use nugit
   nugit context [flags]       scoped, typed knowledge bundle for a path (for agents)
   nugit mcp [flags]           run the MCP stdio server (exposes context() to agents)
   nugit stats [flags]         aggregate the local context() usage log
@@ -53,6 +57,7 @@ usage:
   nugit distill [flags]       promote commit-trailer decisions/lessons to durable knowledge (as proposed)
   nugit ratify [flags] <id>…  promote proposed knowledge objects to the ratified corpus (ADR-0016)
   nugit reinforce [flags] <id> append-only reinforcement of a recurring lesson/decision (ADR-0019)
+  nugit promote [flags] <id>  copy a ratified local record into the org hub's checkout (ADR-0035)
   nugit hook commit-msg <f>   git hook entrypoint: validate the commit-trailer block
                               (capture.commit_msg: nudge also prompts on significant commits)
   nugit c4 render [flags]      render the C4 model as Mermaid
@@ -77,6 +82,12 @@ agent flags:
   -force         with -install: overwrite an existing .mcp.json
   -bin path      nugit binary to embed (default "nugit", resolved from PATH)
 
+skill flags:
+  -C dir         repo directory (default ".")
+  -install       write .claude/skills/**/SKILL.md (default: print them)
+  -force         with -install: overwrite an existing, differing SKILL.md
+  -name n        install/print only this skill (default: all)
+
 context flags:
   -C dir         repo directory (default ".")
   -path p        file or dir the agent is operating on (required)
@@ -98,7 +109,14 @@ export flags:
   -format f      skillopt (default) — JSONL eval cases for a skill optimizer (ADR-0027)
   -o path        write the JSONL here instead of stdout
   -min-tier t    high-2 (default: emit thin triggers too) | high-3 (rich triggers only)
+  -peers         span the corpus across peer/hub lessons too (ADR-0035; off = byte-identical to before)
   -report path   write the full JSON report here (a summary always goes to stderr)
+
+promote flags:
+  -C dir         repo directory (default ".")
+  -to peer       destination peer name (default: the configured org.hub)
+  -force         overwrite an occupied path / override the near-duplicate refusal
+  -dry-run       print what would be written, and where, without writing it
 
 pr-render flags:
   -C dir         repo directory (default ".")
@@ -118,6 +136,8 @@ func main() {
 		os.Exit(cmdInit(os.Args[2:]))
 	case "agent":
 		os.Exit(cmdAgent(os.Args[2:]))
+	case "skill":
+		os.Exit(cmdSkill(os.Args[2:]))
 	case "context":
 		os.Exit(cmdContext(os.Args[2:]))
 	case "mcp":
@@ -136,6 +156,8 @@ func main() {
 		os.Exit(cmdRatify(os.Args[2:]))
 	case "reinforce":
 		os.Exit(cmdReinforce(os.Args[2:]))
+	case "promote":
+		os.Exit(cmdPromote(os.Args[2:]))
 	case "landscape":
 		os.Exit(cmdLandscape(os.Args[2:]))
 	case "c4":
@@ -314,6 +336,65 @@ func cmdAgent(args []string) int {
 	return 0
 }
 
+// cmdSkill prints (or installs) the agent skill files that teach an agent to
+// USE nugit — the half of adoption `nugit agent` does not cover. agent wires the
+// MCP server so the `context` tool EXISTS; the skills are what tell an agent
+// when to call it, what a trailer block is for, and that a declared architecture
+// edge is not a suggestion. They ship in the binary (ADR-0035 point 4), so an
+// adopting repo stops hand-copying them out of nugit's own checkout.
+func cmdSkill(args []string) int {
+	fs := flag.NewFlagSet("skill", flag.ExitOnError)
+	dir := fs.String("C", ".", "repo directory")
+	install := fs.Bool("install", false, "write the skill files into .claude/skills/")
+	force := fs.Bool("force", false, "with -install: overwrite an existing, differing SKILL.md")
+	name := fs.String("name", "", "install/print only this skill (default: all)")
+	_ = fs.Parse(args)
+
+	if !*install {
+		list := skills.All()
+		if *name != "" {
+			s, ok := skills.Get(*name)
+			if !ok {
+				fmt.Fprintf(os.Stderr, "nugit skill: unknown skill %q (have: %s)\n", *name, strings.Join(skills.Names(), ", "))
+				return 2
+			}
+			list = []skills.Skill{s}
+		}
+		for i, s := range list {
+			if i > 0 {
+				fmt.Println()
+			}
+			fmt.Printf("----- %s -----\n", s.Path)
+			fmt.Print(s.Content)
+		}
+		fmt.Fprintf(os.Stderr, "\n→ write these with `nugit skill -install` (they live in the repo, under .claude/skills/)\n")
+		return 0
+	}
+
+	res, err := skills.Install(*dir, *force, *name)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "nugit skill: %v\n", err)
+		return 1
+	}
+	skipped := 0
+	for _, o := range res {
+		switch {
+		case o.Created:
+			fmt.Printf("  created  %s\n", o.Path)
+		case o.Unchanged:
+			fmt.Printf("  current  %s (identical)\n", o.Path)
+		default:
+			skipped++
+			fmt.Printf("  skipped  %s (exists and differs; -force to overwrite)\n", o.Path)
+		}
+	}
+	if skipped > 0 {
+		fmt.Println("\nSkipped files were left untouched — a SKILL.md may carry local edits, and nugit never merges prose it did not author.")
+	}
+	fmt.Println("\nCommit them with your next PR. Wire the MCP server too, if you have not: `nugit agent -client claude-code -install`.")
+	return 0
+}
+
 // cmdHook implements git hook entrypoints. `nugit hook commit-msg <file>`
 // validates the trailer block per config capture.commit_msg
 // (warn|nudge|block|off). In nudge mode it additionally prompts with a
@@ -412,7 +493,7 @@ func cmdLandscape(args []string) int {
 	cfg, _ := config.Load(*dir)
 	dirs := []c4.LandscapeDir{{Dir: *dir}}
 	for _, p := range cfg.Peers {
-		dirs = append(dirs, c4.LandscapeDir{Name: p.Name, Dir: p.Dir(*dir)})
+		dirs = append(dirs, c4.LandscapeDir{Name: p.Name, Dir: p.Dir(*dir), Hub: p.Hub})
 	}
 	res := c4.ResolveLandscape(c4.LandscapeSourcesFromDirs(dirs))
 	if len(res.Ambiguous) > 0 {
@@ -596,13 +677,30 @@ func cmdExport(args []string) int {
 	format := fs.String("format", "skillopt", "export format: skillopt")
 	out := fs.String("o", "", "write the JSONL to this file instead of stdout")
 	minTier := fs.String("min-tier", "high-2", "lowest tier to emit: high-2 | high-3")
+	peers := fs.Bool("peers", false, "span the corpus across configured peer/hub lessons (ADR-0035)")
 	report := fs.String("report", "", "write the full JSON report to this file")
 	_ = fs.Parse(args)
 	if *format != "skillopt" {
 		fmt.Fprintf(os.Stderr, "nugit export: unknown format %q (want: skillopt)\n", *format)
 		return 2
 	}
-	cases, rep, err := skillopt.Export(skillopt.Options{RepoDir: *dir, MinTier: *minTier})
+	opt := skillopt.Options{RepoDir: *dir, MinTier: *minTier}
+	if *peers {
+		// Without -peers nothing reads a peer directory at all, which is what
+		// keeps the default export byte-identical to the pre-federation one.
+		cfg, cerr := config.Load(*dir)
+		if cerr != nil {
+			fmt.Fprintf(os.Stderr, "nugit export: %v\n", cerr)
+			return 2
+		}
+		for _, p := range cfg.Peers {
+			opt.Peers = append(opt.Peers, knowledge.PeerSource{Name: p.Name, Dir: p.Dir(*dir), Hub: p.Hub})
+		}
+		if len(opt.Peers) == 0 {
+			fmt.Fprintln(os.Stderr, "nugit export: -peers given but no `peers:` are configured — exporting the local store only")
+		}
+	}
+	cases, rep, err := skillopt.Export(opt)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "nugit export: %v\n", err)
 		return 2
@@ -761,6 +859,60 @@ func cmdReinforce(args []string) int {
 		fmt.Println("\nCommit the new file with the PR, then promote it with `nugit ratify " + res.ID + "` — the target object is untouched (ADR-0019).")
 	}
 	return 0
+}
+
+// cmdPromote copies a ratified local record into the org hub's checkout so it
+// can become org-wide knowledge (ADR-0035). It writes exactly one file into the
+// hub's working tree and stops: no commit, no push, no network, no git in the
+// hub at all. The hub owner reviews the dirty file and opens the PR there.
+func cmdPromote(args []string) int {
+	fs := flag.NewFlagSet("promote", flag.ExitOnError)
+	dir := fs.String("C", ".", "repo directory")
+	to := fs.String("to", "", "destination peer name (default: the configured org.hub)")
+	force := fs.Bool("force", false, "overwrite an occupied path / override the near-duplicate refusal")
+	dry := fs.Bool("dry-run", false, "print what would be written, and where, without writing it")
+	_ = fs.Parse(args)
+	if fs.NArg() != 1 {
+		fmt.Fprintln(os.Stderr, "nugit promote: usage: nugit promote [-C dir] [-to peer] [-force] [-dry-run] <id>")
+		return 2
+	}
+	res, err := promote.Promote(promote.Options{
+		RepoDir: *dir, ID: fs.Arg(0), To: *to, Force: *force, DryRun: *dry,
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "nugit promote: %v\n", err)
+		return 1
+	}
+	if res.DryRun {
+		fmt.Printf("Would write %s into hub %q (%s)\n\n", res.DestPath, res.Hub, res.HubDir)
+		fmt.Print(res.Content)
+		fmt.Printf("\n(dry run — nothing was written)\n")
+		return 0
+	}
+	verb := "wrote"
+	if res.Overwrote {
+		verb = "overwrote"
+	}
+	fmt.Printf("  %s %s  in hub %q (%s)\n", verb, res.DestPath, res.Hub, res.HubDir)
+	fmt.Printf("  %-12s %s -> proposed\n", "status", res.Kind)
+	fmt.Printf("  %-12s origin_repo: %s, commit: %s\n", "provenance", res.OriginRepo, short12(res.Commit))
+	for _, d := range res.DanglingEdges {
+		fmt.Printf("  note        cites %s, which the hub does not hold — the id is never rewritten (ADR-0001); provenance says where to find it\n", d)
+	}
+	fmt.Printf("\nNothing was committed, pushed, or fetched — nugit did not run git in the hub.\n")
+	fmt.Printf("In %s: review the new file, commit it, and open the PR. The hub owner ratifies with `nugit ratify %s`.\n", res.HubDir, res.ID)
+	return 0
+}
+
+// short12 abbreviates a sha for display without hiding that one is missing.
+func short12(sha string) string {
+	if sha == "" {
+		return "(none)"
+	}
+	if len(sha) > 12 {
+		return sha[:12]
+	}
+	return sha
 }
 
 // cmdRemember writes (or lists) ephemeral working-memory notes in .nugit-local/.

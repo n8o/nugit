@@ -95,7 +95,13 @@ go build -o nugit ./cmd/nugit
 ./nugit c4 render | ./nugit c4 gen-rules                        # Mermaid / go-arch-lint config
 ./nugit c4 preview                                             # live C4 diagrams via local Structurizr renderer (Docker)
 ./nugit export -format skillopt > cases.jsonl                   # lessons → eval cases (leakage-gated; report on stderr)
+./nugit export -format skillopt -peers > cases.jsonl             # …spanning peer/hub stores too (origin-labelled)
 ./nugit explain c4'<->'code                                     # finding rationale
+
+# organization federation (ADR-0032…0035)
+./nugit promote LESSON-foo                                      # copy a ratified record into the org hub's checkout
+./nugit promote LESSON-foo -dry-run                             # …show what would land, and where
+./nugit skill -install                                          # write the agent skill files this binary ships
 ```
 
 Exit code is non-zero when a finding reaches `-fail-on` severity (default `fail`),
@@ -113,6 +119,7 @@ nugit agent -client cursor                 # snippet for ~/.cursor/mcp.json (abs
 nugit agent -client codex                  # TOML snippet for ~/.codex/config.toml
 nugit agent -client opencode               # snippet for opencode.json in the project
 nugit agent -client generic                # plain mcpServers JSON for any MCP-aware client
+nugit skill -install                       # writes .claude/skills/**/SKILL.md (never merges; -force overwrites)
 ```
 
 `-install` supports claude-code only, because its `.mcp.json` is project-scoped;

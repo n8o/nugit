@@ -117,21 +117,29 @@ func (ix index) dupLesson(normText string, kws []string) bool {
 	if ix.lessonText[normText] {
 		return true
 	}
-	if len(kws) < 2 {
-		return false
-	}
 	for _, set := range ix.lessonKw {
-		shared := 0
-		for _, k := range kws {
-			if set[norm(k)] {
-				shared++
-			}
-		}
-		if shared >= 2 && shared*2 >= len(kws) {
+		if similarKeywordSet(kws, set) {
 			return true
 		}
 	}
 	return false
+}
+
+// similarKeywordSet is the ADR-0018 overlap rule against an already-normalized
+// set. SimilarKeywords (overlap.go) is the exported slice-taking form, and both
+// go through this one predicate so a caller outside this package can never end
+// up with a different notion of "the same record" (ADR-0035).
+func similarKeywordSet(candidate []string, set map[string]bool) bool {
+	if len(candidate) < 2 {
+		return false
+	}
+	shared := 0
+	for _, k := range candidate {
+		if set[norm(k)] {
+			shared++
+		}
+	}
+	return shared >= 2 && shared*2 >= len(candidate)
 }
 
 // keyPrefixRE matches a leading knowledge-object key ("ADR-0026", "SPEC-014")

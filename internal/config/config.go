@@ -46,7 +46,8 @@ type Config struct {
 	// Peers are sibling repos in the same organization whose knowledge is
 	// readable from here (ADR-0032, phase 1: read-only, local paths only).
 	Peers PeerList `yaml:"peers"`
-	// Org declares this repo's own identity within the organization (ADR-0033).
+	// Org declares this repo's own identity within the organization (ADR-0033)
+	// and which peer is the org's canonical store (ADR-0035).
 	Org struct {
 		// Repo is the stable org-wide id other repos name this one by in a
 		// contract's `parties:`. Deliberately NOT a peer name: a peer name is
@@ -55,6 +56,15 @@ type Config struct {
 		// Empty (or malformed) means contract checking is INERT — nugit never
 		// guesses which party this repo is from the remote, directory, or module.
 		Repo string `yaml:"repo"`
+		// Hub names one already-configured PEER as the organization's canonical
+		// store (ADR-0035). It is a role, not a transport: the hub is read
+		// through the ordinary ADR-0032 peer path and nothing else. This one IS
+		// a peer name — unlike `repo`, it is the reader's own private choice of
+		// which sibling it trusts as canonical, so the reader's namespace is
+		// exactly the right space for it. A hub naming no configured peer, or
+		// one that is not checked out, degrades like any absent peer: doctor
+		// says so and nothing fails.
+		Hub string `yaml:"hub"`
 	} `yaml:"org"`
 	// Contracts configures cross-repo obligation checking (ADR-0033).
 	Contracts struct {
@@ -70,6 +80,11 @@ type Peer struct {
 	// Path is the peer's local checkout, relative to the nugit root (or absolute).
 	// Phase 1 never fetches: a path that is not checked out contributes nothing.
 	Path string `yaml:"path"`
+	// Hub is DERIVED at load time from `org.hub` — never authored on the entry
+	// itself (hence `yaml:"-"`). A peer must not be able to declare itself the
+	// org's canonical store; the reader designates one, in one place, and every
+	// existing `for _, p := range cfg.Peers` loop carries the role for free.
+	Hub bool `yaml:"-"`
 }
 
 // Dir resolves the peer's checkout against the nugit root.
@@ -221,6 +236,17 @@ func LoadBytes(b []byte) (Config, error) {
 	if !orgRepoRe.MatchString(c.Org.Repo) {
 		c.Org.Repo = ""
 	}
+	// The hub designation (ADR-0035). A name that matches no configured peer is
+	// KEPT, not blanked: "org.hub names a peer that isn't configured" is the
+	// exact misconfiguration doctor exists to report, and blanking it here would
+	// make it indistinguishable from "no hub". Resolution is HubPeer's job.
+	c.Org.Hub = strings.ToLower(strings.TrimSpace(c.Org.Hub))
+	if !peerNameRe.MatchString(c.Org.Hub) {
+		c.Org.Hub = ""
+	}
+	for i := range c.Peers {
+		c.Peers[i].Hub = c.Peers[i].Name == c.Org.Hub && c.Org.Hub != ""
+	}
 	c.Contracts.Mode = strings.ToLower(strings.TrimSpace(c.Contracts.Mode))
 	switch c.Contracts.Mode {
 	case "fail", "off":
@@ -270,3 +296,24 @@ func (c Config) ContractsOn() bool { return c.Contracts.Mode != "off" && c.Org.R
 // ContractsFail reports whether an unmet obligation is a `fail` finding rather
 // than the default `warn` (the ADR-0016 candidate-lane ramp).
 func (c Config) ContractsFail() bool { return c.Contracts.Mode == "fail" }
+
+// HubPeer resolves `org.hub` to the peer entry it names (ADR-0035). ok is false
+// when no hub is designated OR when the designated name matches no configured
+// peer — the caller distinguishes those two by looking at Org.Hub, which is how
+// doctor can say "org.hub names X, which is not in peers:" instead of silently
+// reporting no hub at all.
+//
+// A hub is a peer with a ROLE. There is deliberately no `hub:` transport, path,
+// or URL: everything about reading it is ADR-0032's read-only local-checkout
+// path, so a hub that is not checked out degrades exactly like any absent peer.
+func (c Config) HubPeer() (Peer, bool) {
+	if c.Org.Hub == "" {
+		return Peer{}, false
+	}
+	for _, p := range c.Peers {
+		if p.Name == c.Org.Hub {
+			return p, true
+		}
+	}
+	return Peer{}, false
+}

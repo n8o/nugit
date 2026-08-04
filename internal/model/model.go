@@ -124,6 +124,19 @@ type Provenance struct {
 	Commit   string `yaml:"commit"`
 	Agent    string `yaml:"agent,omitempty"`
 	Citation string `yaml:"citation,omitempty"`
+	// OriginRepo and OriginPath are stamped by `nugit promote` (ADR-0035) when a
+	// record is copied out of the repo that authored it and into the org hub.
+	// They are the hub's answer to "where did this come from" — a typed pair
+	// rather than a sentence in Citation, because a hub owner auditing a
+	// promotion needs to resolve the source mechanically. OriginRepo is the
+	// source repo's stable org-wide id (its `org.repo`, the ADR-0033 party-id
+	// space), OriginPath its store-relative path THERE. Commit carries the
+	// source commit, so the pair plus the sha addresses the exact bytes.
+	//
+	// Absent on every record that was authored where it lives, which is why both
+	// are omitempty: a promoted record is visibly different from a native one.
+	OriginRepo string `yaml:"origin_repo,omitempty"`
+	OriginPath string `yaml:"origin_path,omitempty"`
 }
 
 // FrontMatter is the common YAML header every durable knowledge object begins

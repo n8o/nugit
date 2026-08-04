@@ -27,6 +27,7 @@ graph LR
   notion["Notion projection"]
   nudge["Capture nudge"]
   obsidian["Obsidian vault"]
+  promote["Promoter"]
   pyimports["Python analyzer"]
   ratify["Ratifier"]
   reinforce["Reinforcer"]
@@ -35,6 +36,7 @@ graph LR
   scaffold["Scaffold"]
   significance["Significance classifier"]
   skillopt["Skill-optimizer export"]
+  skills["Skill distribution"]
   trailers["Trailer parser"]
   tsdeps["TS analyzer"]
   usage["Usage log"]
@@ -57,6 +59,7 @@ graph LR
   cli --> doctor
   cli --> engine
   cli --> icepanel
+  cli --> knowledge
   cli --> localmem
   cli --> mcp
   cli --> model_
@@ -64,12 +67,14 @@ graph LR
   cli --> notion
   cli --> nudge
   cli --> obsidian
+  cli --> promote
   cli --> ratify
   cli --> reinforce
   cli --> render
   cli --> retrieval
   cli --> scaffold
   cli --> skillopt
+  cli --> skills
   cli --> trailers
   cli --> usage
   consistency --> c4
@@ -144,6 +149,11 @@ graph LR
   nudge --> trailers
   obsidian --> knowledge
   obsidian --> model_
+  promote --> config
+  promote --> distill
+  promote --> gitutil
+  promote --> knowledge
+  promote --> model_
   ratify --> knowledge
   ratify --> model_
   reinforce --> knowledge

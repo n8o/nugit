@@ -199,6 +199,16 @@ workspace "nugit" "Git-native typed knowledge & unified PR view — self-model (
                     "paths" "internal/agentcfg/**"
                 }
             }
+            skills = component "Skill distribution" "Embedded agent skill files installed into a consuming repo (nugit skill, ADR-0035)" "Go" {
+                properties {
+                    "paths" "internal/skills/**"
+                }
+            }
+            promote = component "Promoter" "Copies a ratified local record into the org hub's checkout (nugit promote, ADR-0035)" "Go" {
+                properties {
+                    "paths" "internal/promote/**"
+                }
+            }
             cli = component "CLI" "nugit command entrypoint" "Go" {
                 properties {
                     "paths" "cmd/nugit/**"
@@ -346,6 +356,16 @@ workspace "nugit" "Git-native typed knowledge & unified PR view — self-model (
             doctor -> model_ "uses types"
             doctor -> mapping "resolves unit dirs for the coverage scan"
             doctor -> modelfacts "full-repo facts-vs-DSL diff (ADR-0021)"
+
+            // --- org federation phase 4: the hub, promotion, distribution (ADR-0035) ---
+            promote -> model_ "uses types"
+            promote -> config "resolves org.hub + org.repo"
+            promote -> knowledge "loads the local store and the hub's"
+            promote -> distill "reuses the ADR-0018 keyword-overlap dedup"
+            promote -> gitutil "stamps the ORIGIN repo's HEAD (never the hub's)"
+            cli -> promote "promote command"
+            cli -> skills "skill command"
+            cli -> knowledge "builds the peer set for a federated export"
 
             cli -> obsidian "obsidian command"
             cli -> deploy "deploy command"
