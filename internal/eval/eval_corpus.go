@@ -399,6 +399,49 @@ var corpus = []Case{
 		WantTier:  model.TierTrivial,
 		WantClean: true,
 	},
+	{
+		// ADR-0033 twin (negative): a ratified contract names this repo, and
+		// the guard it requires is present at the reviewed ref — silent.
+		Name:   "contract-obligation-satisfied",
+		Config: orgConfig,
+		Base: mergeFiles(baseFiles, map[string]string{
+			".nugit/contracts/transport.md": contractObj("CONTRACT-0001", "demo-service", "b/guard.go", "useStandardProtocols"),
+			"b/guard.go":                    "package b\n\n// useStandardProtocols keeps the mirror in step.\nfunc Guard() {}\n",
+		}),
+		Head:      map[string]string{"a/a.go": "package a\n\nimport _ \"example.com/m/b\"\n\n// edit.\nfunc A() {}\n"},
+		WantTier:  model.TierTrivial,
+		WantClean: true,
+	},
+	{
+		// Positive twin: the guard the contract requires is gone from the
+		// reviewed ref — the two-sided invariant is half-implemented, which is
+		// exactly the state prose could never detect. Warn, so still "clean" in
+		// the fail-severity sense.
+		Name:   "contract-obligation-unmet",
+		Config: orgConfig,
+		Base: mergeFiles(baseFiles, map[string]string{
+			".nugit/contracts/transport.md": contractObj("CONTRACT-0001", "demo-service", "b/guard.go", "useStandardProtocols"),
+			"b/guard.go":                    "package b\n\n// useStandardProtocols keeps the mirror in step.\nfunc Guard() {}\n",
+		}),
+		Head:       map[string]string{"b/guard.go": "package b\n\nfunc Guard() {}\n"},
+		WantTier:   model.TierTrivial,
+		WantChecks: []string{"contract-obligation"},
+		WantClean:  true,
+	},
+}
+
+// orgConfig declares this repo's org-wide identity (ADR-0033). Without it the
+// contract check is inert — nugit never guesses which party a repo is.
+const orgConfig = "schema_version: 1\norg:\n  repo: demo-service\n"
+
+// contractObj is a ratified single-party contract placing one obligation on
+// `party`: `file` must match `pattern` at the reviewed ref.
+func contractObj(id, party, file, pattern string) string {
+	return "---\nschema_version: 1\nid: " + id + "\ntype: contract\nscope: global\nstatus: accepted\n" +
+		"created: 2026-01-01T00:00:00Z\nprovenance:\n  commit: x\n" +
+		"parties:\n  - repo: " + party + "\n    must:\n" +
+		"      - name: mirror guard present\n        file: " + file + "\n        matches: '" + pattern + "'\n" +
+		"---\n\n# " + id + "\n"
 }
 
 // aEdit is a small distinct edit to component a (keeps the declared a->b

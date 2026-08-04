@@ -46,6 +46,17 @@ var explanations = map[string]string{
 		"Fix: capture the why (learned:/keywords: trailer + `nugit distill`, or an ADR/lesson), or — when governing knowledge\n" +
 		"exists but proved too narrow — widen it with `nugit reinforce <id> -text \"…\" -keywords …`.\n" +
 		"Knobs: recurrence.mode (warn|off), recurrence.window_days, recurrence.min_fixes in .nugit/config.yml.",
+	"contract-obligation": "A ratified `contract` object — declared here or read from a peer store (ADR-0032) — names this repo as a\n" +
+		"party and requires something of it that the reviewed ref does not satisfy (ADR-0033). This is the two-sided\n" +
+		"invariant case: one repo writes down \"the sibling must add a mirror guard\", and until now nothing in the\n" +
+		"sibling's CI could ever fail when its half was missing.\n" +
+		"Fix: satisfy the obligation in this repo, or supersede the contract in the repo that declares it.\n" +
+		"Assertions are DECLARATIVE only — a Go RE2 regexp (linear time) over one named file, optionally negated with\n" +
+		"`absent: true`. A contract can never execute a script or a command: it is text read out of another repo's\n" +
+		"checkout, so running it would hand that repo this repo's CI credentials. That boundary is permanent.\n" +
+		"A `must` whose file does not resolve at the reviewed ref is UNMET, not an error — unverifiable is not met.\n" +
+		"Knobs: org.repo (this repo's stable org-wide party id; absent ⇒ the check is inert and never guesses) and\n" +
+		"contracts.mode (warn|fail|off, default warn) in .nugit/config.yml.",
 }
 
 // topics documents cross-cutting concepts that are not check ids (kept apart

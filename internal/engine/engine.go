@@ -130,6 +130,7 @@ func BuildReport(opt Options) (model.Report, error) {
 			WindowDays: cfg.Recurrence.WindowDays,
 			MinFixes:   cfg.Recurrence.MinFixes,
 		},
+		Contracts: contractOpts(opt.RepoDir, cfg),
 	}
 
 	// Order matters: C4<->code first (independent), then significance (uses it),
@@ -183,4 +184,34 @@ func BuildReport(opt Options) (model.Report, error) {
 	// architectural + ANTHROPIC_API_KEY set. Never alters the deterministic facts.
 	rep.Narrative = narrative.Generate(rep, opt.RepoDir, cfg.Narrative.Enabled, cfg.Narrative.Model)
 	return rep, nil
+}
+
+// contractOpts assembles the cross-repo obligation check's input (ADR-0033).
+//
+// This is the ONE place peer content reaches a pr-render finding, and it is
+// gated three ways, all of which this repo controls: `contracts.mode` not off,
+// `org.repo` configured (no identity ⇒ inert, never a guess), and a ratified
+// contract naming this repo. With any gate shut, no peer store is even read —
+// so a repo that has not opted in pays nothing and behaves exactly as it did
+// before this decision.
+//
+// Peer contracts are read from the peer's CHECKOUT, because this repo has no
+// ref that addresses another repo's history; every file the obligations assert
+// about THIS repo is still read at the reviewed ref (the check owns that). An
+// absent peer contributes nothing and can never error (ADR-0032).
+func contractOpts(repoDir string, cfg config.Config) consistency.ContractOpts {
+	opt := consistency.ContractOpts{
+		OrgRepo: cfg.Org.Repo,
+		Fail:    cfg.ContractsFail(),
+		Off:     !cfg.ContractsOn(),
+	}
+	if opt.Off || opt.OrgRepo == "" || len(cfg.Peers) == 0 {
+		return opt
+	}
+	srcs := make([]knowledge.PeerSource, 0, len(cfg.Peers))
+	for _, p := range cfg.Peers {
+		srcs = append(srcs, knowledge.PeerSource{Name: p.Name, Dir: p.Dir(repoDir)})
+	}
+	opt.PeerContracts = knowledge.PeerContracts(srcs)
+	return opt
 }
