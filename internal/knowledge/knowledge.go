@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/n8o/nugit/internal/gitutil"
 	"github.com/n8o/nugit/internal/model"
 	"gopkg.in/yaml.v3"
 )
@@ -51,6 +52,41 @@ func Load(repoDir string) ([]model.KnowledgeObject, error) {
 	})
 	if err != nil {
 		return nil, err
+	}
+	ResolveEffectiveStatus(objs)
+	ResolveAmendedBy(objs)
+	return objs, nil
+}
+
+// LoadAtRef reads every knowledge object under the nugit root's .nugit/ tree at
+// ref — never from the working tree — with EffectiveStatus resolved across the
+// set, mirroring Load. A PR-time analyzer must read every artifact from the
+// reviewed ref (LESSON-read-from-reviewed-ref); this is the ref-addressed
+// counterpart of Load for the engine/pr-render path. prefix is the nugit root
+// within the git repo, slash-terminated ("" when it IS the git root); returned
+// Paths are nugit-root-relative, byte-identical to Load's.
+func LoadAtRef(repo gitutil.Repo, ref, prefix string) ([]model.KnowledgeObject, error) {
+	paths, err := repo.ListTree(ref)
+	if err != nil {
+		return nil, err
+	}
+	root := prefix + ".nugit/"
+	var objs []model.KnowledgeObject
+	for _, p := range paths {
+		if !strings.HasPrefix(p, root) || !strings.HasSuffix(p, ".md") {
+			continue
+		}
+		rel := p[len(prefix):]
+		if strings.Contains(rel, "/.cache/") {
+			continue // derived caches are not knowledge (mirrors Load's SkipDir)
+		}
+		src, err := repo.ShowFile(ref, p)
+		if err != nil {
+			return nil, err
+		}
+		if obj, ok := ParseObject(rel, src); ok {
+			objs = append(objs, *obj)
+		}
 	}
 	ResolveEffectiveStatus(objs)
 	ResolveAmendedBy(objs)
