@@ -72,6 +72,7 @@ graph LR
   cli --> skillopt
   cli --> trailers
   cli --> usage
+  consistency --> c4
   consistency --> cmake
   consistency --> evidence
   consistency --> gitutil

@@ -131,6 +131,7 @@ func BuildReport(opt Options) (model.Report, error) {
 			MinFixes:   cfg.Recurrence.MinFixes,
 		},
 		Contracts: contractOpts(opt.RepoDir, cfg),
+		Landscape: landscapeOpts(opt.RepoDir, cfg),
 	}
 
 	// Order matters: C4<->code first (independent), then significance (uses it),
@@ -213,5 +214,23 @@ func contractOpts(repoDir string, cfg config.Config) consistency.ContractOpts {
 		srcs = append(srcs, knowledge.PeerSource{Name: p.Name, Dir: p.Dir(repoDir)})
 	}
 	opt.PeerContracts = knowledge.PeerContracts(srcs)
+	return opt
+}
+
+// landscapeOpts assembles the org-landscape ownership check's input (ADR-0034).
+//
+// Gated exactly like contracts and for the same reason: with no `org.repo` this
+// repo cannot know whether it owns a system, so the check is INERT rather than
+// guessing. The check itself resolves the landscape — this repo's own copy at
+// the reviewed ref, a peer's from its checkout — so a repo that declares no
+// identity never reads a peer directory at all.
+func landscapeOpts(repoDir string, cfg config.Config) consistency.LandscapeOpts {
+	opt := consistency.LandscapeOpts{OrgRepo: cfg.Org.Repo}
+	if opt.OrgRepo == "" {
+		return opt
+	}
+	for _, p := range cfg.Peers {
+		opt.Peers = append(opt.Peers, knowledge.PeerSource{Name: p.Name, Dir: p.Dir(repoDir)})
+	}
 	return opt
 }

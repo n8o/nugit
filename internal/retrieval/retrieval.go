@@ -53,6 +53,11 @@ type Item struct {
 	// ReinforcedBy: this object was re-confirmed after a recurrence by these
 	// ids, which widen its applicability (ADR-0019).
 	ReinforcedBy []string `json:"reinforced_by,omitempty"`
+	// SharedSystem names the org-landscape system that admitted this item: the
+	// queried path configures a system some OTHER repo owns, and this item is
+	// that repo's knowledge about it (ADR-0034). Never silently privileged —
+	// the marker rides every rendered line, like path_bound.
+	SharedSystem string `json:"shared_system,omitempty"`
 	// Origin names the PEER this item came from, or "" for local knowledge
 	// (ADR-0032). A reader must never mistake peer knowledge for local
 	// knowledge: this repo enforces nothing about a foreign object, its Path
@@ -65,6 +70,24 @@ type Item struct {
 // QualifiedID is how an item is NAMED anywhere a human or an agent reads it:
 // the bare id locally, `<peer>:<id>` for a foreign object (ADR-0032).
 func (it Item) QualifiedID() string { return model.QualifyID(it.Origin, it.ID) }
+
+// LandscapeItem is one org-landscape system the queried path configures
+// (ADR-0034). It is descriptive, never authored here: the landscape is a single
+// artifact owned by one repo in the org (ADR-0011) and read from wherever it
+// is authoritative.
+type LandscapeItem struct {
+	ID   string `json:"id"`
+	Name string `json:"name,omitempty"`
+	// Owner is the repo accountable for the system ("" when it is not shared).
+	Owner string `json:"owner,omitempty"`
+	// OwnedHere is true when this repo's own `org.repo` is the owner.
+	OwnedHere bool `json:"owned_here,omitempty"`
+	// Origin is where the LANDSCAPE came from: "" local, else the peer name.
+	Origin string `json:"origin,omitempty"`
+	// Path is the landscape file the system was read from.
+	Path   string `json:"path,omitempty"`
+	tokens int
+}
 
 // C4Slice is the component + its immediate relationships.
 type C4Slice struct {
@@ -84,11 +107,16 @@ type Bundle struct {
 	// party (ADR-0033), local or from a peer, each labelled with its origin. An
 	// obligation ON this code outranks advice ABOUT it, so they fill right after
 	// the single spec slot — which they never displace.
-	Contracts     []Item   `json:"contracts,omitempty"`
-	Lessons       []Item   `json:"lessons"`
-	References    []Item   `json:"references,omitempty"` // distilled external sources
-	Glossary      []string `json:"glossary"`
-	WorkingMemory []string `json:"working_memory,omitempty"` // ephemeral .nugit-local notes
+	Contracts []Item `json:"contracts,omitempty"`
+	// Landscape are the ORG-level shared systems the queried path configures
+	// (ADR-0034), each naming the repo accountable for it. An agent editing a
+	// file here must know when the thing it configures belongs to someone else,
+	// before it reads a single lesson.
+	Landscape     []LandscapeItem `json:"landscape,omitempty"`
+	Lessons       []Item          `json:"lessons"`
+	References    []Item          `json:"references,omitempty"` // distilled external sources
+	Glossary      []string        `json:"glossary"`
+	WorkingMemory []string        `json:"working_memory,omitempty"` // ephemeral .nugit-local notes
 	// PathHistory: recent commits touching the queried path (subject + captured
 	// decision:/learned: trailers), derived from git at read time (ADR-0024).
 	// Lowest fill priority — it exists to spend budget the typed sections left
@@ -133,6 +161,18 @@ func Context(opt Options) (Bundle, error) {
 
 	b := Bundle{Path: opt.Path, Component: comp, BudgetTokens: budget}
 	b.C4 = c4Slice(m, comp)
+
+	// Org landscape (ADR-0034), resolved to exactly one authoritative source
+	// (ADR-0011). Entirely inert when no landscape exists anywhere: `land` is
+	// zero, `sharedHere` is empty, and every branch below short-circuits.
+	land := resolveLandscape(opt.RepoDir, cfg)
+	sharedHere := sharedSystems(land, path)
+	b.Landscape = landscapeItems(land, sharedHere, cfg.Org.Repo)
+	// Which configured peer IS the owner of a shared system this path
+	// configures. The bridge is the peer's OWN declared `org.repo`, never its
+	// `peers[].name`: the name is this reader's private label (ADR-0033 point 3),
+	// while a repo id is the bilateral fact both repos spell identically.
+	ownerOf := ownerOrigins(opt.RepoDir, cfg, sharedHere)
 
 	// Local store + every reachable peer (ADR-0032). Only the LOCAL load can
 	// error: an absent sibling degrades to "contributed nothing" so pr-render
@@ -184,7 +224,19 @@ func Context(opt Options) (Bundle, error) {
 		// peer's checkout, and `internal/render/**` matching here would be a
 		// coincidence of layout, not a binding (ADR-0032).
 		bound := !o.Foreign() && knowledge.AppliesTo(o, path)
-		if !bound && !inScope(o, comp, parent) {
+		// Landscape binding (ADR-0034): the queried path configures a shared
+		// system, and this object comes from the peer that OWNS that system. The
+		// glob doing the binding is the ORG's, declared reader-relative in the
+		// landscape — not the peer's own applies_to_paths, which still never
+		// binds here (ADR-0032 point 6). It is admitted without a keyword match:
+		// a declared, bilateral, path-level statement is stronger evidence of
+		// relevance than a keyword coincidence, and the set is bounded twice
+		// over — by the landscape's globs and by the single owning origin.
+		landSys := ""
+		if o.Foreign() {
+			landSys = ownerOf[o.Origin]
+		}
+		if !bound && landSys == "" && !inScope(o, comp, parent) {
 			continue
 		}
 		switch o.Type {
@@ -192,11 +244,12 @@ func Context(opt Options) (Bundle, error) {
 			// Component-scoped decisions always; global ones only when relevant to
 			// the task (else every global decision floods every path's bundle) —
 			// unless the queried path itself matches the decision's binding.
-			if !bound && (o.Scope == "" || o.Scope == "global") && len(kw) > 0 && !matches(o, kw) {
+			if !bound && landSys == "" && (o.Scope == "" || o.Scope == "global") && len(kw) > 0 && !matches(o, kw) {
 				continue
 			}
 			it := toItem(o, "")
 			it.PathBound = bound
+			it.SharedSystem = landSys
 			decisions = append(decisions, it)
 			pulled[knowledge.KeyOf(*o)] = true
 		case model.KindSpec:
@@ -213,18 +266,20 @@ func Context(opt Options) (Bundle, error) {
 				pulled[knowledge.KeyOf(*o)] = true
 			}
 		case model.KindLesson:
-			if len(kw) == 0 || matches(o, kw) {
+			if landSys != "" || len(kw) == 0 || matches(o, kw) {
 				it := toItem(o, "")
 				it.PathBound = bound
+				it.SharedSystem = landSys
 				lessons = append(lessons, it)
 				pulled[knowledge.KeyOf(*o)] = true
 			}
 		case model.KindReference:
 			// Same rule as lessons: keyword-matched when a task is given, all
 			// in-scope otherwise (the budget truncates, never silently).
-			if len(kw) == 0 || matches(o, kw) {
+			if landSys != "" || len(kw) == 0 || matches(o, kw) {
 				it := toItem(o, "")
 				it.PathBound = bound
+				it.SharedSystem = landSys
 				references = append(references, it)
 				pulled[knowledge.KeyOf(*o)] = true
 			}
@@ -356,6 +411,74 @@ func hasKeyword(e localmem.Entry, kw map[string]bool) bool {
 	return overlaps(e.Text+" "+strings.Join(e.Keywords, " "), kw)
 }
 
+// resolveLandscape picks the ONE authoritative org landscape for this repo's
+// view (ADR-0034 point 3 / ADR-0011): this repo's own file if it has one,
+// otherwise the single peer that declares one, otherwise nothing. Reading is
+// one os.ReadFile, and none happens at all for a repo with no landscape and no
+// peers.
+func resolveLandscape(repoDir string, cfg config.Config) c4.LandscapeResolution {
+	dirs := []c4.LandscapeDir{{Dir: repoDir}}
+	for _, p := range cfg.Peers {
+		dirs = append(dirs, c4.LandscapeDir{Name: p.Name, Dir: p.Dir(repoDir)})
+	}
+	return c4.ResolveLandscape(c4.LandscapeSourcesFromDirs(dirs))
+}
+
+// sharedSystems are the landscape systems the queried path configures AND that
+// declare an owner. A system with no owner is modelled but not shared, so it
+// carries no cross-repo consequence.
+func sharedSystems(res c4.LandscapeResolution, path string) []model.LandscapeSystem {
+	if !res.Found {
+		return nil
+	}
+	var out []model.LandscapeSystem
+	for _, s := range c4.Configuring(res.Landscape, path) {
+		if s.Shared() {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+func landscapeItems(res c4.LandscapeResolution, shared []model.LandscapeSystem, me string) []LandscapeItem {
+	var out []LandscapeItem
+	for _, s := range shared {
+		it := LandscapeItem{
+			ID: s.ID, Name: s.Name, Owner: s.Owner,
+			OwnedHere: s.OwnedBy(me),
+			Origin:    res.Landscape.Origin, Path: res.Landscape.Path,
+		}
+		it.tokens = tokensOf(it.Name) + tokensOf(it.ID) + tokensOf(it.Owner) + 8
+		out = append(out, it)
+	}
+	return out
+}
+
+// ownerOrigins maps a configured peer's display name onto the shared system it
+// OWNS, for the systems this path configures. The join key is the peer's own
+// `org.repo`, read from its checkout: a peer's `name` is this reader's private
+// label and could never carry a bilateral fact (ADR-0033 point 3). A peer that
+// declares no identity, or is not checked out, simply never matches.
+func ownerOrigins(repoDir string, cfg config.Config, shared []model.LandscapeSystem) map[string]string {
+	if len(shared) == 0 || len(cfg.Peers) == 0 {
+		return nil
+	}
+	out := map[string]string{}
+	for _, p := range cfg.Peers {
+		pc, err := config.Load(p.Dir(repoDir))
+		if err != nil || pc.Org.Repo == "" {
+			continue
+		}
+		for _, s := range shared {
+			if s.Owner == pc.Org.Repo {
+				out[p.Name] = s.ID
+				break
+			}
+		}
+	}
+	return out
+}
+
 // peerSources maps the configured peers onto the loader's input, resolving each
 // peer path against the nugit root.
 func peerSources(repoDir string, cfg config.Config) []knowledge.PeerSource {
@@ -436,6 +559,22 @@ func truncate(b *Bundle, budget int) {
 	// restores each section's sorted order exactly (sortItems ranks local
 	// first), so this changes what SURVIVES the budget, never the order.
 	b.Contracts = add(b.Contracts, "contract")
+	// Shared systems fill next (ADR-0034): "the thing you are editing belongs to
+	// another repo" frames every item below it, and the section is bounded by
+	// the landscape globs that matched this one path. It never displaces the
+	// spec — the spec is part of the mandatory baseline above — and each drop is
+	// recorded like every other cut.
+	var land []LandscapeItem
+	for _, li := range b.Landscape {
+		if used+li.tokens <= budget {
+			used += li.tokens
+			land = append(land, li)
+		} else {
+			b.Truncated = true
+			b.Dropped = append(b.Dropped, "landscape "+li.ID+" (over budget)")
+		}
+	}
+	b.Landscape = land
 	localD, peerD := splitOrigin(b.Decisions)
 	localL, peerL := splitOrigin(b.Lessons)
 	localR, peerR := splitOrigin(b.References)

@@ -205,6 +205,13 @@ func scopeRank(it Item) int {
 	if it.PathBound {
 		return 0 // a direct path match is as near as component scope (ADR-0020)
 	}
+	if it.SharedSystem != "" {
+		// A declared org-landscape binding is a path-level statement about this
+		// file, so it ranks with component scope WITHIN its origin run
+		// (ADR-0034). Origin stays the outermost dimension: this can never lift
+		// a peer item above a local one (ADR-0032 point 7).
+		return 0
+	}
 	if it.Scope == "" || it.Scope == "global" {
 		return 1
 	}

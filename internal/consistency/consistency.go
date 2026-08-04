@@ -52,6 +52,9 @@ type Input struct {
 	// Contracts configures the cross-repo obligation check (ADR-0033); the zero
 	// value is inert (no configured identity ⇒ nothing is checked).
 	Contracts ContractOpts
+	// Landscape configures the org-landscape ownership check (ADR-0034); the
+	// zero value is inert (no configured identity ⇒ nothing is checked).
+	Landscape LandscapeOpts
 }
 
 // C4CodeFindings runs the C4<->code check plus model-health checks. The
@@ -350,6 +353,7 @@ func OtherFindings(in Input) []model.Finding {
 	fs = append(fs, checkProseSupersession(in)...)
 	fs = append(fs, checkRecurrence(in)...)
 	fs = append(fs, checkContractObligations(in)...)
+	fs = append(fs, checkLandscapeOwnership(in)...)
 	return Sort(fs)
 }
 

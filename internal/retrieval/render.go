@@ -27,6 +27,18 @@ func (b Bundle) Markdown() string {
 		w.WriteString("\n")
 	}
 
+	// The org landscape frames everything below it (ADR-0034): if this path
+	// configures infrastructure another repo owns, that is the first thing an
+	// agent needs to know — before any lesson about how to change it.
+	if len(b.Landscape) > 0 {
+		fmt.Fprintf(&w, "**Shared infrastructure** _(org landscape, %s)_\n", landscapeWhere(b.Landscape[0]))
+		for _, l := range b.Landscape {
+			fmt.Fprintf(&w, "- `%s` %s — owned by **%s**%s\n",
+				l.ID, landscapeName(l), l.Owner, ownedHereSuffix(l))
+		}
+		w.WriteString("\n")
+	}
+
 	if b.Spec != nil {
 		fmt.Fprintf(&w, "**Active spec** `%s` — %s\n\n", b.Spec.QualifiedID(), b.Spec.Summary)
 	}
@@ -122,6 +134,31 @@ func (b Bundle) Markdown() string {
 	return w.String()
 }
 
+// landscapeWhere says which landscape this came from — local, or a named peer.
+// A reader must never mistake another repo's org model for this repo's.
+func landscapeWhere(l LandscapeItem) string {
+	if l.Origin == "" {
+		return "local"
+	}
+	return "peer " + l.Origin
+}
+
+func landscapeName(l LandscapeItem) string {
+	if l.Name == "" {
+		return ""
+	}
+	return "**" + l.Name + "**"
+}
+
+// ownedHereSuffix distinguishes "you own this" from "someone else owns this" —
+// the difference between a note and an instruction to go talk to a team.
+func ownedHereSuffix(l LandscapeItem) string {
+	if l.OwnedHere {
+		return " _(this repo)_"
+	}
+	return " _(not this repo — coordinate with the owner)_"
+}
+
 // tierWord renders an item's trust tier for humans; the proposed tier reads
 // "unratified" so a proposed item never prints "proposed · proposed". Falls
 // back to a plain proposed marker when no tier derivation ran.
@@ -149,6 +186,9 @@ func tierSuffix(it Item) string {
 	}
 	if it.PathBound {
 		parts = append(parts, "path-bound")
+	}
+	if it.SharedSystem != "" {
+		parts = append(parts, "shared system "+it.SharedSystem)
 	}
 	if len(parts) > 0 {
 		return " _[" + strings.Join(parts, " · ") + "]_"
@@ -179,6 +219,9 @@ func statusLabel(it Item) string {
 	}
 	if it.PathBound {
 		s += " · path-bound"
+	}
+	if it.SharedSystem != "" {
+		s += " · shared system " + it.SharedSystem
 	}
 	if len(it.AmendedBy) == 0 {
 		return s

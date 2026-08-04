@@ -57,6 +57,16 @@ var explanations = map[string]string{
 		"A `must` whose file does not resolve at the reviewed ref is UNMET, not an error — unverifiable is not met.\n" +
 		"Knobs: org.repo (this repo's stable org-wide party id; absent ⇒ the check is inert and never guesses) and\n" +
 		"contracts.mode (warn|fail|off, default warn) in .nugit/config.yml.",
+	"landscape-ownership": "This PR changes files that configure a system the ORG LANDSCAPE says another repo owns (ADR-0034).\n" +
+		"The landscape (.nugit/architecture/landscape.dsl) sits ABOVE the per-repo C4 model and is the only place this\n" +
+		"can be said: the cluster belongs to a sibling repo, but the paths that configure it legitimately live here, so\n" +
+		"`nugit_paths` globs are evaluated against whichever repo is reading.\n" +
+		"Fix: coordinate with the owning repo before merging, or land the change in the repo that owns the system.\n" +
+		"This is a WARN and always will be — the remediation is a conversation, sometimes about code you cannot write.\n" +
+		"For an enforceable two-sided invariant, declare a `contract` instead (ADR-0033).\n" +
+		"Exactly one landscape is authoritative (ADR-0011): the local file wins; otherwise the single peer that declares\n" +
+		"one; two claiming peers is ambiguous and NOTHING is used — `nugit doctor` names them.\n" +
+		"Knob: org.repo (this repo's stable org-wide id; absent ⇒ the check is inert and never guesses who owns what).",
 }
 
 // topics documents cross-cutting concepts that are not check ids (kept apart

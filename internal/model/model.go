@@ -286,6 +286,88 @@ type Relationship struct {
 	Desc string
 }
 
+// LandscapeSystem is one software system in the ORG-LEVEL landscape (ADR-0034)
+// — a strictly separate artifact that sits ABOVE the per-repo Model. It is NOT
+// a C4 element of this repo's model and never reaches Covered(), the mapper,
+// gen-rules, the C4 delta, or the c4<->code gate: `softwareSystem` stays
+// transparent to the per-repo parser exactly as ADR-0017 left it.
+type LandscapeSystem struct {
+	// ID is the DSL identifier (the relationship endpoint).
+	ID string
+	// Name is the human label.
+	Name string
+	// Desc is the optional positional description.
+	Desc string
+	// Repo marks this system as BEING one of the org's repos, named by the
+	// stable org-wide id ADR-0033 established as `org.repo`. From the DSL
+	// property `nugit_repo`.
+	Repo string
+	// Owner names the repo ACCOUNTABLE for a shared system, by the same id
+	// space as Repo. From the DSL property `nugit_owner`. A system with an
+	// owner is shared; one without is just a system.
+	Owner string
+	// Paths are doublestar globs, in the ADR-0002 dialect, that are evaluated
+	// against WHICHEVER REPO IS READING — the paths that configure this system,
+	// wherever they live. That reader-relative definition is the whole modelling
+	// move: the cluster is owned by B, but the files that configure it sit in
+	// A's tree, so the glob belongs to neither repo's model. From `nugit_paths`.
+	Paths []string
+}
+
+// Shared reports whether the system declares an accountable owner.
+func (s LandscapeSystem) Shared() bool { return s.Owner != "" }
+
+// OwnedBy reports whether repoID is this system's declared owner. An empty
+// repoID never matches: with no configured identity nugit never guesses which
+// repo it is (ADR-0033 point 3).
+func (s LandscapeSystem) OwnedBy(repoID string) bool {
+	return repoID != "" && s.Owner == repoID
+}
+
+// LandscapeRel is a directed relationship between two landscape systems.
+type LandscapeRel struct {
+	Src  string
+	Dst  string
+	Desc string
+}
+
+// Landscape is the parsed org-level landscape.dsl (ADR-0034). Origin and Path
+// are stamped by resolution, not by parsing: exactly one landscape is
+// authoritative for a repo's view (ADR-0011), and a reader must always be able
+// to say WHERE it came from.
+type Landscape struct {
+	Name    string
+	Systems []LandscapeSystem
+	Rels    []LandscapeRel
+	// Origin is "" when the landscape is this repo's own, else the peer name it
+	// was read from (the ADR-0032 display namespace).
+	Origin string
+	// Path is where it was read from, for display.
+	Path string
+}
+
+// Empty reports whether the landscape declares no systems at all.
+func (l Landscape) Empty() bool { return len(l.Systems) == 0 }
+
+// System returns the system with the given id, if present.
+func (l Landscape) System(id string) (LandscapeSystem, bool) {
+	for _, s := range l.Systems {
+		if s.ID == id {
+			return s, true
+		}
+	}
+	return LandscapeSystem{}, false
+}
+
+// OriginLabel spells out where the landscape came from, on any line that names
+// it (ADR-0032's rule: foreign content is never readable as local content).
+func (l Landscape) OriginLabel() string {
+	if l.Origin == "" {
+		return "local"
+	}
+	return "peer " + l.Origin
+}
+
 // Model is the parsed C4 workspace (the subset nugit needs).
 type Model struct {
 	Name          string

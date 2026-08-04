@@ -132,6 +132,12 @@ func Run(repoDir string) Report {
 	r.Checks = append(r.Checks, Check{Name: "cross-repo contract obligations",
 		OK: cok, Advisory: true, Detail: cdetail})
 
+	// Org landscape (ADR-0034). Advisory: the landscape is optional, an absent
+	// peer is the normal CI state, and a dangling owner id is modelling debt.
+	lok, ldetail := landscapeHealth(repoDir, cfg)
+	r.Checks = append(r.Checks, Check{Name: "org landscape",
+		OK: lok, Advisory: true, Detail: ldetail})
+
 	// ADR-0026: wiring coherence between config.yml and the artifacts that
 	// invoke nugit (CI workflows, CLAUDE.md, skill files). Advisory only.
 	r.Checks = append(r.Checks, wiringChecks(repoDir, cfg)...)

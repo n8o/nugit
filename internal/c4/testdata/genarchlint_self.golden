@@ -135,6 +135,7 @@ deps:
     mayDependOn: []
   "consistency":
     mayDependOn:
+      - "c4"
       - "cmake"
       - "evidence"
       - "gitutil"
