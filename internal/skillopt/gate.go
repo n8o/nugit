@@ -216,6 +216,20 @@ func annotatedWithCause(trigger string, answerBearing []string) bool {
 	return containment(pw, answerBearing) >= echoThreshold
 }
 
+// LooksLikeSymptom reports whether s reads as an OBSERVABLE symptom under this
+// gate's lexicon — the same judgement `trigger-not-a-symptom` makes, exported so
+// other surfaces can ask the question without minting a second, subtly
+// different notion of "looks like a symptom" (ADR-0036 reuses it to spot
+// symptom-keyed runbooks). It answers only the cue question: length, echo and
+// commit-subject checks stay inside grade(), because they are about an eval
+// case's inputs, not about whether a sentence describes something someone saw.
+func LooksLikeSymptom(s string) bool {
+	if strings.TrimSpace(s) == "" {
+		return false
+	}
+	return hasSymptomCue(s, contentWords(s))
+}
+
 func hasSymptomCue(raw string, words []string) bool {
 	for _, w := range words {
 		if symptomCue[w] {

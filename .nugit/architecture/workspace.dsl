@@ -209,6 +209,11 @@ workspace "nugit" "Git-native typed knowledge & unified PR view — self-model (
                     "paths" "internal/promote/**"
                 }
             }
+            adopt = component "Adoption report" "Brownfield prose-vs-code inventory diff, computed before adoption (ADR-0036)" "Go" {
+                properties {
+                    "paths" "internal/adopt/**"
+                }
+            }
             cli = component "CLI" "nugit command entrypoint" "Go" {
                 properties {
                     "paths" "cmd/nugit/**"
@@ -371,6 +376,14 @@ workspace "nugit" "Git-native typed knowledge & unified PR view — self-model (
             cli -> deploy "deploy command"
             cli -> modelfacts "model facts command"
             cli -> agentcfg "agent command"
+
+            // --- brownfield adoption: prose vs code, before any store exists (ADR-0036) ---
+            adopt -> modelfacts "reuses the detected-unit inventory (ADR-0021); never a second detector"
+            adopt -> gitutil "bounded per-document staleness (last commit + commits since)"
+            adopt -> skillopt "reuses the export gate's symptom lexicon for runbook detection (ADR-0027)"
+            adopt -> distill "reuses the TriggerTODO refusal placeholder (ADR-0028)"
+            adopt -> model_ "uses types"
+            cli -> adopt "adopt command"
 
             modelfacts -> deploy "reads the container inventory"
             modelfacts -> cmake "reads the dependency edges"
