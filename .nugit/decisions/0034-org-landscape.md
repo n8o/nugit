@@ -3,7 +3,7 @@ schema_version: 1
 id: ADR-0034
 type: decision
 scope: global
-status: proposed
+status: accepted
 created: 2026-08-04T00:00:00Z
 relates_to:
   - constrains:c4
