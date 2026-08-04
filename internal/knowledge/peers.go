@@ -14,6 +14,11 @@ import (
 type PeerSource struct {
 	Name string // the origin namespace: [a-z0-9-], unique across peers
 	Dir  string // nugit root of the peer checkout (already resolved absolute-or-relative)
+	// Hub marks this peer as the organization's designated canonical store
+	// (config `org.hub`, ADR-0035). It changes nothing about HOW the store is
+	// read — the hub is a peer with a role, not a second transport — only which
+	// source wins when two disagree, and where `nugit promote` writes.
+	Hub bool
 }
 
 // PeerLoad reports what one peer contributed to a merged set. It exists so an

@@ -61,6 +61,15 @@ type Summary struct {
 	High2      int            `json:"high_2_signal"`
 	NeedsAgent int            `json:"needs_agent"`
 	Reasons    map[string]int `json:"refusal_reasons,omitempty"`
+	// ByOrigin counts emitted cases per origin ("local", then each peer name),
+	// populated ONLY in federated mode (ADR-0035). omitempty is load-bearing: a
+	// non-federated export's report must stay byte-identical to what it was
+	// before federation existed.
+	ByOrigin map[string]int `json:"emitted_by_origin,omitempty"`
+	// Peers reports what each configured peer contributed — reachability
+	// included, because "the sibling isn't checked out" and "the sibling had no
+	// exportable lesson" are different facts and CI routinely produces the first.
+	Peers []knowledge.PeerLoad `json:"peers,omitempty"`
 }
 
 // Report is the full accounting of an export: what was emitted, and every
@@ -76,6 +85,18 @@ type Options struct {
 	// MinTier gates emission: "" / "high-2" (default) emits both tiers,
 	// "high-3" emits only rich triggers and reports thin ones as refused.
 	MinTier string
+	// Peers spans the corpus across sibling stores (ADR-0035): every repo's
+	// incidents feed one benchmark instead of one per repo. Empty — the default
+	// — is byte-for-byte the pre-federation export, including the absence of
+	// origin labels: with a single origin the label carries no information, and
+	// adding it would silently invalidate every measurement taken against a
+	// corpus generated before this existed.
+	//
+	// The ADR-0027 leakage gate applies to a foreign lesson UNCHANGED. A leaky
+	// case is permanent and poisons every number derived from it, and nothing
+	// about the lesson having been written next door makes its trigger less
+	// likely to state its own answer.
+	Peers []knowledge.PeerSource
 }
 
 // Export reads the store and returns the emittable cases plus the report. Cases
@@ -85,19 +106,39 @@ func Export(opt Options) ([]Case, Report, error) {
 	if err != nil {
 		return nil, Report{}, err
 	}
-	objs, err := knowledge.Load(opt.RepoDir)
+	federated := len(opt.Peers) > 0
+	var objs []model.KnowledgeObject
+	var loads []knowledge.PeerLoad
+	if federated {
+		objs, loads, err = knowledge.LoadWithPeers(opt.RepoDir, opt.Peers)
+	} else {
+		objs, err = knowledge.Load(opt.RepoDir)
+	}
 	if err != nil {
 		return nil, Report{}, err
 	}
 	var cases []Case
 	rep := Report{Summary: Summary{Reasons: map[string]int{}}}
+	if federated {
+		rep.Summary.ByOrigin = map[string]int{}
+		rep.Summary.Peers = loads
+	}
 	for i := range objs {
 		o := objs[i]
 		if o.Type != model.KindLesson {
 			continue
 		}
+		if o.Origin != "" && !federatable(o) {
+			// The ADR-0032 peer-admission gate, unchanged: only what a peer's
+			// own author declared repo-wide is safely repo-agnostic, and a
+			// foreign candidate is nobody here's to ratify.
+			continue
+		}
 		rep.Summary.Lessons++
 		c, v := Assess(o)
+		if federated {
+			c.Labels = append(c.Labels, "origin:"+originLabel(o))
+		}
 		if v.Tier == TierHigh2 && minTier == TierHigh3 {
 			v = Verdict{Tier: TierNeedsAgent, Reasons: []string{ReasonThinTrigger}}
 		}
@@ -117,6 +158,9 @@ func Export(opt Options) ([]Case, Report, error) {
 			rep.Summary.High2++
 		}
 		rep.Summary.Emitted++
+		if federated {
+			rep.Summary.ByOrigin[originLabel(o)]++
+		}
 		cases = append(cases, c)
 	}
 	sort.Slice(cases, func(i, j int) bool { return cases[i].Number < cases[j].Number })
@@ -141,7 +185,7 @@ func Assess(o model.KnowledgeObject) (Case, Verdict) {
 	c := Case{
 		Number:     number,
 		Title:      title,
-		Source:     storeRelPath(o.Path),
+		Source:     sourceOf(o),
 		Input:      s.Trigger, // ONLY the trigger — see the doc comment above
 		GoldAnswer: goldAnswer(s),
 		Labels:     labelsFor(o),
@@ -197,6 +241,14 @@ func labelsFor(o model.KnowledgeObject) []string {
 
 // caseNumber is the stable case id: "lesson:<slug>", from the object id with its
 // LESSON- prefix stripped, else the filename.
+//
+// A FOREIGN lesson's slug is prefixed with its origin ("lesson:platform/foo").
+// Identity in a merged set is (origin, id), never id (ADR-0032 point 4), and the
+// case number is exactly where that matters most: a consumer hashes it into a
+// train/val/test split, so two repos' same-named lessons colliding would put one
+// case in two splits — or silently drop one — and no two measurements would
+// mean the same thing. Local numbers are untouched, so a corpus generated before
+// federation keeps every id it had.
 func caseNumber(o model.KnowledgeObject) string {
 	slug := strings.TrimSpace(o.ID)
 	if slug == "" {
@@ -204,7 +256,21 @@ func caseNumber(o model.KnowledgeObject) string {
 	}
 	low := strings.ToLower(slug)
 	low = strings.TrimPrefix(low, "lesson-")
+	if o.Origin != "" {
+		return "lesson:" + o.Origin + "/" + low
+	}
 	return "lesson:" + low
+}
+
+// sourceOf is the case's harness-only provenance: the object's store-relative
+// path, qualified with its origin for a foreign lesson (`platform:lessons/x.md`)
+// exactly as ADR-0032 point 8 requires of every rendered foreign reference.
+func sourceOf(o model.KnowledgeObject) string {
+	p := storeRelPath(o.Path)
+	if o.Origin != "" {
+		return o.Origin + ":" + p
+	}
+	return p
 }
 
 // storeRelPath is the object's path relative to the .nugit store root, so the
@@ -215,6 +281,36 @@ func storeRelPath(p string) string {
 		return p[i+len(".nugit/"):]
 	}
 	return p
+}
+
+// originLabel is the label value a federated case carries: "local" for this
+// repo, else the peer's display namespace.
+func originLabel(o model.KnowledgeObject) string {
+	if o.Origin == "" {
+		return "local"
+	}
+	return o.Origin
+}
+
+// federatable is the ADR-0032 peer-admission gate applied to the corpus: a
+// foreign lesson enters only if its own author declared it repo-wide (`scope:
+// global`) and it is ratified. Component scope is compared by string equality,
+// so a peer's `scope: transport` and ours are unrelated strings that happen to
+// match; and the candidate lane is a LOCAL review queue nobody here can clear.
+//
+// Statuses beyond `active` are refused by the gate itself (ADR-0027 point 5)
+// with a named reason, which is the more useful outcome — this filter exists so
+// a peer's component-scoped lessons do not even appear as refusals in a report
+// about this repo's capture hygiene.
+func federatable(o model.KnowledgeObject) bool {
+	if s := strings.TrimSpace(o.Scope); s != "" && s != "global" {
+		return false
+	}
+	st := o.EffectiveStatus
+	if st == "" {
+		st = o.Status
+	}
+	return st == model.StatusActive || st == model.StatusAccepted
 }
 
 // titleOf is the object's first markdown heading, with the "Lesson — " lead-in
@@ -269,6 +365,23 @@ func (r Report) SummaryLines() string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "skillopt: %d lesson(s) scanned → %d case(s) emitted (%d×%s, %d×%s), %d×%s\n",
 		s.Lessons, s.Emitted, s.High3, TierHigh3, s.High2, TierHigh2, s.NeedsAgent, TierNeedsAgent)
+	if len(s.ByOrigin) > 0 {
+		origins := make([]string, 0, len(s.ByOrigin))
+		for k := range s.ByOrigin {
+			origins = append(origins, k)
+		}
+		sort.Strings(origins)
+		parts := make([]string, 0, len(origins))
+		for _, k := range origins {
+			parts = append(parts, fmt.Sprintf("%s=%d", k, s.ByOrigin[k]))
+		}
+		fmt.Fprintf(&b, "  federated across %d origin(s): %s\n", len(origins), strings.Join(parts, ", "))
+	}
+	for _, pl := range s.Peers {
+		if !pl.Reachable {
+			fmt.Fprintf(&b, "  peer %-16s contributed nothing: %s\n", pl.Name, pl.Note)
+		}
+	}
 	if len(s.Reasons) > 0 {
 		keys := make([]string, 0, len(s.Reasons))
 		for k := range s.Reasons {

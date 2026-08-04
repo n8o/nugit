@@ -53,6 +53,18 @@ func (r Repo) Prefix() string {
 	return strings.TrimSpace(out)
 }
 
+// HeadSHA returns the full sha HEAD resolves to, or "" when it cannot be (not a
+// git repo, an unborn branch). Callers that stamp provenance treat "" as "no
+// commit recorded" rather than failing: a record is still promotable out of a
+// checkout that has no commits yet, it just cannot say which one it came from.
+func (r Repo) HeadSHA() string {
+	out, err := r.git("rev-parse", "HEAD")
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(out)
+}
+
 // CurrentBranch returns the branch HEAD points at (`git rev-parse
 // --abbrev-ref HEAD`), trimmed. It returns "" on any error (e.g. not a git
 // repo, or an unborn branch with no commits); a detached HEAD returns the

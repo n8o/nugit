@@ -124,7 +124,7 @@ func resolveLandscape(in Input) c4.LandscapeResolution {
 	}
 	dirs := make([]c4.LandscapeDir, 0, len(in.Landscape.Peers))
 	for _, p := range in.Landscape.Peers {
-		dirs = append(dirs, c4.LandscapeDir{Name: p.Name, Dir: p.Dir})
+		dirs = append(dirs, c4.LandscapeDir{Name: p.Name, Dir: p.Dir, Hub: p.Hub})
 	}
 	srcs = append(srcs, c4.LandscapeSourcesFromDirs(dirs)...)
 	return c4.ResolveLandscape(srcs)

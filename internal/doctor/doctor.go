@@ -125,6 +125,13 @@ func Run(repoDir string) Report {
 	r.Checks = append(r.Checks, Check{Name: "peer stores reachable",
 		OK: pok, Advisory: true, Detail: pdetail})
 
+	// Org hub (ADR-0035). Advisory: a hub is a peer with a role, so every way it
+	// can be absent degrades exactly like an absent peer — and each of those ways
+	// gets its own sentence, because "typo in org.hub" and "sibling not checked
+	// out in CI" have nothing to do with each other.
+	hok, hdetail := orgHub(repoDir, cfg)
+	r.Checks = append(r.Checks, Check{Name: "org hub", OK: hok, Advisory: true, Detail: hdetail})
+
 	// Cross-repo contracts (ADR-0033). Advisory, always: enforcing an obligation
 	// is `pr-render`'s job at the reviewed ref, and doctor is a pre-flight — an
 	// unmet obligation is a backlog item, never a reason to block setup.
@@ -178,7 +185,11 @@ func proseDetail(ps []knowledge.ProseSupersession) string {
 // provenanceKnownKeys are the schema fields of a provenance block; anything
 // else is silently dropped by the typed parser (seen in the wild: an `issues:`
 // array that vanished without a sound).
-var provenanceKnownKeys = map[string]bool{"commit": true, "agent": true, "citation": true}
+var provenanceKnownKeys = map[string]bool{
+	"commit": true, "agent": true, "citation": true,
+	// Stamped by `nugit promote` on a record copied into the org hub (ADR-0035).
+	"origin_repo": true, "origin_path": true,
+}
 
 // provenanceIssues audits provenance blocks syntactically (ADR-0022): a
 // literal HEAD or empty commit is meaningless as provenance, and unknown keys
@@ -225,7 +236,7 @@ func provenanceIssues(repoDir string, objs []model.KnowledgeObject) []string {
 		}
 		if len(unknown) > 0 {
 			sort.Strings(unknown)
-			issues = append(issues, fmt.Sprintf("%s: unknown provenance key(s) %s — the schema drops them silently (known: commit, agent, citation)",
+			issues = append(issues, fmt.Sprintf("%s: unknown provenance key(s) %s — the schema drops them silently (known: commit, agent, citation, origin_repo, origin_path)",
 				o.Path, strings.Join(unknown, ", ")))
 		}
 	}
@@ -338,7 +349,7 @@ func contractObligations(repoDir string, cfg config.Config, local []model.Knowle
 	objs := append([]model.KnowledgeObject{}, local...)
 	srcs := make([]knowledge.PeerSource, 0, len(cfg.Peers))
 	for _, p := range cfg.Peers {
-		srcs = append(srcs, knowledge.PeerSource{Name: p.Name, Dir: p.Dir(repoDir)})
+		srcs = append(srcs, knowledge.PeerSource{Name: p.Name, Dir: p.Dir(repoDir), Hub: p.Hub})
 	}
 	objs = append(objs, knowledge.PeerContracts(srcs)...)
 

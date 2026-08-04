@@ -230,7 +230,7 @@ func landscapeOpts(repoDir string, cfg config.Config) consistency.LandscapeOpts 
 		return opt
 	}
 	for _, p := range cfg.Peers {
-		opt.Peers = append(opt.Peers, knowledge.PeerSource{Name: p.Name, Dir: p.Dir(repoDir)})
+		opt.Peers = append(opt.Peers, knowledge.PeerSource{Name: p.Name, Dir: p.Dir(repoDir), Hub: p.Hub})
 	}
 	return opt
 }
