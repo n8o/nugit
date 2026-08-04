@@ -234,6 +234,142 @@ func TestProposeSelection(t *testing.T) {
 	}
 }
 
+// splitKey is the unit under the citation rule: a leading knowledge-object key
+// is recognized only when it is followed by an EXPLICIT separator or nothing —
+// never by a bare space, which would eat real prose ("HTTP-2 over HTTP-1").
+func TestSplitKey(t *testing.T) {
+	cases := []struct{ in, key, stmt string }{
+		{"ADR-0026", "ADR-0026", ""},
+		{"  ADR-0026  ", "ADR-0026", ""},
+		{"adr-0026", "ADR-0026", ""},
+		{"ADR-0024 — spend leftover budget", "ADR-0024", "spend leftover budget"},
+		{"ADR-0024 – spend leftover budget", "ADR-0024", "spend leftover budget"},
+		{"ADR-0024 -- spend leftover budget", "ADR-0024", "spend leftover budget"},
+		{"ADR-0024 - spend leftover budget", "ADR-0024", "spend leftover budget"},
+		{"SPEC-014: satisfy the contract", "SPEC-014", "satisfy the contract"},
+		{"expose P", "", "expose P"},
+		{"cross-cutting choice", "", "cross-cutting choice"},
+		// a bare space is not a separator: this states a decision, it does not
+		// cite a record called HTTP-2.
+		{"HTTP-2 over HTTP-1", "", "HTTP-2 over HTTP-1"},
+		{"", "", ""},
+	}
+	for _, c := range cases {
+		key, stmt := splitKey(c.in)
+		if key != c.key || stmt != c.stmt {
+			t.Errorf("splitKey(%q) = (%q, %q), want (%q, %q)", c.in, key, stmt, c.key, c.stmt)
+		}
+	}
+}
+
+// The defect: a `decision:` trailer that CITES a record minted a brand-new
+// duplicate ADR whose whole Decision body was the cited key. Five shapes, one
+// range, both surfaces (Distill writes, Propose offers) — they must agree.
+func TestDistillSkipsCitedDecisions(t *testing.T) {
+	dir := t.TempDir()
+	git(t, dir, "init", "-q")
+	// The store already carries ADR-0007. Synthetic id, no repo history.
+	existing := "---\nschema_version: 1\nid: ADR-0007\ntype: decision\nscope: global\nstatus: accepted\ncreated: 2026-01-01T00:00:00Z\nprovenance:\n  commit: seed\n---\n\n" +
+		"# ADR-0007 — widgets are immutable\n\n## Decision\n\nwidgets are immutable once published\n"
+	os.MkdirAll(filepath.Join(dir, ".nugit", "decisions"), 0o755)
+	os.WriteFile(filepath.Join(dir, ".nugit", "decisions", "0007-widgets.md"), []byte(existing), 0o644)
+	os.WriteFile(filepath.Join(dir, "f"), []byte("a"), 0o644)
+	git(t, dir, "add", "-A")
+	git(t, dir, "commit", "-q", "-m", "base")
+	base := git(t, dir, "rev-parse", "HEAD")[:40]
+
+	commit := func(content, msg string) {
+		os.WriteFile(filepath.Join(dir, "f"), []byte(content), 0o644)
+		git(t, dir, "add", "-A")
+		git(t, dir, "commit", "-q", "-m", msg)
+	}
+	// 1. bare citation of an existing record — mints nothing
+	commit("b", "feat(widget): honor immutability\n\ndecision: ADR-0007\nrejected: mutate in place — breaks published links\nlearned: cited decisions still need a test\nkeywords: widget, immutable")
+	// 2. existing key + added detail — still nothing (already recorded)
+	commit("c", "feat(widget): publish path\n\ndecision: ADR-0007 — and the publish path enforces it at write time\nlearned: enforcement belongs at the write boundary\nkeywords: widget, publish")
+	// 3. bare citation of an UNKNOWN key — a dangling reference, not a decision
+	commit("d", "feat(widget): forward ref\n\ndecision: ADR-0099\nlearned: forward references rot\nkeywords: widget, ref")
+	// 4. unknown key + a real statement — mints, with the key STRIPPED
+	commit("e", "feat(widget): batch publish\n\ndecision: ADR-0099 — publish in batches of 50, never one at a time\nlearned: batch sizes belong in the record\nkeywords: widget, batch")
+	// 5. no key at all — mints unchanged
+	commit("f", "feat(widget): retire\n\ndecision: retire the v1 widget endpoint\nlearned: retirement needs a date\nkeywords: widget, retire")
+
+	res, err := Distill(Options{RepoDir: dir, Base: base, Head: "HEAD", Now: "2026-01-01T00:00:00Z"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Decisions) != 2 {
+		t.Fatalf("only the 2 statement-bearing decisions may promote, got %v", res.Decisions)
+	}
+
+	objs, _ := knowledge.Load(dir)
+	bodies := map[string]string{}
+	for _, o := range objs {
+		if o.Type == model.KindDecision {
+			bodies[o.ID] = sectionText(o.Body, "## Decision")
+		}
+	}
+	if len(bodies) != 3 { // seeded ADR-0007 + the 2 minted
+		t.Fatalf("want 3 decisions in the store, got %d: %v", len(bodies), bodies)
+	}
+	// The regression invariant: no minted record's Decision body is just a key.
+	for id, body := range bodies {
+		if k, stmt := splitKey(body); stmt == "" && k != "" {
+			t.Errorf("%s has a citation for a Decision body: %q", id, body)
+		}
+	}
+	want := map[string]bool{
+		"publish in batches of 50, never one at a time": true,
+		"retire the v1 widget endpoint":                 true,
+	}
+	for id, body := range bodies {
+		if id == "ADR-0007" {
+			continue
+		}
+		if !want[body] {
+			t.Errorf("%s Decision body = %q, want one of %v", id, body, want)
+		}
+		// the key must be stripped from the title too
+		for _, o := range objs {
+			if o.ID == id && strings.Contains(o.Body, "ADR-0099") {
+				t.Errorf("%s title/body still carries the cited key:\n%s", id, o.Body)
+			}
+		}
+	}
+
+	// Propose must offer exactly what Distill wrote — ADR-0018 requires the
+	// view and the apply verb to agree. Re-run against the pre-distill store.
+	seedOnly := []model.KnowledgeObject{{
+		FrontMatter: model.FrontMatter{ID: "ADR-0007", Type: model.KindDecision},
+		Body:        "# ADR-0007\n\n## Decision\n\nwidgets are immutable once published\n",
+	}}
+	commits := []model.Commit{
+		{SHA: "1111111111", Subject: "feat(widget): honor immutability", Trailer: model.Trailer{Decision: "ADR-0007"}},
+		{SHA: "2222222222", Subject: "feat(widget): publish path", Trailer: model.Trailer{Decision: "ADR-0007 — and the publish path enforces it at write time"}},
+		{SHA: "3333333333", Subject: "feat(widget): forward ref", Trailer: model.Trailer{Decision: "ADR-0099"}},
+		{SHA: "4444444444", Subject: "feat(widget): batch publish", Trailer: model.Trailer{Decision: "ADR-0099 — publish in batches of 50, never one at a time"}},
+		{SHA: "5555555555", Subject: "feat(widget): retire", Trailer: model.Trailer{Decision: "retire the v1 widget endpoint"}},
+	}
+	props, deduped := Propose(commits, seedOnly, 0)
+	if len(props) != 2 || deduped != 0 {
+		t.Fatalf("Propose must offer the same 2 decisions and dedupe none, got props=%+v deduped=%d", props, deduped)
+	}
+	for _, p := range props {
+		if !want[p.Text] {
+			t.Errorf("proposal text %q still carries a cited key or is unexpected", p.Text)
+		}
+		if strings.Contains(p.Title, "ADR-") {
+			t.Errorf("proposal title must not restate a key: %q", p.Title)
+		}
+	}
+
+	// A cited decision does not suppress the commit's `learned:` — the commit
+	// is still a significant act, and the lesson is new knowledge.
+	if len(res.Lessons) != 5 {
+		t.Errorf("every learned: must still promote, got %d: %v", len(res.Lessons), res.Lessons)
+	}
+}
+
 // ADR-0016 candidate lane: distill mints proposed by default; -status ratified
 // restores the pre-lane behavior; anything else is a hard error.
 func TestDistillStatusLane(t *testing.T) {

@@ -7,6 +7,11 @@
 // trailer, else a symptom-shaped observation scavenged from the commit body,
 // else an explicit author-facing TODO. Never the commit subject (ADR-0028);
 // see symptom.go.
+//
+// A `decision:` trailer that CITES a record rather than stating one promotes
+// nothing: a bare key ("decision: ADR-0026") has no statement to record, and a
+// key the store already carries is already recorded. Only the statement is ever
+// minted, with any leading key stripped — see splitKey/citation.
 package distill
 
 import (
@@ -64,17 +69,23 @@ type candidate struct {
 // distilled object carries (its Decision section / Insight line), not a
 // whole-body substring scan — that wrongly skipped any candidate whose text
 // appeared anywhere in a body. Lessons additionally record their keyword sets
-// for the ADR-0018 overlap rule.
+// for the ADR-0018 overlap rule, and every object's stable key is recorded so
+// a `decision:` trailer that merely CITES one can be told from one that states
+// a new decision (see splitKey).
 type index struct {
 	decisionText map[string]bool
 	lessonText   map[string]bool
 	lessonKw     []map[string]bool
+	keys         map[string]bool // upper-cased ids of every loaded object
 	maxADR       int
 }
 
 func indexStore(objs []model.KnowledgeObject) index {
-	ix := index{decisionText: map[string]bool{}, lessonText: map[string]bool{}}
+	ix := index{decisionText: map[string]bool{}, lessonText: map[string]bool{}, keys: map[string]bool{}}
 	for _, o := range objs {
+		if id := strings.ToUpper(strings.TrimSpace(o.ID)); id != "" {
+			ix.keys[id] = true
+		}
 		if n := adrNum(o.ID); n > ix.maxADR {
 			ix.maxADR = n
 		}
@@ -123,10 +134,51 @@ func (ix index) dupLesson(normText string, kws []string) bool {
 	return false
 }
 
+// keyPrefixRE matches a leading knowledge-object key ("ADR-0026", "SPEC-014")
+// and, optionally, an EXPLICIT separator introducing a statement. A bare space
+// is deliberately NOT a separator: "HTTP-2 over HTTP-1" states a decision, it
+// does not cite ADR-shaped key HTTP-2.
+var keyPrefixRE = regexp.MustCompile(`^([A-Za-z][A-Za-z0-9]*-\d+)\s*(?:$|(?:—|–|--|-|:|;)\s*)`)
+
+// splitKey splits a `decision:` trailer value into the knowledge-object key it
+// leads with (upper-cased, "" when absent) and the decision statement that
+// follows. Both forms this repo's history uses are covered:
+//
+//	"ADR-0026"                       -> ("ADR-0026", "")           pure citation
+//	"ADR-0024 — spend the budget…"   -> ("ADR-0024", "spend the…") cite + statement
+//	"expose P"                       -> ("",         "expose P")   plain statement
+func splitKey(s string) (key, stmt string) {
+	s = strings.TrimSpace(s)
+	m := keyPrefixRE.FindStringSubmatch(s)
+	if m == nil {
+		return "", s
+	}
+	return strings.ToUpper(m[1]), strings.TrimSpace(s[len(m[0]):])
+}
+
+// citation reports whether a `decision:` trailer merely REFERS to a decision
+// rather than stating one, in which case it must mint nothing. Two cases:
+//
+//  1. No statement at all ("decision: ADR-0026"). There is nothing to record —
+//     minting can only produce a record whose Decision body is a key, which is
+//     the bug this rule exists to kill. True whether or not the key resolves:
+//     an unresolved bare key is a dangling reference, not a decision.
+//  2. A statement led by a key the store already carries ("ADR-0024 — …"). The
+//     decision is already recorded under that key; the commit is citing it
+//     while adding detail. Minting would fork the record under a second id.
+//
+// A statement led by an UNKNOWN key still mints — with the key stripped, so the
+// title and Decision body are the statement (ADR-0001: keys are assigned by the
+// store, never carried in a record's own prose).
+func (ix index) citation(key, stmt string) bool {
+	return stmt == "" || (key != "" && ix.keys[key])
+}
+
 // selectCandidates walks the range in commit order: every unique `decision:`
-// trailer (a deliberate, significant act), then every unique `learned:` that
-// recurs ≥ minRecur times or rides a decision/rejected-bearing commit.
-// In-range duplicates collapse to the first occurrence.
+// trailer that STATES a decision (a deliberate, significant act — citations of
+// existing records are skipped), then every unique `learned:` that recurs ≥
+// minRecur times or rides a decision/rejected-bearing commit. In-range
+// duplicates collapse to the first occurrence.
 func selectCandidates(commits []model.Commit, ix index, minRecur int) []candidate {
 	var out []candidate
 	learnedCount := map[string]int{}
@@ -137,8 +189,8 @@ func selectCandidates(commits []model.Commit, ix index, minRecur int) []candidat
 	}
 	seen := map[string]bool{}
 	for _, c := range commits {
-		d := strings.TrimSpace(c.Trailer.Decision)
-		if d == "" || seen[norm(d)] {
+		key, d := splitKey(c.Trailer.Decision)
+		if ix.citation(key, d) || seen[norm(d)] {
 			continue
 		}
 		seen[norm(d)] = true
@@ -232,7 +284,7 @@ func Distill(opt Options) (Result, error) {
 			maxADR++
 			key := fmt.Sprintf("ADR-%04d", maxADR)
 			path := filepath.Join(".nugit", "decisions", fmt.Sprintf("%04d-%s.md", maxADR, slug(cand.text)))
-			wrote, err := writeObj(opt.RepoDir, path, adrBody(key, cand.c, now, adrStatus))
+			wrote, err := writeObj(opt.RepoDir, path, adrBody(key, cand.text, cand.c, now, adrStatus))
 			if err != nil {
 				return res, err
 			}
@@ -301,7 +353,10 @@ func scopeOf(affects []string) string {
 	return "global"
 }
 
-func adrBody(key string, c model.Commit, now, status string) string {
+// adrBody renders one MADR record. `text` is the selected decision STATEMENT,
+// not the raw trailer: any leading knowledge-object key was stripped upstream
+// (splitKey), so the title and Decision body never restate an id.
+func adrBody(key, text string, c model.Commit, now, status string) string {
 	t := c.Trailer
 	var rel []string
 	for _, a := range t.Affects {
@@ -319,9 +374,9 @@ func adrBody(key string, c model.Commit, now, status string) string {
 		}
 	}
 	fmt.Fprintf(&b, "provenance:\n  commit: %s\nconfidence: medium\n---\n\n", short(c.SHA))
-	fmt.Fprintf(&b, "# %s — %s\n\n", key, title(t.Decision))
+	fmt.Fprintf(&b, "# %s — %s\n\n", key, title(text))
 	fmt.Fprintf(&b, "## Context\n\n%s\n\n", firstLine(c.Subject))
-	fmt.Fprintf(&b, "## Decision\n\n%s\n\n", t.Decision)
+	fmt.Fprintf(&b, "## Decision\n\n%s\n\n", text)
 	if t.Rejected != "" {
 		fmt.Fprintf(&b, "## Rejected\n\n%s\n\n", t.Rejected)
 	}
