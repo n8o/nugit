@@ -71,18 +71,13 @@ func checkContractObligations(in Input) []model.Finding {
 // obligation, the must's own name, the asserted file, the pattern, and why it
 // is unmet.
 func contractDetail(ob knowledge.Obligation) string {
-	verb := "must match"
-	if ob.Must.Absent {
-		verb = "must NOT match"
-	}
 	where := ob.RecordPath
 	if ob.Origin != "" {
 		where = "peer " + ob.Origin + ":" + ob.RecordPath
 	}
-	return fmt.Sprintf("%s (%s) names this repo as party %q and requires %q: %s %s /%s/ — %s; "+
-		"satisfy it here, or supersede the contract where it is declared",
-		ob.QualifiedID(), where, ob.Party, ob.Must.Name,
-		ob.Must.File, verb, ob.Must.Matches, ob.Reason)
+	return fmt.Sprintf("%s (%s) names this repo as party %q and requires %q — %s. "+
+		"Satisfy it here, or supersede the contract where it is declared.",
+		ob.QualifiedID(), where, ob.Party, ob.Must.Name, ob.Reason)
 }
 
 // refReader reads asserted files from the REVIEWED REF, never the working tree

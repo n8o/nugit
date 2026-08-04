@@ -52,6 +52,18 @@ plus `source:`, scoped + keyworded for retrieval, linked to the decisions they
 ground via `informs:<id>` edges (ADR-0014). Distill the claims, link the document —
 never paste the paper.
 
+**Two-sided invariants are enforceable across repos** — `.nugit/contracts/` holds
+`type: contract` objects: an invariant spanning two repos in one organization,
+declared **once** by the repo that owns it, naming each party by a stable org-wide
+repo id. Each counterparty reads it through `peers:` (ADR-0032), matches its own
+`org.repo` identity, and checks **only its own** obligations at the reviewed ref —
+so "the sibling must add a mirror guard" stops being a sentence nobody's CI can
+fail on (ADR-0033). Assertions are declarative only: a Go RE2 regexp (linear time)
+over one named file, optionally negated with `absent: true`. A contract can never
+execute a script or a command — it is text read out of another repo's checkout.
+Warn by default (`contracts.mode: warn|fail|off`), and entirely inert until you
+configure `org.repo`: nugit never guesses which party a repo is.
+
 **The store fills itself** — `nugit init` installs a commit-msg hook that validates
 trailer blocks; `nugit remember` jots ephemeral working memory; `nugit distill`
 promotes deliberate `decision:`/recurring `learned:` trailers into durable ADRs/lessons.
