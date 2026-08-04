@@ -134,10 +134,12 @@ graph LR
   retrieval --> c4
   retrieval --> config
   retrieval --> evidence
+  retrieval --> gitutil
   retrieval --> knowledge
   retrieval --> localmem
   retrieval --> mapping
   retrieval --> model_
+  retrieval --> trailers
   scaffold --> bootstrap
   scaffold --> gitutil
   significance --> model_

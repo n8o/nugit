@@ -58,19 +58,24 @@ type C4Slice struct {
 
 // Bundle is the composed result.
 type Bundle struct {
-	Path            string   `json:"path"`
-	Component       string   `json:"component"`
-	C4              C4Slice  `json:"c4_slice"`
-	Decisions       []Item   `json:"decisions"`
-	Spec            *Item    `json:"spec,omitempty"`
-	Lessons         []Item   `json:"lessons"`
-	References      []Item   `json:"references,omitempty"` // distilled external sources
-	Glossary        []string `json:"glossary"`
-	WorkingMemory   []string `json:"working_memory,omitempty"` // ephemeral .nugit-local notes
-	Truncated       bool     `json:"truncated"`
-	Dropped         []string `json:"dropped,omitempty"` // "type id (reason)" — never a silent cut
-	EstimatedTokens int      `json:"estimated_tokens"`
-	BudgetTokens    int      `json:"budget_tokens"`
+	Path          string   `json:"path"`
+	Component     string   `json:"component"`
+	C4            C4Slice  `json:"c4_slice"`
+	Decisions     []Item   `json:"decisions"`
+	Spec          *Item    `json:"spec,omitempty"`
+	Lessons       []Item   `json:"lessons"`
+	References    []Item   `json:"references,omitempty"` // distilled external sources
+	Glossary      []string `json:"glossary"`
+	WorkingMemory []string `json:"working_memory,omitempty"` // ephemeral .nugit-local notes
+	// PathHistory: recent commits touching the queried path (subject + captured
+	// decision:/learned: trailers), derived from git at read time (ADR-0024).
+	// Lowest fill priority — it exists to spend budget the typed sections left
+	// unused, so it is the first thing dropped when the budget is tight.
+	PathHistory     []HistoryEntry `json:"path_history,omitempty"`
+	Truncated       bool           `json:"truncated"`
+	Dropped         []string       `json:"dropped,omitempty"` // "type id (reason)" — never a silent cut
+	EstimatedTokens int            `json:"estimated_tokens"`
+	BudgetTokens    int            `json:"budget_tokens"`
 }
 
 // Context composes the bundle for opt.Path.
@@ -240,6 +245,7 @@ func Context(opt Options) (Bundle, error) {
 
 	b.Decisions, b.Spec, b.Lessons, b.References, b.Glossary = decisions, spec, lessons, references, glossary
 	b.WorkingMemory = workingMemory(opt.RepoDir, comp, kw)
+	b.PathHistory = pathHistory(opt.RepoDir, path)
 	truncate(&b, budget)
 	return b, nil
 }
@@ -264,19 +270,12 @@ func workingMemory(repoDir, comp string, kw map[string]bool) []string {
 }
 
 func hasKeyword(e localmem.Entry, kw map[string]bool) bool {
-	// Whole-token match (same tokenization as keywords()), not substring — so "go"
-	// doesn't spuriously match "algorithm".
-	for tok := range keywords(e.Text + " " + strings.Join(e.Keywords, " ")) {
-		if kw[tok] {
-			return true
-		}
-	}
-	return false
+	return overlaps(e.Text+" "+strings.Join(e.Keywords, " "), kw)
 }
 
 // truncate enforces the token budget by type priority (c4 > spec > decisions >
-// lessons > references > glossary), dropping lowest-priority items first and
-// recording each drop — never a silent cut.
+// lessons > references > glossary > working memory > path history), dropping
+// lowest-priority items first and recording each drop — never a silent cut.
 func truncate(b *Bundle, budget int) {
 	used := tokensOf(b.C4.Component) + 20
 	if b.Spec != nil {
@@ -317,7 +316,7 @@ func truncate(b *Bundle, budget int) {
 		}
 	}
 	b.Glossary = g
-	// working memory is lowest priority (ephemeral scratch) — dropped first
+	// working memory is near-lowest priority (ephemeral scratch)
 	var wm []string
 	for _, t := range b.WorkingMemory {
 		tk := tokensOf(t)
@@ -330,5 +329,19 @@ func truncate(b *Bundle, budget int) {
 		}
 	}
 	b.WorkingMemory = wm
+	// path history is the LAST priority (ADR-0024): the budget-fill section
+	// only exists because budget remains, so it is dropped first when tight —
+	// and its drops are reported like every other kind, never a silent cut.
+	var ph []HistoryEntry
+	for _, h := range b.PathHistory {
+		if used+h.tokens <= budget {
+			used += h.tokens
+			ph = append(ph, h)
+		} else {
+			b.Truncated = true
+			b.Dropped = append(b.Dropped, "path-history "+h.SHA+" (over budget)")
+		}
+	}
+	b.PathHistory = ph
 	b.EstimatedTokens = used
 }

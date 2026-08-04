@@ -211,13 +211,12 @@ const (
 	fieldSep  = "\x1f" // unit separator
 )
 
-// Log returns the commits in (base, head], newest last, with full bodies.
-func (r Repo) Log(base, head string) ([]model.Commit, error) {
-	format := strings.Join([]string{"%H", "%s", "%b"}, fieldSep) + commitSep
-	out, err := r.git("log", "--reverse", "--pretty=format:"+format, base+".."+head)
-	if err != nil {
-		return nil, err
-	}
+// logFormat is the machine-parseable pretty format shared by Log and LogPath.
+const logFormat = "%H" + fieldSep + "%s" + fieldSep + "%b" + commitSep
+
+// parseCommits parses `git log --pretty=format:logFormat` output into commits,
+// in the order git emitted them.
+func parseCommits(out string) []model.Commit {
 	var commits []model.Commit
 	for _, rec := range strings.Split(out, commitSep) {
 		rec = strings.Trim(rec, "\n")
@@ -234,5 +233,31 @@ func (r Repo) Log(base, head string) ([]model.Commit, error) {
 		}
 		commits = append(commits, c)
 	}
-	return commits, nil
+	return commits
+}
+
+// Log returns the commits in (base, head], newest last, with full bodies.
+func (r Repo) Log(base, head string) ([]model.Commit, error) {
+	out, err := r.git("log", "--reverse", "--pretty=format:"+logFormat, base+".."+head)
+	if err != nil {
+		return nil, err
+	}
+	return parseCommits(out), nil
+}
+
+// LogPath returns up to n commits touching path (newest first), restricted to
+// the since window when non-empty (git approxidate, e.g. "90 days"). Bodies
+// are full, so callers can read trailer lines. Bounded by construction (-n
+// plus --since) so it stays cheap on long histories.
+func (r Repo) LogPath(path string, n int, since string) ([]model.Commit, error) {
+	args := []string{"log", "-n", strconv.Itoa(n), "--pretty=format:" + logFormat}
+	if since != "" {
+		args = append(args, "--since="+since)
+	}
+	args = append(args, "--", path)
+	out, err := r.git(args...)
+	if err != nil {
+		return nil, err
+	}
+	return parseCommits(out), nil
 }

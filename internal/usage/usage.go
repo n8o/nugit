@@ -42,6 +42,7 @@ type Record struct {
 	References      int       `json:"references"`
 	Glossary        int       `json:"glossary"`
 	WorkingMemory   int       `json:"working_memory"`
+	PathHistory     int       `json:"path_history"`
 	Spec            bool      `json:"spec"`
 	Dropped         int       `json:"dropped"`
 }
@@ -62,6 +63,7 @@ func FromBundle(source, task string, b retrieval.Bundle) Record {
 		References:      len(b.References),
 		Glossary:        len(b.Glossary),
 		WorkingMemory:   len(b.WorkingMemory),
+		PathHistory:     len(b.PathHistory),
 		Spec:            b.Spec != nil,
 		Dropped:         len(b.Dropped),
 	}

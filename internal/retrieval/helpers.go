@@ -126,15 +126,23 @@ func keywords(task string) map[string]bool {
 	return kw
 }
 
-// matches reports whether a lesson overlaps the task keywords (in its body/id).
-func matches(o *model.KnowledgeObject, kw map[string]bool) bool {
-	hay := strings.ToLower(o.Body + " " + o.ID)
-	for w := range kw {
-		if strings.Contains(hay, w) {
+// overlaps reports whether any whole token of text (keywords() tokenization:
+// lowercased alphanumeric runs of >= 3 chars) is in kw. Whole-token, never
+// substring — "git" cannot match "digital". One matching semantics for every
+// section of the bundle (ADR-0024): precision over recall, because a bundle
+// slot spent on a spurious match displaces a real one.
+func overlaps(text string, kw map[string]bool) bool {
+	for tok := range keywords(text) {
+		if kw[tok] {
 			return true
 		}
 	}
 	return false
+}
+
+// matches reports whether an object overlaps the task keywords (in its body/id).
+func matches(o *model.KnowledgeObject, kw map[string]bool) bool {
+	return overlaps(o.Body+" "+o.ID, kw)
 }
 
 // glossaryTerms returns the "- **term** — def" bullets in play (matching the
@@ -147,21 +155,11 @@ func glossaryTerms(o *model.KnowledgeObject, task, path string) []string {
 		if !strings.HasPrefix(t, "- **") {
 			continue
 		}
-		if len(kw) == 0 || lineMatches(t, kw) {
+		if len(kw) == 0 || overlaps(t, kw) {
 			out = append(out, t)
 		}
 	}
 	return out
-}
-
-func lineMatches(line string, kw map[string]bool) bool {
-	low := strings.ToLower(line)
-	for w := range kw {
-		if strings.Contains(low, w) {
-			return true
-		}
-	}
-	return false
 }
 
 // sortItems orders nearer-scope (component-scoped) before global, current status
