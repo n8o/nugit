@@ -9,7 +9,7 @@ relates_to:
   - constrains:knowledge
   - constrains:consistency
   - constrains:config
-  - informs:ADR-0032
+  - amends:ADR-0032
   - informs:ADR-0011
 provenance:
   commit: seed
@@ -111,6 +111,19 @@ No central index, no promotion, no landscape model, no service.
    list — a contract's entire purpose is to be read by the counterparty, so
    excluding it would make the type useless across the boundary. The rest of the
    ADR-0032 gate is unchanged: global scope only, ratified only.
+
+   **This AMENDS ADR-0032 point 10** (`relates_to: amends:ADR-0032`, per
+   ADR-0015), and the amendment is narrow but real. Point 10 reads "peer
+   knowledge is retrieval-and-context only … structurally guaranteed: the
+   `pr-render` pipeline … does not consult peers at all." After this ADR
+   `pr-render` DOES consult peers, for contracts only, and with
+   `contracts.mode: fail` a peer-declared contract can reach a fail-severity
+   finding. That guarantee is replaced by three gates this repo alone controls:
+   it configures the peer, it declares its own `org.repo` identity, and it sets
+   `contracts.mode`. Recording this as `amends` rather than `informs` is what
+   makes retrieval annotate ADR-0032 as partially overridden — without the edge
+   a reader would be served point 10's structural guarantee as if it still
+   held. Everything else in ADR-0032 stands unchanged.
 
 6. **Assertions are evaluated at the reviewed ref, never the working tree.**
    `LESSON-read-from-reviewed-ref` and ADR-0029's `LoadAtRef` pattern apply
