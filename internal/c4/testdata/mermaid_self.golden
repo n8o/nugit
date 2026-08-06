@@ -1,4 +1,5 @@
 graph LR
+  adopt["Adoption report"]
   agentcfg["Agent wiring"]
   beads["Beads adapter"]
   bootstrap["Bootstrap"]
@@ -40,6 +41,11 @@ graph LR
   trailers["Trailer parser"]
   tsdeps["TS analyzer"]
   usage["Usage log"]
+  adopt --> distill
+  adopt --> gitutil
+  adopt --> model_
+  adopt --> modelfacts
+  adopt --> skillopt
   beads --> gitutil
   beads --> model_
   bootstrap --> cmake
@@ -50,6 +56,7 @@ graph LR
   bootstrap --> pyimports
   bootstrap --> tsdeps
   c4 --> model_
+  cli --> adopt
   cli --> agentcfg
   cli --> c4
   cli --> config

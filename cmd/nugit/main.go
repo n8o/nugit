@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/n8o/nugit/internal/adopt"
 	"github.com/n8o/nugit/internal/agentcfg"
 	"github.com/n8o/nugit/internal/c4"
 	"github.com/n8o/nugit/internal/config"
@@ -47,6 +48,7 @@ import (
 const usage = `nugit — git-native PR view (thin keystone)
 
 usage:
+  nugit adopt [flags]         read-only brownfield report: what the repo's prose claims vs what is there
   nugit init [flags]          scaffold .nugit/ and bootstrap a C4 model
   nugit agent [flags]         print/install the MCP wiring config for a coding agent
   nugit skill [flags]         print/install the agent skill files that teach an agent to use nugit
@@ -95,6 +97,13 @@ context flags:
   -budget n      token budget (default 4000)
   -format f      markdown (default) | json
 
+adopt flags:
+  -C dir              repo directory (default ".")
+  -format f           markdown (default: the adoption pitch) | json
+  -write-candidates   ALSO write the runbook candidates into .nugit/lessons/ as
+                      status: proposed (the candidate lane, ADR-0016). Nothing
+                      else is ever written — the model and config are init's job.
+
 init flags:
   -C dir            repo directory (default ".")
   -mode m           c4 enforcement written to config: warn (default) | enforce
@@ -132,6 +141,8 @@ func main() {
 		os.Exit(2)
 	}
 	switch os.Args[1] {
+	case "adopt":
+		os.Exit(cmdAdopt(os.Args[2:]))
 	case "init":
 		os.Exit(cmdInit(os.Args[2:]))
 	case "agent":
@@ -215,6 +226,39 @@ func versionString() string {
 		return "nugit (devel " + rev + dirty + ")"
 	}
 	return "nugit (devel)"
+}
+
+// cmdAdopt is the brownfield adoption path (ADR-0036): it runs BEFORE `nugit
+// init`, in a repo with no `.nugit/` at all, and computes the argument for
+// adopting — the diff between what the repo's prose claims and what the code
+// detectors actually find, plus how far behind each document is.
+//
+// Read-only by default and ALWAYS exit 0: this is a report, never a gate.
+func cmdAdopt(args []string) int {
+	fs := flag.NewFlagSet("adopt", flag.ExitOnError)
+	dir := fs.String("C", ".", "repo directory")
+	format := fs.String("format", "markdown", "output: markdown | json")
+	write := fs.Bool("write-candidates", false, "also write runbook candidates into .nugit/lessons/ as status: proposed")
+	_ = fs.Parse(args)
+	if *format != "markdown" && *format != "json" {
+		fmt.Fprintf(os.Stderr, "nugit adopt: unknown format %q (want: markdown | json)\n", *format)
+		return 2
+	}
+	rep, err := adopt.Run(adopt.Options{RepoDir: *dir, WriteCandidates: *write})
+	if err != nil {
+		// Even a hard failure stays out of gate territory: report it and stop,
+		// but never invite a caller to wire this into CI as a check.
+		fmt.Fprintf(os.Stderr, "nugit adopt: %v\n", err)
+		return 1
+	}
+	if *format == "json" {
+		out, _ := json.MarshalIndent(rep, "", "  ")
+		fmt.Println(string(out))
+	} else {
+		fmt.Print(rep.Markdown())
+	}
+	fmt.Fprint(os.Stderr, rep.SummaryLine())
+	return 0
 }
 
 func cmdInit(args []string) int {

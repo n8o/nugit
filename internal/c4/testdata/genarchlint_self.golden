@@ -5,6 +5,8 @@ allow:
   depOnAnyVendor: true
 
 components:
+  "adopt":
+    in: "internal/adopt/**"
   "agentcfg":
     in: "internal/agentcfg/**"
   "beads":
@@ -89,6 +91,13 @@ components:
     in: "internal/usage/**"
 
 deps:
+  "adopt":
+    mayDependOn:
+      - "distill"
+      - "gitutil"
+      - "model_"
+      - "modelfacts"
+      - "skillopt"
   "agentcfg":
     mayDependOn: []
   "beads":
@@ -109,6 +118,7 @@ deps:
       - "model_"
   "cli":
     mayDependOn:
+      - "adopt"
       - "agentcfg"
       - "c4"
       - "config"

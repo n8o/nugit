@@ -73,6 +73,13 @@ promotes deliberate `decision:`/recurring `learned:` trailers into durable ADRs/
 ```sh
 go build -o nugit ./cmd/nugit
 
+# BEFORE adopting anything: what does this repo's prose claim, and is it true?
+# Read-only, works with no .nugit/ at all, always exits 0 (ADR-0036).
+./nugit adopt                      # the pitch: phantom services, undocumented units,
+                                   # documents that disagree, and how stale each one is
+./nugit adopt -format json         # the same report, machine-readable
+./nugit adopt -write-candidates    # …and import the runbook shelf as proposed lessons
+
 # adopt in ANY repo: scaffold .nugit/ and bootstrap a C4 model from the real
 # dependency graph (Go import graph / CMake / Python / TS — auto-detected), so the
 # first render is green, not a wall of failures. Installs a commit-msg hook too.

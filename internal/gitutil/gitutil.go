@@ -365,6 +365,48 @@ func parseCommits(out string) []model.Commit {
 	return commits
 }
 
+// LastCommitFor returns the newest commit touching path (repo-relative) as
+// (sha, committer date in RFC3339). A path no commit has ever touched — an
+// untracked or brand-new file — yields ("", "", nil) rather than an error, so a
+// caller reporting document staleness can say "never committed" instead of
+// failing the whole report.
+func (r Repo) LastCommitFor(path string) (sha, date string, err error) {
+	out, err := r.git("log", "-1", "--format=%H"+fieldSep+"%cI", "--", path)
+	if err != nil {
+		return "", "", err
+	}
+	s := strings.TrimSpace(out)
+	if s == "" {
+		return "", "", nil
+	}
+	parts := strings.SplitN(s, fieldSep, 2)
+	if len(parts) < 2 {
+		return parts[0], "", nil
+	}
+	return parts[0], parts[1], nil
+}
+
+// CountCommits returns how many commits revRange contains ("HEAD", or
+// "<sha>..HEAD"), bounded by max: the walk stops there and capped reports that
+// the true number is at least n. The bound exists so a staleness scan over a
+// long history stays O(max) per document rather than O(history).
+func (r Repo) CountCommits(revRange string, max int) (n int, capped bool, err error) {
+	args := []string{"rev-list", "--count"}
+	if max > 0 {
+		args = append(args, "--max-count="+strconv.Itoa(max))
+	}
+	args = append(args, revRange)
+	out, err := r.git(args...)
+	if err != nil {
+		return 0, false, err
+	}
+	n, err = strconv.Atoi(strings.TrimSpace(out))
+	if err != nil {
+		return 0, false, err
+	}
+	return n, max > 0 && n >= max, nil
+}
+
 // Log returns the commits in (base, head], newest last, with full bodies.
 func (r Repo) Log(base, head string) ([]model.Commit, error) {
 	out, err := r.git("log", "--reverse", "--pretty=format:"+logFormat, base+".."+head)
