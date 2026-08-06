@@ -295,6 +295,9 @@ func cmdInit(args []string) int {
 	for _, f := range res.Skipped {
 		fmt.Printf("  skipped  %s (exists; -force to overwrite)\n", f)
 	}
+	if res.ForeignHook != "" {
+		fmt.Printf("\nLeft %s alone — nugit did not write that hook (a commit linter?), and nugit never overwrites a commit contract it does not own, not even with -force.\nTo get trailer validation as well, add this line to it:\n  nugit hook commit-msg \"$1\"\n", res.ForeignHook)
+	}
 	fmt.Println()
 	switch {
 	case *noModel && res.DSLCreated:

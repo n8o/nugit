@@ -38,6 +38,10 @@ type Result struct {
 	DSLCreated    bool   // a workspace.dsl was actually written (not skipped)
 	PolyglotHint  bool   // a root go.mod was used but the layout suggests a polyglot repo
 	HookInstalled bool   // a commit-msg hook was installed
+	// ForeignHook is a commit-msg hook nugit did not write that occupies the
+	// install target. init leaves it alone and names it, rather than silently
+	// clobbering somebody else's commit contract.
+	ForeignHook string
 }
 
 // Run scaffolds .nugit/ under opt.RepoDir.
@@ -188,33 +192,51 @@ func Run(opt Options) (Result, error) {
 }
 
 // installCommitMsgHook writes a commit-msg hook that validates trailer blocks
-// (it skips if nugit isn't on PATH, so it never breaks commits). A pre-existing
-// hook is preserved unless Force is set.
+// (it skips if nugit isn't on PATH, so it never breaks commits).
+//
+// It installs where the repo's hook convention keeps DEVELOPER-owned hooks,
+// which under a shim-generating hook manager is not where core.hooksPath points:
+// the generated shim dir is regenerated on every package install and typically
+// gitignored, so a hook written there would vanish. Target comes from the same
+// gitutil.CommitMsgHook that doctor searches, so init can never write a hook
+// doctor then calls missing.
+//
+// A commit-msg hook nugit did not write is left alone even under Force: Force
+// governs the files nugit itself authors, and a repo using a hook manager very
+// likely has another validator sitting exactly there. Force does refresh a hook
+// that IS nugit's.
 func installCommitMsgHook(res *Result, repoDir string, force bool) {
-	hooks := gitutil.Repo{Dir: repoDir}.HooksDir()
-	if hooks == "" {
+	repo := gitutil.Repo{Dir: repoDir}
+	h := repo.CommitMsgHook()
+	if h.Target == "" {
 		return // not a git repo
 	}
-	path := filepath.Join(hooks, "commit-msg")
-	if _, err := os.Stat(path); err == nil && !force {
-		res.Skipped = append(res.Skipped, path)
+	if foreign := h.ForeignAtTarget(); foreign != "" {
+		res.ForeignHook = foreign
 		return
 	}
-	if err := os.MkdirAll(hooks, 0o755); err != nil {
+	if h.Installed() && !force {
+		res.Skipped = append(res.Skipped, h.Path)
+		return
+	}
+	if err := os.MkdirAll(filepath.Dir(h.Target), 0o755); err != nil {
 		return
 	}
 	// Git runs hooks with cwd = git toplevel; when the nugit root is nested, embed
 	// its prefix so the hook loads the right .nugit/config.yml (not the toplevel's).
 	cArg := ""
-	if prefix := strings.TrimSuffix(gitutil.Repo{Dir: repoDir}.Prefix(), "/"); prefix != "" {
+	if prefix := strings.TrimSuffix(repo.Prefix(), "/"); prefix != "" {
 		cArg = " -C \"" + prefix + "\""
 	}
 	script := "#!/bin/sh\n" +
 		"# installed by `nugit init` — validates the commit-trailer block (§6.1)\n" +
 		"command -v nugit >/dev/null 2>&1 || exit 0\n" +
 		"exec nugit hook commit-msg" + cArg + " \"$1\"\n"
-	if os.WriteFile(path, []byte(script), 0o755) == nil {
-		res.Created = append(res.Created, path)
+	if os.WriteFile(h.Target, []byte(script), 0o755) == nil {
+		// WriteFile leaves an existing file's mode alone; a hook manager's older
+		// layout has git exec this file directly, so the bit has to be there.
+		_ = os.Chmod(h.Target, 0o755)
+		res.Created = append(res.Created, h.Target)
 		res.HookInstalled = true
 	}
 }

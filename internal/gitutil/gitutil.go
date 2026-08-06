@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
@@ -77,8 +78,13 @@ func (r Repo) CurrentBranch() string {
 	return strings.TrimSpace(out)
 }
 
-// HooksDir returns the absolute path of the repo's git hooks directory, or ""
-// when Dir is not in a git repo.
+// HooksDir returns the absolute path of the hooks directory git will actually
+// run for this repo (`rev-parse --git-path hooks`, which honours
+// core.hooksPath), or "" when Dir is not in a git repo.
+//
+// It answers "where does git look?", NOT "where does a developer commit a
+// hook?". Under a shim-generating hook manager those are two different
+// directories; CommitMsgHook is what reconciles them.
 func (r Repo) HooksDir() string {
 	out, err := r.git("rev-parse", "--git-path", "hooks")
 	if err != nil {
@@ -89,6 +95,190 @@ func (r Repo) HooksDir() string {
 		p = filepath.Join(r.Dir, p)
 	}
 	return p
+}
+
+// defaultHooksDir returns $GIT_COMMON_DIR/hooks — git's built-in hooks
+// location, the one core.hooksPath masks — or "" outside a git repo.
+func (r Repo) defaultHooksDir() string {
+	gd := r.CommonGitDir()
+	if gd == "" {
+		return ""
+	}
+	return filepath.Join(gd, "hooks")
+}
+
+// nugitHookSignature is the command every hook `nugit init` writes carries. It
+// is what makes a commit-msg hook nugit's, and matching on it (rather than on
+// the generated header comment) keeps working when a repo chains nugit into a
+// hook of its own — the supported way to coexist with another validator.
+const nugitHookSignature = "nugit hook commit-msg"
+
+// isNugitHook reports whether the file at path delegates to nugit. An unreadable
+// file is "not nugit's": detection degrades to absent, never to a crash.
+func isNugitHook(path string) bool {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	return strings.Contains(string(b), nugitHookSignature)
+}
+
+// hookShimParent reports the developer-owned hooks directory that a GENERATED
+// shim directory delegates to (its parent), or "" when dir is not one.
+//
+// The rule is structural on purpose, not a match on the literal name `.husky`.
+// A shim-generating hook manager — husky >= 9, which most of the JavaScript
+// ecosystem uses — points core.hooksPath at a `_` subdirectory of a directory
+// it does not own, regenerates that `_` on every package install, gitignores
+// it, and has each generated shim run the same-named file in the PARENT: the
+// file a developer actually writes and commits. Two things are observable from
+// the path alone, which is what matters here, because the shim directory does
+// not exist in a fresh checkout until the package manager runs — precisely the
+// state in which this check used to report a correctly-installed hook missing:
+//
+//   - the base name is exactly "_", the conventional "generated, do not edit"
+//     marker; and
+//   - the parent is an existing directory strictly inside the working tree,
+//     i.e. somewhere a developer can commit a file to.
+//
+// The parent's NAME is the half of the convention that varies (husky takes the
+// directory as an argument; `.husky` is only its default), so keying on it
+// would be the brittle choice. The `_` child is the invariant. "Strictly
+// inside" excludes the working-tree root itself, so a core.hooksPath of `_` at
+// the top level cannot turn the whole checkout into a hooks directory.
+func hookShimParent(dir, worktreeRoot string) string {
+	if dir == "" || worktreeRoot == "" || filepath.Base(dir) != "_" {
+		return ""
+	}
+	parent := filepath.Dir(dir)
+	if !strictlyWithin(parent, worktreeRoot) {
+		return ""
+	}
+	if fi, err := os.Stat(parent); err != nil || !fi.IsDir() {
+		return ""
+	}
+	return parent
+}
+
+// resolvePath normalizes symlinked spellings (macOS /var -> /private/var) so
+// paths reached by different routes compare equal, degrading to Clean when the
+// path does not exist.
+func resolvePath(p string) string {
+	if r, err := filepath.EvalSymlinks(p); err == nil {
+		return r
+	}
+	return filepath.Clean(p)
+}
+
+// strictlyWithin reports whether p is a proper descendant of root — never root
+// itself.
+func strictlyWithin(p, root string) bool {
+	rel, err := filepath.Rel(resolvePath(root), resolvePath(p))
+	if err != nil {
+		return false
+	}
+	return rel != "." && !strings.HasPrefix(rel, "..")
+}
+
+// sameDirAny reports whether dir names the same directory as any of dirs.
+func sameDirAny(dir string, dirs []string) bool {
+	rd := resolvePath(dir)
+	for _, d := range dirs {
+		if resolvePath(d) == rd {
+			return true
+		}
+	}
+	return false
+}
+
+// CommitMsgHook is where a repo's commit-msg hook stands. It is the ONE search
+// order that `nugit doctor` (detection) and `nugit init` (installation) both
+// read, so the two cannot disagree about a repo: Target is by construction the
+// last of Dirs, and Dirs is exactly what detection scans.
+type CommitMsgHook struct {
+	// GitHooksDir is the directory git runs (HooksDir): core.hooksPath when set,
+	// git's default hooks dir otherwise. "" outside a git repo.
+	GitHooksDir string
+	// Dirs are the directories whose commit-msg git will execute, in precedence
+	// order: GitHooksDir first, then — when GitHooksDir is a generated shim dir
+	// — the developer-owned parent its shims run.
+	Dirs []string
+	// Path is the commit-msg hook in Dirs that delegates to nugit, or "" when
+	// none does.
+	Path string
+	// Target is where `nugit init` writes: the developer-owned end of the chain,
+	// never the generated shim dir (which the hook manager rewrites and
+	// gitignores). "" outside a git repo.
+	Target string
+	// Foreign are commit-msg hooks present in Dirs that do NOT delegate to nugit
+	// — a commitlint hook, or a hook manager's own generated shim. `init` never
+	// overwrites one.
+	Foreign []string
+	// Inert is a nugit commit-msg hook sitting in git's DEFAULT hooks directory
+	// while core.hooksPath sends git somewhere else: installed, but dead. Empty
+	// in the ordinary case, where the default IS the directory git runs.
+	Inert string
+}
+
+// Installed reports whether a nugit commit-msg hook exists somewhere git runs.
+func (h CommitMsgHook) Installed() bool { return h.Path != "" }
+
+// Shimmed reports whether the directory git runs is a generated shim dir, so
+// the hook a developer commits lives one level up.
+func (h CommitMsgHook) Shimmed() bool { return len(h.Dirs) > 1 }
+
+// ForeignAtTarget returns the path of a non-nugit commit-msg hook occupying the
+// install target, or "".
+func (h CommitMsgHook) ForeignAtTarget() string {
+	for _, p := range h.Foreign {
+		if p == h.Target {
+			return p
+		}
+	}
+	return ""
+}
+
+// CommitMsgHook resolves where this repo's commit-msg hook lives, and where one
+// belongs. Every git failure degrades to the zero value — nothing found,
+// nothing to install — so doctor reports "not installed" and init returns
+// quietly, exactly as they did before core.hooksPath was understood. It never
+// crashes and never blocks.
+func (r Repo) CommitMsgHook() CommitMsgHook {
+	h := CommitMsgHook{GitHooksDir: r.HooksDir()}
+	if h.GitHooksDir == "" {
+		return h
+	}
+	h.Dirs = []string{h.GitHooksDir}
+	if root, err := r.WorktreeRoot(); err == nil {
+		if parent := hookShimParent(h.GitHooksDir, root); parent != "" {
+			h.Dirs = append(h.Dirs, parent)
+		}
+	}
+	h.Target = filepath.Join(h.Dirs[len(h.Dirs)-1], "commit-msg")
+	for _, d := range h.Dirs {
+		p := filepath.Join(d, "commit-msg")
+		if _, err := os.Stat(p); err != nil {
+			continue // a hooks dir that does not exist yet is simply empty
+		}
+		switch {
+		case !isNugitHook(p):
+			h.Foreign = append(h.Foreign, p)
+		case h.Path == "":
+			h.Path = p
+		}
+	}
+	// The plain fallback: git's built-in hooks dir. With core.hooksPath unset it
+	// IS GitHooksDir and this adds nothing. With core.hooksPath set, a nugit hook
+	// left behind there is installed but unreachable — worth naming, because
+	// "your hook is in the wrong place" is a far better message than either
+	// silence or a green check git would not honour.
+	if def := r.defaultHooksDir(); def != "" && !sameDirAny(def, h.Dirs) {
+		p := filepath.Join(def, "commit-msg")
+		if _, err := os.Stat(p); err == nil && isNugitHook(p) {
+			h.Inert = p
+		}
+	}
+	return h
 }
 
 // Toplevel returns the absolute path of the git working-tree root, or Dir if it
