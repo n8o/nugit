@@ -162,6 +162,62 @@ func TestCommonRootFallsBackOutsideGit(t *testing.T) {
 	}
 }
 
+// TrackedFiles reports the index, not the working tree: untracked and ignored
+// paths are absent, and paths are relative to Dir (so a nugit root nested in a
+// bigger repo gets its own coordinates, not git-root ones).
+func TestTrackedFiles(t *testing.T) {
+	dir := t.TempDir()
+	writeF := func(rel, content string) {
+		t.Helper()
+		p := filepath.Join(dir, rel)
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mustGit(t, dir, "init")
+	writeF(".gitignore", "ignored/\n")
+	writeF("a.txt", "a")
+	writeF("sub/b with space.txt", "b")
+	writeF("ignored/c.txt", "c")
+	mustGit(t, dir, "add", "-A")
+	mustGit(t, dir, "commit", "-m", "tracked")
+	writeF("untracked.txt", "u")
+
+	got, err := (Repo{Dir: dir}).TrackedFiles()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{".gitignore", "a.txt", "sub/b with space.txt"} {
+		if !got[want] {
+			t.Errorf("%q should be tracked, got %v", want, got)
+		}
+	}
+	for _, no := range []string{"untracked.txt", "ignored/c.txt"} {
+		if got[no] {
+			t.Errorf("%q must not be reported as tracked", no)
+		}
+	}
+	// From a subdirectory: only that subtree, in subtree-relative coordinates.
+	sub, err := (Repo{Dir: filepath.Join(dir, "sub")}).TrackedFiles()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sub) != 1 || !sub["b with space.txt"] {
+		t.Errorf("subdir TrackedFiles: want [b with space.txt], got %v", sub)
+	}
+}
+
+// Outside a git repo the error must surface, so callers can degrade instead of
+// reading an empty set as "nothing is tracked".
+func TestTrackedFilesNotARepo(t *testing.T) {
+	if _, err := (Repo{Dir: t.TempDir()}).TrackedFiles(); err == nil {
+		t.Fatal("non-repo TrackedFiles: want error, got nil")
+	}
+}
+
 // mustGitAt is mustGit with the commit date pinned (window-boundary tests).
 func mustGitAt(t *testing.T, dir, date string, args ...string) {
 	t.Helper()

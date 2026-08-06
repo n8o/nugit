@@ -387,6 +387,7 @@ workspace "nugit" "Git-native typed knowledge & unified PR view — self-model (
 
             modelfacts -> deploy "reads the container inventory"
             modelfacts -> cmake "reads the dependency edges"
+            modelfacts -> gitutil "admits only git-tracked evidence files"
             obsidian -> knowledge "loads the corpus"
             obsidian -> model_ "uses types"
           }
