@@ -93,7 +93,7 @@ func (r Report) Markdown() string {
 
 	if len(r.Disagreements) > 0 {
 		b.WriteString("## Disagreements between documents\n\n")
-		b.WriteString("The same unit, described differently by two documents. At most one of them is right.\n\n")
+		b.WriteString("The same unit, given two different values for one **scalar** fact by two documents — at most one of them is right. Set-valued differences (two documents citing different files under one component) are not contradictions and are not reported here.\n\n")
 		for i, d := range r.Disagreements {
 			if i == maxListed {
 				fmt.Fprintf(&b, "\n_…and %d more._\n", len(r.Disagreements)-maxListed)
@@ -177,7 +177,7 @@ func (r Report) Headlines() []string {
 		out = append(out, fmt.Sprintf("**%d unit(s) present but undocumented** — real code no inventory mentions at all.", n))
 	}
 	if n := len(r.Disagreements); n > 0 {
-		out = append(out, fmt.Sprintf("**%d disagreement(s) between documents** — the same unit described two different ways.", n))
+		out = append(out, fmt.Sprintf("**%d disagreement(s) between documents** — the same unit given two different values for one scalar fact.", n))
 	}
 	if d := r.stalest(); d != nil {
 		since := fmt.Sprintf("%d", d.CommitsSince)

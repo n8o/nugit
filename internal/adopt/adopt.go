@@ -72,11 +72,14 @@ type Absent struct {
 	Mentions []mention `json:"mentions"`
 }
 
-// Disagreement is one attribute two documents assert differently about the same
-// unit.
+// Disagreement is one SCALAR attribute two documents assert differently about
+// the same unit. Scalar is the whole point: a port has one right answer, so two
+// documents giving two values means one of them is wrong. A set-valued
+// attribute — the files a component touches — has no such property, and is not
+// reported here (ADR-0036).
 type Disagreement struct {
 	Unit   string      `json:"unit"`
-	Attr   string      `json:"attr"` // "port" | "path"
+	Attr   string      `json:"attr"` // "port"
 	Claims []AttrClaim `json:"claims"`
 }
 
@@ -138,7 +141,7 @@ func Run(opt Options) (Report, error) {
 	for _, u := range units {
 		rep.Units = append(rep.Units, Unit(u))
 	}
-	sh := newShape(units)
+	sh := newShape(units, repoDir)
 
 	docPaths := discoverDocs(repoDir)
 	if len(docPaths) == 0 {
@@ -196,9 +199,10 @@ func gatherClaims(docs []docText, sh shape, repoDir string) (map[string]*claim, 
 			name := canonName(tok)
 			c := claims[name]
 			if c == nil {
-				c = &claim{Name: name, Ports: map[string][]mention{}, Paths: map[string][]mention{}}
+				c = &claim{Name: name, Ports: map[string][]mention{}}
 				claims[name] = c
 			}
+			c.addSpelling(tok)
 			key := name + "\x00" + d.Path + "\x00" + strconv.Itoa(sl.Line)
 			if ix, ok := mentionAt[key]; ok {
 				// Same place, second slot: keep the STRONGEST evidence, so a name
@@ -215,18 +219,8 @@ func gatherClaims(docs []docText, sh shape, repoDir string) (map[string]*claim, 
 				seenPerDoc[dk] = true
 				perDoc[d.Path]++
 			}
-			for _, p := range rowPorts(sl.Row) {
+			for _, p := range rowPorts(sl.Row, sl.Header) {
 				c.Ports[d.Path] = append(c.Ports[d.Path], mention{Doc: d.Path, Line: sl.Line, Text: p})
-			}
-			// The unit's OWN path is exactly the interesting claim: two documents
-			// that place one unit in two different directories is the disagreement
-			// this section exists to surface. Only a bare restatement of the name
-			// itself (no directory at all) is dropped.
-			for _, p := range rowPaths(sl.Row) {
-				if normalize(p) == name {
-					continue
-				}
-				c.Paths[d.Path] = append(c.Paths[d.Path], mention{Doc: d.Path, Line: sl.Line, Text: p})
 			}
 		}
 	}
@@ -242,13 +236,35 @@ func gatherClaims(docs []docText, sh shape, repoDir string) (map[string]*claim, 
 // the single most discrediting false positive this report can produce. A name
 // that resolves to a real directory is never called absent, whatever the
 // detectors think of it.
+//
+// Every SPELLING the prose used is checked, not just the name the claim is filed
+// under. A claim is keyed by basename, so `apps/gateway/api/v1` files under
+// `v1`; asking only whether `v1` exists at the root or beside a unit answers a
+// question the document never asked.
 func absentUnits(claims map[string]*claim, sh shape, repoDir string) []Absent {
 	var out []Absent
 	for name, c := range claims {
-		if strongestRule(c) == RuleExact {
+		rule := strongestRule(c)
+		if rule == RuleExact {
 			continue
 		}
-		if sh.names[name] || existsAsDir(repoDir, name, sh) {
+		if sh.existsHere(name) || c.anySpellingResolves(sh) {
+			continue
+		}
+		// CORROBORATION, for co-location only. That rule's whole evidence is
+		// statistical — "most of this group is real, so the rest of it is too" —
+		// and one group in one document is one editor's list. A plan document
+		// that tables a service it intends to build, a numbered migration step
+		// naming a database table, a feature matrix whose Status column reads
+		// "Production-ready": all measured, all admitted by a single qualifying
+		// group, none of them a claim this repo makes about itself. Two
+		// independent documents naming the same missing unit is the shape of the
+		// finding this report exists to make.
+		//
+		// The path-anchor rule is exempt: its evidence is not the document's
+		// structure but the TREE — a parent directory that really exists and
+		// really holds units — which one document cannot manufacture.
+		if rule == RuleColocated && c.docCount() < minCorroborating {
 			continue
 		}
 		ms := append([]mention(nil), c.Mentions...)
@@ -258,14 +274,14 @@ func absentUnits(claims map[string]*claim, sh shape, repoDir string) []Absent {
 			}
 			return ms[i].Line < ms[j].Line
 		})
-		out = append(out, Absent{Name: name, Rule: strongestRule(c), Mentions: ms})
+		out = append(out, Absent{Name: name, Rule: rule, Mentions: ms})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out
 }
 
 // ruleRank orders the admission rules by how much evidence they carry.
-var ruleRank = map[string]int{RuleExact: 0, RuleColocated: 1, RulePathAnchor: 2, RuleFamilyAffix: 3}
+var ruleRank = map[string]int{RuleExact: 0, RuleColocated: 1, RulePathAnchor: 2}
 
 func strongestRule(c *claim) string {
 	best := ""
@@ -277,27 +293,37 @@ func strongestRule(c *claim) string {
 	return best
 }
 
-// existsAsDir reports whether a claimed name corresponds to a real directory:
-// at the repo root, or under any directory that already holds a detected unit.
-// Bounded by the number of unit-bearing parents, so it stays a handful of stats.
-func existsAsDir(repoDir, name string, sh shape) bool {
-	isDir := func(rel string) bool {
-		st, err := os.Stat(filepath.Join(repoDir, filepath.FromSlash(rel)))
-		return err == nil && st.IsDir()
+// minCorroborating is how many DISTINCT documents must name a co-located claim
+// before it is reported absent. Two, for the same reason two entries make a
+// group an inventory: one is an editor, two is the repo.
+const minCorroborating = 2
+
+// docCount is how many distinct documents mention this claim.
+func (c *claim) docCount() int {
+	docs := map[string]bool{}
+	for _, m := range c.Mentions {
+		docs[m.Doc] = true
 	}
-	if strings.Contains(name, "/") {
-		return isDir(name)
+	return len(docs)
+}
+
+// addSpelling records one raw token that produced this claim, deduped.
+func (c *claim) addSpelling(tok string) {
+	t := normalize(tok)
+	for _, s := range c.Spellings {
+		if s == t {
+			return
+		}
 	}
-	if isDir(name) {
-		return true
-	}
-	parents := make([]string, 0, len(sh.parentDir))
-	for p := range sh.parentDir {
-		parents = append(parents, p)
-	}
-	sort.Strings(parents)
-	for _, p := range parents {
-		if isDir(p + "/" + name) {
+	c.Spellings = append(c.Spellings, t)
+}
+
+// anySpellingResolves reports whether any spelling the prose used names
+// something that really exists — the veto that keeps a real directory out of
+// the phantom list.
+func (c *claim) anySpellingResolves(sh shape) bool {
+	for _, s := range c.Spellings {
+		if sh.existsHere(s) {
 			return true
 		}
 	}
@@ -348,8 +374,19 @@ func kindRank(k string) int {
 }
 
 // disagreements finds units two documents describe differently. Only CROSS-
-// document conflicts are reported, and only where both documents actually
-// assert a value: silence is not disagreement.
+// document conflicts are reported, only where both documents actually assert a
+// value (silence is not disagreement), and only for SCALAR attributes.
+//
+// The scalar restriction is a narrowing forced by measurement. It used to
+// include "path", on the theory that two documents placing one unit in two
+// directories is a contradiction. In practice documents do not assert a
+// component's location; they cite some of its files, and different documents
+// cite different ones. On a real monorepo every path finding (7 of 7) was two
+// documents listing different, individually-correct file subsets — noise
+// dressed as a contradiction, next to three genuine port conflicts on a sibling
+// repo. A disagreement is only worth a reader's time when the two values cannot
+// both be true, and that is a property of scalar facts: a port, a version, a
+// replica count. See ADR-0036.
 func disagreements(claims map[string]*claim) []Disagreement {
 	var out []Disagreement
 	names := make([]string, 0, len(claims))
@@ -362,7 +399,7 @@ func disagreements(claims map[string]*claim) []Disagreement {
 		for _, attr := range []struct {
 			name string
 			set  map[string][]mention
-		}{{"port", c.Ports}, {"path", c.Paths}} {
+		}{{"port", c.Ports}} {
 			byDoc := map[string]string{}
 			lineOf := map[string]int{}
 			for doc, ms := range attr.set {

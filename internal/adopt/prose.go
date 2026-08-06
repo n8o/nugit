@@ -8,9 +8,20 @@ package adopt
 // report — a reader who finds one phantom that is really a typo stops reading.
 //
 // So a prose token becomes a CLAIMED UNIT only when the document itself gives
-// structural or lexical evidence that it is naming this repo's units. Four
-// admission rules, each recorded on the finding so a reader can audit which one
-// fired; everything else in the prose is ignored.
+// STRUCTURAL evidence that it is naming this repo's units. Three admission
+// rules, each recorded on the finding so a reader can audit which one fired;
+// everything else in the prose is ignored.
+//
+// There used to be a fourth, lexical rule — "family affix": a token that shares
+// a same-position separator segment with two or more detected units. It was
+// removed after being run against a second real monorepo. Its precision turns
+// out to be a property of the REPO, not of the rule: it is sharp when a repo's
+// units share a distinctive role suffix (`*-service`) and it collapses when they
+// share ordinary domain nouns, because then every hyphenated phrase in ordinary
+// prose carries the family shape. On that repo it admitted 41 of 47 findings,
+// and the sampled ones were struct fields, local variables and a Dockerfile
+// name. Resemblance to a unit name is not evidence about the repo; only the
+// document's own structure is.
 
 import (
 	"io/fs"
@@ -30,38 +41,35 @@ const (
 	// Never yields a phantom; it is how coverage and disagreements are computed.
 	RuleExact = "exact-match"
 	// RuleColocated — the token sits in a table column, sibling list or sibling
-	// heading group where at least two OTHER entries are detected units. The
+	// heading group where at least two OTHER entries RESOLVE in this tree. The
 	// document's own structure declares the group an inventory of this repo.
 	RuleColocated = "inventory-colocation"
 	// RulePathAnchor — the token is path-shaped and its parent directory really
 	// exists and really contains a detected unit, but the full path does not.
 	RulePathAnchor = "path-anchor"
-	// RuleFamilyAffix — the token's first or last segment appears in the same
-	// position in at least two detected unit names, using a separator at least
-	// two detected units use ("x-service" in a repo of "*-service"s).
-	RuleFamilyAffix = "family-affix"
 )
 
 const (
-	// minColocated: how many entries in a group must be real units before the
-	// group counts as an inventory. Two, not one: a single real name next to a
-	// word is a coincidence, two is a list.
+	// minColocated: how many entries in a group must resolve in this tree before
+	// the group counts as an inventory. Two, not one: a single real name next to
+	// a word is a coincidence, two is a list.
 	minColocated = 2
 	// colocatedShare: and they must be at least this fraction of the group.
 	// Without it, ANY long bullet list containing two service names would make
 	// every other bullet a unit claim — measured on a real 21-service monorepo
 	// that admitted 395 phantoms, nearly all of them English words. A document's
-	// structure only vouches for a group when the group is MOSTLY units.
+	// structure only vouches for a group when the group is MOSTLY real.
 	colocatedShare = 0.5
-	// minAffixUnits: how many detected units must share a segment in the same
-	// position before it is a family affix. Same reasoning.
-	minAffixUnits = 2
 	// maxDocBytes bounds a single document read — a generated changelog is not
 	// an inventory and must not be able to blow up the report.
 	maxDocBytes = 1 << 20
 	// maxDocs bounds the corpus walked. Deterministic (docs are sorted) so the
 	// truncation point does not move between runs.
 	maxDocs = 400
+	// maxDirListings bounds how many directories the resolver may read while
+	// deciding whether prose names something real. A docs tree with thousands of
+	// distinct path-shaped tokens must not turn a report into a tree walk.
+	maxDirListings = 2000
 )
 
 // docText is one prose document, read once.
@@ -83,7 +91,11 @@ type claim struct {
 	Name     string
 	Mentions []mention
 	Ports    map[string][]mention // doc -> port values asserted there
-	Paths    map[string][]mention // doc -> path values asserted there
+	// Spellings are the raw tokens that produced this claim. A claim is filed
+	// under its basename, so `apps/gateway/api/v1` files under `v1` — and the
+	// only way to check whether the document was pointing at something that
+	// really exists is to keep the path it actually wrote.
+	Spellings []string
 }
 
 // inventoryRoots are the top-level files an agent or a newcomer actually reads.
@@ -157,52 +169,49 @@ func readDoc(repoDir, rel string) (docText, bool) {
 // prose is the thing under suspicion, so it never gets to define what a unit
 // looks like.
 type shape struct {
-	names     map[string]bool // normalized unit names + dir basenames
-	unitDirs  map[string]bool // normalized detected unit directories
-	parentDir map[string]bool // directories that CONTAIN a detected unit
-	head      map[string]int  // first segment -> how many units use it there
-	tail      map[string]int  // last segment  -> how many units use it there
-	seps      map[string]int  // separator -> how many units use it
+	repoDir     string
+	names       map[string]bool // normalized unit names + dir basenames
+	unitDirs    map[string]bool // normalized detected unit directories
+	parentDir   map[string]bool // directories that CONTAIN a detected unit
+	parents     []string        // parentDir, sorted — deterministic lookup order
+	unitDirList []string        // unitDirs, sorted — deterministic lookup order
+
+	// unitLike / existing / listings memoize the filesystem side of the two
+	// resolution tests. The maps are shared by every copy of the shape value,
+	// which is the point: the quorum test runs once per slot in a whole docs tree.
+	unitLike map[string]bool
+	existing map[string]bool
+	listings map[string]map[string]string // dir -> normalized child name -> real name
 }
 
 var sepChars = []string{"-", "_", "."}
 
-func newShape(units []unitRef) shape {
+func newShape(units []unitRef, repoDir string) shape {
+	if repoDir == "" {
+		repoDir = "."
+	}
 	s := shape{
-		names: map[string]bool{}, unitDirs: map[string]bool{}, parentDir: map[string]bool{},
-		head: map[string]int{}, tail: map[string]int{}, seps: map[string]int{},
+		repoDir: repoDir,
+		names:   map[string]bool{}, unitDirs: map[string]bool{}, parentDir: map[string]bool{},
+		unitLike: map[string]bool{}, existing: map[string]bool{},
+		listings: map[string]map[string]string{},
 	}
 	for _, u := range units {
-		n := normalize(u.Name)
-		base := normalize(path.Base(u.Dir))
-		s.names[n] = true
-		s.names[base] = true
-		s.unitDirs[strings.ToLower(u.Dir)] = true
+		s.names[normalize(u.Name)] = true
+		s.names[normalize(path.Base(u.Dir))] = true
+		s.unitDirs[normalize(u.Dir)] = true
 		if d := path.Dir(u.Dir); d != "." && d != "/" && d != "" {
-			s.parentDir[strings.ToLower(d)] = true
-		}
-		// Count each affix ONCE PER UNIT. A unit contributes two spellings (its
-		// detector name and its directory basename) and they are usually equal;
-		// counting both would let ONE unit mint a "family", which is precisely
-		// what the two-unit threshold exists to prevent.
-		counted := map[string]bool{}
-		bump := func(m map[string]int, key, val string) {
-			if val == "" || counted[key+":"+val] {
-				return
-			}
-			counted[key+":"+val] = true
-			m[val]++
-		}
-		for _, name := range []string{n, base} {
-			segs, sep := segments(name)
-			if len(segs) < 2 {
-				continue
-			}
-			bump(s.seps, "sep", sep)
-			bump(s.head, "head", segs[0])
-			bump(s.tail, "tail", segs[len(segs)-1])
+			s.parentDir[normalize(d)] = true
 		}
 	}
+	for p := range s.parentDir {
+		s.parents = append(s.parents, p)
+	}
+	for d := range s.unitDirs {
+		s.unitDirList = append(s.unitDirList, d)
+	}
+	sort.Strings(s.parents)
+	sort.Strings(s.unitDirList)
 	return s
 }
 
@@ -248,6 +257,27 @@ func init() {
 // fileExt rejects a token that is plainly a file, not a unit.
 var fileExt = regexp.MustCompile(`(?i)\.(md|go|py|ts|tsx|js|jsx|rs|c|cc|cpp|h|hpp|java|rb|sh|bash|zsh|yml|yaml|json|toml|ini|cfg|txt|lock|sum|mod|png|jpg|svg|gif|pdf|html|css|xml|proto|sql|env|dockerfile)$`)
 
+// fileTypeWord is the other half of that test. Some build files put the type
+// word FIRST and the subject after it — `Dockerfile.press-binder`,
+// `Makefile.local`, `CMakeLists.shared` — which normalizes into a perfectly
+// unit-shaped two-segment name and sails past a trailing-extension check. A
+// token whose basename starts `<file-type>.` is a filename, not a unit.
+//
+// The dot is required. A unit may legitimately be NAMED after what it does with
+// those files (`dockerfile-linter`), and only the `<type>.<subject>` spelling is
+// unambiguously a file.
+var fileTypeWord = map[string]bool{}
+
+func init() {
+	for _, w := range strings.Fields(`
+		dockerfile containerfile makefile cmakelists justfile taskfile
+		jenkinsfile procfile gemfile rakefile brewfile vagrantfile
+		readme license notice changelog copying codeowners
+	`) {
+		fileTypeWord[w] = true
+	}
+}
+
 // versionish rejects "v1.2.3", "1.2", "0.20.0-rc1" — a version is not a unit.
 var versionish = regexp.MustCompile(`^v?\d+(\.\d+)*(-[a-z0-9.]+)?$`)
 
@@ -289,6 +319,15 @@ func plausibleToken(tok string) bool {
 	segs := strings.FieldsFunc(t, func(r rune) bool {
 		return r == '-' || r == '.' || r == '/'
 	})
+	if len(segs) == 0 {
+		return false
+	}
+	// A leading file-type word makes the whole token a filename, wherever it was
+	// found: `Dockerfile.press-binder` is a build file, not a service.
+	if base := path.Base(t); strings.Contains(base, ".") &&
+		fileTypeWord[base[:strings.Index(base, ".")]] {
+		return false
+	}
 	generic := 0
 	for _, s := range segs {
 		if docVocab[s] {
@@ -328,9 +367,9 @@ func (s shape) admit(tok string, colocated bool, repoDir string) string {
 	if s.pathAnchored(t, repoDir) {
 		return RulePathAnchor
 	}
-	if s.familyAffix(t) {
-		return RuleFamilyAffix
-	}
+	// And that is the whole list. A token that merely LOOKS like this repo's
+	// units — same separator, same head or tail segment — is not admitted: see
+	// the package comment for why that rule was removed rather than narrowed.
 	return ""
 }
 
@@ -341,13 +380,148 @@ func nameShaped(t string) bool {
 	return len(segs) > 1 || strings.Contains(t, "/")
 }
 
-// isExact reports whether tok names a detected unit — by unit name, by unit
-// directory, or by the basename of either. The same test decides RuleExact and
-// decides whether a table column / list / heading group is an inventory, so the
-// two can never disagree about what "a real unit" means.
+// isExact reports whether tok names a DETECTED unit — by unit name, by unit
+// directory, or by the basename of either. It decides RuleExact and nothing
+// else.
 func (s shape) isExact(tok string) bool {
 	t := normalize(tok)
-	return s.names[t] || s.names[normalize(path.Base(t))] || s.unitDirs[strings.ToLower(t)]
+	return s.names[t] || s.names[normalize(path.Base(t))] || s.unitDirs[t]
+}
+
+// namesAUnit is the CO-LOCATION QUORUM currency: does this token name a unit of
+// this repo — one the detectors found, or one sitting right beside a unit they
+// did find?
+//
+// Widening it from "detected unit" to "detected unit or its sibling directory"
+// is the fix for a measured defect. On a real monorepo a 16-row service table in
+// which 15 rows were real directories under `apps/` failed to qualify as an
+// inventory, because only 4 of those services had a detector (ADR-0021 has
+// blind spots) — so the one row that was genuinely a phantom could not be
+// admitted by the document's structure and fell to a lexical rule instead.
+//
+// It stops at siblings deliberately. A directory at the REPO ROOT (`build/`,
+// `k8s/`, `docs/`) is not a unit, and counting one as quorum currency turns a
+// license table's "Build" column into an inventory — measured, on the same repo.
+//
+// Comparison is on NORMALIZED path segments, so `libs/crate_index` answers to
+// `crate-index`. Prose spells a directory the way prose feels like.
+func (s shape) namesAUnit(tok string) bool {
+	return s.lookup(s.unitLike, tok, func(t string) bool {
+		if s.names[t] || s.names[normalize(path.Base(t))] || s.unitDirs[t] {
+			return true
+		}
+		if strings.Contains(t, "/") {
+			return s.parentDir[path.Dir(strings.Trim(t, "/"))] && s.dirExists(t)
+		}
+		for _, p := range s.parents {
+			if s.dirExists(p + "/" + t) {
+				return true
+			}
+		}
+		return false
+	})
+}
+
+// existsHere is the ABSENCE VETO: does this token name anything real in this
+// tree at all? Wider than namesAUnit on purpose — a root-level directory counts,
+// and so does the exact path the document wrote. The asymmetry is the point:
+// deciding a group is an inventory should be strict, and deciding a name is a
+// phantom should be generous, because a real directory reported as absent is the
+// single most discrediting output this report can produce.
+func (s shape) existsHere(tok string) bool {
+	return s.lookup(s.existing, tok, func(t string) bool {
+		if s.names[t] || s.names[normalize(path.Base(t))] || s.unitDirs[t] {
+			return true
+		}
+		if s.dirExists(t) {
+			return true
+		}
+		if !strings.Contains(t, "/") {
+			for _, p := range s.parents {
+				if s.dirExists(p + "/" + t) {
+					return true
+				}
+			}
+			return false
+		}
+		// A path in a document is not always relative to the repo root. A unit
+		// that is itself a workspace repeats the layout inside its own directory,
+		// so a paragraph about that unit writes `apps/frontend` meaning
+		// `<that unit>/apps/frontend`. Reading it against the root alone reports a
+		// directory that is right there as a phantom — measured.
+		for _, u := range s.unitDirList {
+			if s.dirExists(u + "/" + t) {
+				return true
+			}
+		}
+		return false
+	})
+}
+
+// lookup normalizes, memoizes and rejects the degenerate tokens once, so the two
+// tests above are just their own predicate.
+func (s shape) lookup(memo map[string]bool, tok string, fn func(string) bool) bool {
+	t := normalize(tok)
+	if t == "" || t == "." || t == "/" {
+		return false
+	}
+	if v, ok := memo[t]; ok {
+		return v
+	}
+	v := fn(t)
+	memo[t] = v
+	return v
+}
+
+// dirExists walks a repo-relative path segment by segment, matching each
+// segment against the real directory entries by normalized name.
+func (s shape) dirExists(rel string) bool {
+	cur := "."
+	segs := strings.Split(strings.Trim(rel, "/"), "/")
+	if len(segs) == 0 || len(segs) > 8 {
+		return false
+	}
+	for _, seg := range segs {
+		if seg == "" || seg == "." || seg == ".." {
+			return false
+		}
+		real, ok := s.listing(cur)[normalize(seg)]
+		if !ok {
+			return false
+		}
+		if cur == "." {
+			cur = real
+		} else {
+			cur += "/" + real
+		}
+	}
+	return cur != "."
+}
+
+// listing returns one directory's child DIRECTORIES, keyed by normalized name,
+// read at most once per run and capped so a docs tree full of path-shaped
+// tokens cannot turn this report into a tree walk.
+func (s shape) listing(rel string) map[string]string {
+	if m, ok := s.listings[rel]; ok {
+		return m
+	}
+	m := map[string]string{}
+	if len(s.listings) < maxDirListings {
+		ents, err := os.ReadDir(filepath.Join(s.repoDir, filepath.FromSlash(rel)))
+		if err == nil {
+			for _, e := range ents {
+				if !e.IsDir() {
+					continue
+				}
+				n := normalize(e.Name())
+				if _, dup := m[n]; !dup {
+					m[n] = e.Name()
+				}
+			}
+		}
+	}
+	s.listings[rel] = m
+	return m
 }
 
 // canonName is the key a claim is filed under: a path-shaped claim
@@ -373,52 +547,13 @@ func (s shape) pathAnchored(t string, repoDir string) bool {
 	if parent == "." || parent == "/" {
 		return false
 	}
-	if !s.parentDir[strings.ToLower(parent)] {
+	if !s.parentDir[normalize(parent)] {
 		return false
 	}
 	if st, err := os.Stat(filepath.Join(repoDir, filepath.FromSlash(parent))); err != nil || !st.IsDir() {
 		return false
 	}
 	return true
-}
-
-// familyAffix: the token is named the way this repo names its units — same
-// separator as at least two units, and a first or last segment that at least two
-// units use in the SAME position. Position matters: "service" trailing
-// "parcel-service" and "crate-service" is a family; "service" appearing anywhere in
-// anything is doc vocabulary.
-func (s shape) familyAffix(t string) bool {
-	if strings.Contains(t, "/") {
-		return false // a path is the path-anchor rule's business, not this one
-	}
-	segs, sep := segments(t)
-	if len(segs) < 2 || sep == "" || s.seps[sep] < minAffixUnits {
-		return false
-	}
-	// "per-service", "multi-service", "non-service" all carry the family tail
-	// and none of them is a unit: a qualifier in front of an affix makes an
-	// English phrase, not a name.
-	if qualifierWord[segs[0]] {
-		return false
-	}
-	return s.head[segs[0]] >= minAffixUnits || s.tail[segs[len(segs)-1]] >= minAffixUnits
-}
-
-// qualifierWord is the closed set of English modifiers that turn a family affix
-// into a phrase. Closed on purpose — a general dictionary would be a permanent
-// maintenance surface, and this list covers the shapes prose actually produces.
-var qualifierWord = map[string]bool{}
-
-func init() {
-	for _, w := range strings.Fields(`
-		per the this that each any all some every one two both other another
-		non pre post sub super multi cross inter intra self semi anti co un re
-		new old first second third last next prev previous current legacy
-		single dual full half high low mid best worst same different
-		our your their its my its no not more less most least
-	`) {
-		qualifierWord[w] = true
-	}
 }
 
 // --- slot extraction ---------------------------------------------------------
@@ -429,18 +564,23 @@ var (
 	backtickRE   = regexp.MustCompile("`([^`\n]+)`")
 	tableSepRE   = regexp.MustCompile(`^\|?[\s:|-]*-[\s:|-]*\|?$`)
 	portInline   = regexp.MustCompile(`(?i)\bport[s]?\b[^0-9]{0,12}(\d{2,5})|:(\d{2,5})\b`)
-	pathValueRE  = regexp.MustCompile(`^[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)+/?$`)
-	hasLetter    = regexp.MustCompile(`[A-Za-z]`)
 	urlSpan      = regexp.MustCompile(`(?i)\b[a-z][a-z0-9+.-]*://\S+`)
+	portColumnRE = regexp.MustCompile(`(?i)\bports?\b`)
 )
 
 // slot is one place a document names something, with the whole line kept so the
-// attributes asserted alongside (a port, a path) can be read off it.
+// scalar attributes asserted alongside (a port) can be read off it.
 type slot struct {
 	Line      int
 	Text      string // the cell / heading / item text
 	Row       string // the full source line
 	Colocated bool   // the enclosing group is an inventory of this repo's units
+	// Header is the enclosing table's header row, cell by cell, for a table slot
+	// and nil otherwise. A bare number in a table cell is a port only when the
+	// column says it is a port — the column headed "Default" in an env-var table
+	// is full of timeouts in milliseconds, and reading those as ports invents a
+	// disagreement for every row.
+	Header []string
 }
 
 // scanDoc walks one document and yields every slot: table cells, headings, list
@@ -456,9 +596,10 @@ func scanDoc(d docText, s shape) []slot {
 	// group key -> indices into slots
 	groups := map[string][]int{}
 	var tableStart, tableRow, listRun int
+	var tableHeader []string
 	inFence := false
 
-	addSlot := func(line int, text, row, group string) {
+	addSlot := func(line int, text, row, group string, header []string) {
 		text = strings.TrimSpace(text)
 		if text == "" {
 			return
@@ -469,7 +610,7 @@ func scanDoc(d docText, s shape) []slot {
 		if strings.HasPrefix(text, "@") {
 			return
 		}
-		slots = append(slots, slot{Line: line, Text: text, Row: row})
+		slots = append(slots, slot{Line: line, Text: text, Row: row, Header: header})
 		if group != "" {
 			groups[group] = append(groups[group], len(slots)-1)
 		}
@@ -495,6 +636,7 @@ func scanDoc(d docText, s shape) []slot {
 			}
 			if tableStart == 0 {
 				tableStart, tableRow = line, 0
+				tableHeader = splitRow(t)
 				listRun++
 			}
 			tableRow++
@@ -503,17 +645,17 @@ func scanDoc(d docText, s shape) []slot {
 				if tableRow > 1 { // row 1 is the header: column labels, not units
 					g = "table:" + strconv.Itoa(tableStart) + ":" + strconv.Itoa(col)
 				}
-				addSlot(line, cellToken(cell), t, g)
+				addSlot(line, cellToken(cell), t, g, tableHeader)
 			}
 		case headingRE.MatchString(t):
 			m := headingRE.FindStringSubmatch(t)
-			addSlot(line, cellToken(m[2]), t, "head:"+strconv.Itoa(len(m[1])))
+			addSlot(line, cellToken(m[2]), t, "head:"+strconv.Itoa(len(m[1])), nil)
 			tableStart, listRun = 0, listRun+1
 		case listMarkerRE.MatchString(raw):
 			m := listMarkerRE.FindStringSubmatch(raw)
 			// A list group is one CONTIGUOUS run at one indent, never every
 			// bullet in the document: an inventory is a list, not a file.
-			addSlot(line, cellToken(m[3]), t, "list:"+strconv.Itoa(listRun)+":"+strconv.Itoa(len(m[1])))
+			addSlot(line, cellToken(m[3]), t, "list:"+strconv.Itoa(listRun)+":"+strconv.Itoa(len(m[1])), nil)
 			tableStart = 0
 		default:
 			if len(raw) > 0 && raw[0] != ' ' && raw[0] != '\t' {
@@ -523,23 +665,27 @@ func scanDoc(d docText, s shape) []slot {
 		}
 		// Inline code spans anywhere on the line are always candidates, but they
 		// join no group: `foo` in running prose is a mention, not an inventory.
+		hdr := []string(nil)
+		if tableStart != 0 {
+			hdr = tableHeader
+		}
 		for _, m := range backtickRE.FindAllStringSubmatch(t, -1) {
-			addSlot(line, m[1], t, "")
+			addSlot(line, m[1], t, "", hdr)
 		}
 	}
 
 	// Pass two: a group is an inventory when at least minColocated of its
-	// members are real units AND they are at least colocatedShare of it. Both
-	// halves are load-bearing — the count stops a coincidence, the share stops a
-	// long list of prose that happens to contain two service names.
+	// members NAME A UNIT of this repo AND they are at least colocatedShare of
+	// it. Both halves are load-bearing — the count stops a coincidence, the
+	// share stops a long list of prose that happens to contain two service names.
 	for _, idxs := range groups {
-		exact := 0
+		real := 0
 		for _, ix := range idxs {
-			if tok := primaryToken(slots[ix].Text); tok != "" && s.isExact(tok) {
-				exact++
+			if tok := primaryToken(slots[ix].Text); tok != "" && s.namesAUnit(tok) {
+				real++
 			}
 		}
-		if exact < minColocated || float64(exact) < colocatedShare*float64(len(idxs)) {
+		if real < minColocated || float64(real) < colocatedShare*float64(len(idxs)) {
 			continue
 		}
 		for _, ix := range idxs {
@@ -582,10 +728,23 @@ func primaryToken(text string) string {
 }
 
 // --- attributes --------------------------------------------------------------
+//
+// Only SCALAR attributes are collected, and that is a narrowing forced by
+// evidence. An attribute is worth reporting a disagreement about when two
+// documents asserting different values means at least one of them is WRONG — a
+// port, a version, a replica count: one fact, one value. Paths are not like
+// that. Two documents listing different files under one component are both
+// telling the truth about different subsets, and every path "disagreement" this
+// report produced on a real monorepo (7 of 7) was that shape. See ADR-0036.
 
-// rowPorts returns the port numbers asserted on a line: a bare numeric table
-// cell in range, or an inline "port 8080" / ":8080".
-func rowPorts(row string) []string {
+// rowPorts returns the port numbers asserted on a line: a bare numeric cell in
+// a column the table HEADS as a port, or an inline "port 8080" / ":8080".
+//
+// The header condition is not decoration. Without it every bare number in every
+// table is a port, and a service-configuration table whose "Default" column
+// holds `15000` (a poll interval, in milliseconds) manufactures a port conflict
+// with the same service's real port — measured on a real repo.
+func rowPorts(row string, header []string) []string {
 	seen := map[string]bool{}
 	var out []string
 	add := func(v string) {
@@ -597,7 +756,10 @@ func rowPorts(row string) []string {
 		out = append(out, v)
 	}
 	if strings.HasPrefix(strings.TrimSpace(row), "|") {
-		for _, cell := range splitRow(row) {
+		for col, cell := range splitRow(row) {
+			if col >= len(header) || !portColumnRE.MatchString(header[col]) {
+				continue
+			}
 			c := strings.Trim(strings.TrimSpace(cell), "`*_ ")
 			if _, err := strconv.Atoi(c); err == nil {
 				add(c)
@@ -611,38 +773,6 @@ func rowPorts(row string) []string {
 		for _, g := range m[1:] {
 			if g != "" {
 				add(g)
-			}
-		}
-	}
-	sort.Strings(out)
-	return out
-}
-
-// rowPaths returns the repo-path-shaped values asserted on a line.
-func rowPaths(row string) []string {
-	seen := map[string]bool{}
-	var out []string
-	for _, m := range backtickRE.FindAllStringSubmatch(row, -1) {
-		v := strings.TrimSpace(m[1])
-		if !pathValueRE.MatchString(v) || urlish.MatchString(v) || !hasLetter.MatchString(v) {
-			continue
-		}
-		v = strings.TrimSuffix(v, "/")
-		if !seen[v] {
-			seen[v] = true
-			out = append(out, v)
-		}
-	}
-	if strings.HasPrefix(strings.TrimSpace(row), "|") {
-		for _, cell := range splitRow(row) {
-			v := strings.Trim(strings.TrimSpace(cell), "`*_ ")
-			if !pathValueRE.MatchString(v) || urlish.MatchString(v) || !hasLetter.MatchString(v) {
-				continue
-			}
-			v = strings.TrimSuffix(v, "/")
-			if !seen[v] {
-				seen[v] = true
-				out = append(out, v)
 			}
 		}
 	}

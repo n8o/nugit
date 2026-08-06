@@ -164,17 +164,11 @@ func TestPresentButUndocumented(t *testing.T) {
 
 func TestDisagreements(t *testing.T) {
 	rep := run(t, baseRepo(t))
-	var ports, paths *Disagreement
+	var ports *Disagreement
 	for i := range rep.Disagreements {
 		d := &rep.Disagreements[i]
-		if d.Unit != "parcel-service" {
-			continue
-		}
-		switch d.Attr {
-		case "port":
+		if d.Unit == "parcel-service" && d.Attr == "port" {
 			ports = d
-		case "path":
-			paths = d
 		}
 	}
 	if ports == nil {
@@ -193,15 +187,57 @@ func TestDisagreements(t *testing.T) {
 	if seen["AGENTS.md"] != "8080" || seen["docs/architecture.md"] != "9090" {
 		t.Errorf("port claims = %v, want AGENTS.md 8080 vs docs/architecture.md 9090", seen)
 	}
-	if paths == nil {
-		t.Fatalf("no path disagreement for parcel-service; got %+v", rep.Disagreements)
-	}
-	// crate-service agrees on both attributes in both documents: silence and
-	// agreement must never be reported as conflict.
+	// crate-service agrees in both documents: silence and agreement must never
+	// be reported as conflict.
 	for _, d := range rep.Disagreements {
 		if d.Unit == "crate-service" {
 			t.Errorf("crate-service agrees in both documents but was reported: %+v", d)
 		}
+	}
+}
+
+// The two documents in baseRepo place parcel-service in two different
+// directories (`apps/parcel-service` vs `services/parcel`). That is NOT reported
+// as a disagreement, and the omission is deliberate: a document listing files
+// under a component is not asserting the component's location, and on a real
+// monorepo every single "path disagreement" (7 of 7) was two documents citing
+// different, individually-correct file subsets. Only scalar facts — where two
+// values cannot both be true — are contradictions. See ADR-0036.
+func TestSetValuedPathDifferencesAreNotDisagreements(t *testing.T) {
+	rep := run(t, baseRepo(t))
+	for _, d := range rep.Disagreements {
+		if d.Attr != "port" {
+			t.Errorf("non-scalar disagreement reported: %+v", d)
+		}
+	}
+	// And the headline must not count them either.
+	for _, line := range rep.Headlines() {
+		if strings.Contains(line, "disagreement") && !strings.Contains(line, "1 disagreement") {
+			t.Errorf("headline counts more than the one scalar conflict: %q", line)
+		}
+	}
+}
+
+// A bare number in a table cell is a port only when the column heads as one.
+// A service-configuration table whose "Default" column holds a poll interval in
+// milliseconds otherwise manufactures a port conflict for every row it has.
+func TestBareNumbersAreOnlyPortsInAPortColumn(t *testing.T) {
+	dir := t.TempDir()
+	initRepo(t, dir)
+	service(t, dir, "parcel-service")
+	service(t, dir, "crate-service")
+	write(t, dir, "AGENTS.md", "# Agents\n\n| service | port |\n|---|---|\n| `parcel-service` | 8080 |\n| `crate-service` | 8081 |\n")
+	write(t, dir, "docs/config.md", `# Configuration
+
+| service | variable | default | description |
+|---|---|---|---|
+| `+"`parcel-service`"+` | `+"`POLL_INTERVAL_MS`"+` | 15000 | Collector poll interval |
+| `+"`crate-service`"+` | `+"`FLUSH_MS`"+` | 2500 | Flush interval |
+`)
+	commitAll(t, dir, "seed")
+	rep := run(t, dir)
+	if len(rep.Disagreements) != 0 {
+		t.Errorf("a millisecond interval in a `default` column was read as a port: %+v", rep.Disagreements)
 	}
 }
 
@@ -411,22 +447,59 @@ about observability lives in the handbook.
 	}
 }
 
-// The affix rule is the one that can fire on prose. Assert it fires only on a
-// token shaped like this repo's units, and record the shape it needs.
-func TestFamilyAffixNeedsTwoUnitsInTheSamePosition(t *testing.T) {
-	sh := newShape([]unitRef{
-		{Dir: "apps/parcel-service", Name: "parcel-service"},
-		{Dir: "apps/crate-service", Name: "crate-service"},
-		{Dir: "apps/lonely-widget", Name: "lonely-widget"},
-	})
-	if !sh.familyAffix("depot-service") {
-		t.Error("depot-service shares the -service tail with two units; want admitted")
+// The measured failure of the removed "family affix" rule, as a fixture.
+//
+// That rule admitted any token sharing a same-position separator segment with
+// two detected units. It is sharp when a repo's units share a distinctive ROLE
+// suffix and it collapses when they share ordinary DOMAIN NOUNS — which is what
+// this synthetic repo does (press-*, sheet-*, *-folder, *-binder). Every token
+// below carried the family shape and none of them is a unit: a struct field, two
+// local variables, a Dockerfile name, and a hyphenated noun phrase in a bullet.
+// All of these shapes were confirmed admitted by the old rule, on this exact
+// fixture, before it was removed.
+func TestDomainNounAffixesAreNotUnitClaims(t *testing.T) {
+	dir := t.TempDir()
+	initRepo(t, dir)
+	for _, s := range []string{"press-folder", "press-binder", "sheet-folder", "sheet-binder"} {
+		service(t, dir, s)
 	}
-	if sh.familyAffix("spare-widget") {
-		t.Error("only ONE unit ends in -widget; a family needs two")
+	write(t, dir, "docs/design.md", `# Bindery pipeline design
+
+The feeder assigns `+"`sheet_margin = Stock::Heavy`"+` before the first signature is
+handed to the folder, and the plural form is already carried in `+"`sheet_margin[]`"+`.
+
+Inside the fold loop we keep a local `+"`press_width`"+` next to `+"`sheet_gain`"+` so the
+trimmer does not have to re-read the descriptor every tick.
+
+Build the offline binder with `+"`Dockerfile.press-binder`"+`; the base layer is
+shared with the online one.
+
+- The `+"`sheet-latency`"+` budget is dominated by the folder, not the trimmer
+- The press path is the one to watch under load
+`)
+	commitAll(t, dir, "seed")
+	rep := run(t, dir)
+	if len(rep.Absent) != 0 {
+		t.Errorf("code identifiers and config keys became phantoms %v — resemblance to a unit name is not evidence about the repo", names(rep.Absent))
 	}
-	if sh.familyAffix("warehouse") {
-		t.Error("a token with no separator has no family shape")
+}
+
+// The leading half of the filename test. A trailing extension is caught by
+// fileExt; `Dockerfile.press-binder` puts the type word FIRST and normalizes
+// into a perfectly unit-shaped two-segment name.
+func TestFileTypeLeadingSegmentIsNotAUnit(t *testing.T) {
+	for _, tok := range []string{
+		"Dockerfile.press-binder", "dockerfile.gpu-base", "Makefile.local",
+		"CMakeLists.shared", "README.internal", "Jenkinsfile.release",
+	} {
+		if plausibleToken(tok) {
+			t.Errorf("plausibleToken(%q) = true — a build file is not a unit", tok)
+		}
+	}
+	// The word only disqualifies in the LEADING position: a unit may be named
+	// after what it does with those files.
+	if !plausibleToken("dockerfile-linter") {
+		t.Error(`plausibleToken("dockerfile-linter") = false; "dockerfile" leads a hyphenated NAME here, and the reject is for "<type>.<subject>" filenames`)
 	}
 }
 
@@ -498,7 +571,7 @@ func TestColocationNeedsAMajority(t *testing.T) {
 	sh := newShape([]unitRef{
 		{Dir: "apps/parcel-service", Name: "parcel-service"},
 		{Dir: "apps/crate-service", Name: "crate-service"},
-	})
+	}, dir)
 	d, _ := readDoc(dir, "docs/notes.md")
 	for _, sl := range scanDoc(d, sh) {
 		if sl.Colocated {
@@ -545,6 +618,137 @@ func TestPathAnchorFindsAPhantomUnderARealParent(t *testing.T) {
 	}
 	if got.Rule != RulePathAnchor {
 		t.Errorf("rule = %q, want %q", got.Rule, RulePathAnchor)
+	}
+}
+
+// The co-location quorum spends "names a unit of this repo", not "has a
+// detector". The detectors have documented blind spots (ADR-0021: no Python, no
+// Rust), so a service table in which most rows are real directories under a
+// unit-bearing parent IS an inventory of this repo — and the one row that has no
+// directory is the finding. Measured: with the narrower currency such a table
+// failed to qualify at all, and its genuine phantom had to be admitted by a
+// lexical rule that admitted forty other things with it.
+func TestUndetectedSiblingsCarryTheQuorum(t *testing.T) {
+	dir := t.TempDir()
+	initRepo(t, dir)
+	service(t, dir, "parcel-service") // the only DETECTED unit
+	// Real services the detectors cannot see: a directory, no Dockerfile.
+	for _, s := range []string{"crate-service", "pallet-service", "hopper-service", "chute-service"} {
+		write(t, dir, "apps/"+s+"/main.py", "print('hi')\n")
+	}
+	inventory := "# Services\n\n| service | port |\n|---|---|\n" +
+		"| `parcel-service` | 8080 |\n| `crate-service` | 8081 |\n| `pallet-service` | 8082 |\n" +
+		"| `hopper-service` | 8083 |\n| `chute-service` | 8084 |\n| `depot-service` | 8085 |\n"
+	write(t, dir, "AGENTS.md", inventory)
+	write(t, dir, "docs/architecture.md", inventory)
+	commitAll(t, dir, "seed")
+
+	rep := run(t, dir)
+	got := names(rep.Absent)
+	if !has(got, "depot-service") {
+		t.Errorf("documented-but-absent = %v, want depot-service — 5 of 6 rows are real, so the table is an inventory", got)
+	}
+	for _, a := range rep.Absent {
+		if a.Name != "depot-service" {
+			t.Errorf("a real-but-undetected service was reported absent: %q (%s)", a.Name, a.Rule)
+		}
+		if a.Rule != RuleColocated {
+			t.Errorf("rule = %q, want %q", a.Rule, RuleColocated)
+		}
+	}
+}
+
+// ...and the currency stops at SIBLINGS of units. A directory at the repo root
+// is not a unit, and counting one turns a license table's "Status" column into
+// an inventory — measured, on a real repo, where it minted `production-ready`.
+func TestRootDirectoriesAreNotQuorumCurrency(t *testing.T) {
+	dir := t.TempDir()
+	initRepo(t, dir)
+	service(t, dir, "parcel-service")
+	service(t, dir, "crate-service")
+	write(t, dir, "build/.keep", "")
+	write(t, dir, "scripts/.keep", "")
+	write(t, dir, "docs/choices.md", `# Tooling choices
+
+| concern | tool | status |
+|---|---|---|
+| Packaging | Nix | build |
+| Linting | Ruff | scripts |
+| Release | Custom | production-ready |
+`)
+	commitAll(t, dir, "seed")
+	rep := run(t, dir)
+	if len(rep.Absent) != 0 {
+		t.Errorf("a tooling table became an inventory because `build/` and `scripts/` exist: %v", names(rep.Absent))
+	}
+}
+
+// Co-location's evidence is statistical — "most of this group is real, so the
+// rest of it is too" — and one qualifying group in one document is one editor's
+// list. A plan document tabling a service it intends to build, or a migration
+// step naming a database table, both produce one. Two independent documents
+// naming the same missing unit is the shape of the finding this report is for.
+func TestOneDocumentIsNotEnoughForACoLocatedPhantom(t *testing.T) {
+	dir := t.TempDir()
+	initRepo(t, dir)
+	service(t, dir, "parcel-service")
+	service(t, dir, "crate-service")
+	service(t, dir, "pallet-service")
+	write(t, dir, "docs/plan.md", `# Plan
+
+| service | language | role |
+|---|---|---|
+| `+"`parcel-service`"+` | Go | intake |
+| `+"`crate-service`"+` | Go | fan-out |
+| `+"`pallet-service`"+` | Go | storage |
+| `+"`depot-service`"+` | Go | planned, not built |
+`)
+	commitAll(t, dir, "seed")
+	if rep := run(t, dir); len(rep.Absent) != 0 {
+		t.Errorf("a single plan document minted %v — one document is one editor", names(rep.Absent))
+	}
+	// A second document naming the same missing service corroborates it.
+	write(t, dir, "AGENTS.md", `# Agents
+
+| service | port |
+|---|---|
+| `+"`parcel-service`"+` | 8080 |
+| `+"`crate-service`"+` | 8081 |
+| `+"`depot-service`"+` | 8082 |
+`)
+	commitAll(t, dir, "second inventory")
+	rep := run(t, dir)
+	if !has(names(rep.Absent), "depot-service") {
+		t.Errorf("two documents name depot-service and no such directory exists; got %v", names(rep.Absent))
+	}
+}
+
+// A real directory must never be reported absent, and prose does not spell
+// directories the way the filesystem does. `libs/crate_index` written with
+// underscores answers to the claim filed under `crate-index`, and a claim filed
+// under the BASENAME of a deep path (`.../api/v1` files under `v1`) is checked
+// against the path the document actually wrote.
+func TestRealDirectoriesAreNeverPhantoms(t *testing.T) {
+	dir := t.TempDir()
+	initRepo(t, dir)
+	service(t, dir, "parcel-service")
+	service(t, dir, "crate-service")
+	write(t, dir, "libs/crate_index/README.md", "# index\n")
+	write(t, dir, "apps/parcel-service/api/v1/schema.txt", "x\n")
+	// A unit that is itself a workspace, repeating the layout inside itself.
+	write(t, dir, "apps/parcel-service/apps/console/index.txt", "x\n")
+	doc := "# Layout\n\n" +
+		"| component | source |\n|---|---|\n" +
+		"| `parcel-service` | `apps/parcel-service` |\n" +
+		"| `crate-service` | `apps/crate-service` |\n" +
+		"| `crate-index` | `libs/crate_index` |\n" +
+		"| `schema` | `apps/parcel-service/api/v1` |\n" +
+		"| `console` | `apps/console` |\n"
+	write(t, dir, "AGENTS.md", doc)
+	write(t, dir, "docs/architecture.md", doc)
+	commitAll(t, dir, "seed")
+	if rep := run(t, dir); len(rep.Absent) != 0 {
+		t.Errorf("every name in this document resolves to a real directory; reported %v", names(rep.Absent))
 	}
 }
 

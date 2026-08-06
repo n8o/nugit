@@ -80,60 +80,92 @@ checks the first finding and discovers it is a typo stops reading the rest.
 3. **The inventory diff is the core, and it reports three sets:**
    *documented but absent* (named in prose, no such unit and no such directory),
    *present but undocumented* (a real unit no prose inventory mentions anywhere),
-   and *disagreements* (the same unit given different ports or different paths by
-   two documents, reported with both files, both line numbers and both values).
-   Prose inventories are `CLAUDE.md`, `AGENTS.md`, `README.md` and `docs/**/*.md`.
+   and *disagreements* (the same unit given two different values for one
+   **scalar** fact by two documents, reported with both files, both line numbers
+   and both values). Prose inventories are `CLAUDE.md`, `AGENTS.md`, `README.md`
+   and `docs/**/*.md`.
 4. **THE PRECISION RULE.** A prose token becomes a *claimed unit* only if it
-   survives the blanket rejects and then matches one of four admission rules,
+   survives the blanket rejects and then matches one of three admission rules,
    and the rule that admitted it is recorded on every finding — a phantom nobody
-   can audit is a rumour.
+   can audit is a rumour. **Every rule is structural: the evidence is the
+   document's own layout or the tree, never the token's resemblance to a unit
+   name.** (This clause was materially narrowed before merge — see *The precision
+   rule was narrowed* below.)
    - *Blanket rejects*, applied first: fenced code blocks are skipped whole (a
      shell transcript names binaries, flags and hosts); `SCREAMING_SNAKE`
      (an env var normalizes into a perfectly unit-shaped name); version strings;
-     filenames with a known extension; URLs and hostnames; `@scope/pkg` package
-     coordinates; bare numbers; tokens under three characters; and tokens whose
-     every segment is generic documentation vocabulary.
+     filenames with a known extension; **filenames that lead with the type word
+     instead (`Dockerfile.press-binder`, `Makefile.local`, `CMakeLists.shared`
+     — the dot form only, so a unit may still be *named* `dockerfile-linter`)**;
+     URLs and hostnames; `@scope/pkg` package coordinates; bare numbers; tokens
+     under three characters; and tokens whose every segment is generic
+     documentation vocabulary.
    - *Rule 1, exact match* — the token IS a detected unit's name or directory
      basename. This never mints a phantom; it is how coverage and disagreements
-     are computed, and it is the quorum currency for rule 2.
+     are computed.
    - *Rule 2, inventory co-location* — the token sits in a **contiguous** group
      (one table column, one unbroken run of list items at one indent, or one
      heading level of one document) in which **at least two entries, and at least
-     half of them, are exact matches**. The document's own structure declares the
-     group an inventory of this repo's units. Both halves of that threshold are
+     half of them, name a unit of this repo**. The document's own structure
+     declares the group an inventory. Both halves of that threshold are
      load-bearing: see Consequences.
+     - *The quorum currency is "names a unit", not "has a detector"*: a detected
+       unit, or a directory sitting **beside** one (under a parent that already
+       holds a detected unit). It stops at siblings — a directory at the repo
+       root (`build/`, `k8s/`, `docs/`) is not a unit, and counting one as
+       currency turns a tooling table's Status column into an inventory.
+     - *And a co-located phantom needs **two documents***. Rule 2's evidence is
+       statistical — most of this group is real, so the rest of it is too — and
+       one qualifying group in one document is one editor's list, not a claim the
+       repo makes about itself.
    - *Rule 3, path anchor* — the token is path-shaped, its parent directory
      really exists and really contains a detected unit, and the full path does
-     not exist.
-   - *Rule 4, family affix* — the token's first or last separator-segment appears
-     in the **same position** in at least two detected unit names, using a
-     separator at least two units use. Position matters: `-service` trailing two
-     real units is a family; the word "service" appearing anywhere in anything is
-     documentation vocabulary. A leading English qualifier (`per-`, `multi-`,
-     `cross-`, `non-`…) disqualifies the token — that shape is a phrase, not a
-     name.
+     not exist. Exempt from the two-document requirement: its evidence is the
+     **tree**, which one document cannot manufacture.
    - *Beyond rule 1, a token must be NAME-SHAPED*: at least two segments, or a
      path. A bare single word is admitted only by exact match.
    - *And nothing is called absent while a directory of that name exists* — at
-     the repo root or under any directory that already holds a detected unit.
+     the repo root, under any directory that already holds a detected unit, or,
+     for a path-shaped spelling, **inside any detected unit's own directory** (a
+     unit that is itself a workspace repeats the layout, so a paragraph about it
+     writes `apps/frontend` meaning `<that unit>/apps/frontend`). The comparison
+     is on **normalized path segments**, so `libs/crate_index` answers to a
+     claim filed under `crate-index`; and **every spelling the prose used is
+     checked**, not only the basename the claim is filed under, so
+     `apps/gateway/api/v1` is tested as the path the document actually wrote.
      This veto is the load-bearing guard, because [[0021-model-drift-check]]
      documents real detector blind spots (no Python or Rust unit detector): a
      real service the detectors cannot see would otherwise be reported as a
      phantom, which is the single most discrediting output this report can
      produce.
-5. **The two directions are deliberately asymmetric.** "Documented but absent"
+5. **Only SCALAR attributes produce a disagreement.** An attribute is worth
+   reporting a conflict about when two documents asserting different values means
+   at least one of them is *wrong*: a port, a version, a replica count — one
+   fact, one value. Set-valued attributes are not like that. Two documents
+   listing different files under one component are both telling the truth about
+   different subsets, and there is no reliable way in prose to tell "this
+   document asserts the component's home" from "this document cites some of its
+   files". Path differences are therefore **not reported at all** — not demoted,
+   not counted, not rendered — because a section that is entirely noise is worse
+   than no section. Ports are the one scalar implemented today; versions and
+   replica counts fit the same slot when they are worth extracting. And a **bare
+   number in a table cell is a port only when its column heads as one**: a
+   service-configuration table whose `Default` column holds `15000` (a poll
+   interval, in milliseconds) otherwise manufactures a conflict with that
+   service's real port.
+6. **The two directions are deliberately asymmetric.** "Documented but absent"
    is computed from a narrow set of inventory slots under the rule above.
    "Present but undocumented" is computed by searching the **full text** of every
    document, token by token, not just its inventory slots — because there the
    costly false positive runs the other way, and calling a documented service
    undocumented is just as discrediting. Precision on both, by opposite means.
-6. **Staleness per document**: last-touched commit, its date, and how many
+7. **Staleness per document**: last-touched commit, its date, and how many
    commits have landed since — via two bounded `git` calls per document
    (`gitutil.LastCommitFor`, `gitutil.CountCommits`, both capped so a scan is
    O(cap) not O(history)), computed for the root inventories always and for any
    document that made a unit claim. The headline is the stalest one, stated as
    "N commits behind, of M in this history", because that ratio is the argument.
-7. **Runbook candidates reuse the ADR-0027 gate's symptom lexicon, not a third
+8. **Runbook candidates reuse the ADR-0027 gate's symptom lexicon, not a third
    one.** `skillopt.LooksLikeSymptom` is exported for exactly this: it answers
    the cue question the export gate's `trigger-not-a-symptom` signal already
    answers, and nothing else. A document is a candidate if it lives under a
@@ -145,19 +177,19 @@ checks the first finding and discovers it is a typo stops reading the rest.
    [[0028-distill-trigger-from-symptom]] already settled that refusing beats
    inventing, and a fabricated symptom is unfalsifiable at review time and
    permanent in the store.
-8. **Read-only by default; `-format markdown` (default) and `-format json`.**
+9. **Read-only by default; `-format markdown` (default) and `-format json`.**
    Writing the model, the config and the store is `nugit init`'s job, and adopt
    deliberately does not do it: the whole finding of this report is that prose
    *about* a repo is unreliable, so a verb that reads prose has no business
    writing the enforced text.
-9. **One opt-in write: `-write-candidates`** lands the runbook candidates in the
+10. **One opt-in write: `-write-candidates`** lands the runbook candidates in the
    **candidate lane** (`.nugit/lessons/`, `status: proposed` —
    [[0016-candidate-lane-and-ratify]]), never anywhere else. A candidate whose
    symptom could not be extracted carries `distill.TriggerTODO` verbatim, so the
    gap is visible in review and the lesson is refused by the ADR-0027 export gate
    by construction. Existing files are never clobbered, so a second run over the
    same shelf writes nothing.
-10. **Exit 0, always. This is a report, never a gate.** It has no `-fail-on`, it
+11. **Exit 0, always. This is a report, never a gate.** It has no `-fail-on`, it
     is not wired into `pr-render`, and it does not feed the significance verdict.
     A brownfield repo's documentation debt is not its next PR author's fault.
 
@@ -203,6 +235,33 @@ step in front of ADR-0008, not a revision of it.
   named after single common words, which makes ordinary prose tables look like
   inventories. Nobody audits 395 findings; the one real phantom in that list would
   have been invisible.
+- **Keep the family-affix rule but require the shared segment to be
+  *distinctive*** — a role-ish token rather than a common domain noun, scored by
+  whatever measure could be defended. Rejected because there is no measure to
+  defend. "Distinctive" would have to be computed against the repo's own
+  vocabulary, and the repo's vocabulary is exactly what makes ordinary prose look
+  like an inventory there: in a repo whose units are all named out of one
+  domain's nouns, those nouns ARE the role words. Any threshold that rejected
+  `sheet-latency` on that repo would reject a real `sheet-binder` on the next
+  one, and the rule's precision would still be a property of the repo rather
+  than of the rule.
+- **Keep the family-affix rule as a co-signal**, admitting only affix-carrying
+  tokens that ALSO sit in inventory context. Rejected on inspection, and the
+  inspection is the interesting part. At full strength — "carries the affix AND
+  its group qualifies as an inventory" — the conjunction is *exactly subsumed* by
+  rule 2, which admits every member of a qualifying group whatever it is called;
+  the co-signal would add no finding rule 2 does not already make. At reduced
+  strength — waiving rule 2's half-the-group share for affix-carrying tokens —
+  it re-opens the failure the share threshold exists to close: a list that is 2/8
+  real units, in which all six of the others end `-service`, admits all six. A
+  conjunction that is either redundant or unsafe is not a rule. Removal it is.
+- **Demote path differences to their own clearly-labelled section** rather than
+  dropping them. Tempting — the data is already collected, and "these two
+  documents cite different files" sounds informative. It is not: on the measured
+  repo all seven were correct-and-unremarkable, so the section would have been
+  100% noise under a heading promising insight. A reader who checks the first
+  item and finds nothing wrong stops reading, which is the same failure mode the
+  whole precision rule exists to avoid — it just moves it one heading down.
 - **Extract runbook triggers with a per-repo heading list.** Real runbooks write
   "Symptom", "Likely cause", "Root cause", "What to try" and "Remediation steps"
   for two slots, and an exact-match list needs a new entry per house style and
@@ -217,34 +276,68 @@ step in front of ADR-0008, not a revision of it.
 ## Consequences
 
 - **The report's own numbers are its validation.** Run read-only against the real
-  sibling repo it reports 22 detected units, 19 prose inventories, **1**
+  sibling repo it reports 22 detected units, 18 prose inventories, **1**
   documented-but-absent (the genuine phantom service, confirmed to have no
-  directory among the 21 that exist), 9 present-but-undocumented, 3 cross-
-  document port disagreements, and 14 runbook candidates of which 4 yield both
-  halves deterministically. The stalest inventories date to 1,361 commits ago of
-  1,363; the agent-instruction file, 153. Those independently reproduce the
-  hand-audit that motivated this ADR, which is the strongest evidence the rule is
-  calibrated rather than tuned.
+  directory among the 21 that exist, and cited in three inventory-shaped tables),
+  9 present-but-undocumented, 3 cross-document port disagreements, and 14 runbook
+  candidates of which 4 yield both halves deterministically. The stalest
+  inventories date to 1,361 commits ago of 1,363; the agent-instruction file,
+  153. Those independently reproduce the hand-audit that motivated this ADR,
+  which is the strongest evidence the rule is calibrated rather than tuned.
+- **The precision rule was narrowed, before merge, by a second repo.** The
+  numbers above are one repo, and one repo is a fixture. Run against a second
+  monorepo in the same org — 69 units, and a naming culture built out of ordinary
+  domain nouns rather than a role suffix — the same rule emitted **47**
+  documented-but-absent, of which 41 came from the family-affix rule and the
+  sampled ones were a struct field, two local variables and a Dockerfile name;
+  and **7** disagreements, all of them the set-valued path shape. That is a
+  precision of roughly one in ten on the headline finding, against near-perfect
+  on the first repo, from the same code. The difference was never the code: it
+  was that the first repo's units nearly all end in one distinctive role word,
+  and the second's share generic domain nouns, so hyphenated prose there reads as
+  an inventory.
+  The narrowing that followed: family-affix **removed** (four rules to three);
+  co-location's quorum currency **widened** from "detected unit" to "unit or a
+  sibling of one", which is what lets structure carry a finding the lexical rule
+  used to carry; co-located phantoms now require **two documents**; a bare number
+  is a port only in a **port column**; the absence veto now understands
+  underscores, nested workspace roots and the full path a document wrote; and
+  set-valued **path disagreements are gone**. After it: repo one is unchanged at
+  1 and 3 — the true positive survives on `inventory-colocation` — and repo two
+  falls from 47 to **2** (both hand-confirmed: a library removed by a real commit
+  and still referenced, and a design document naming a service directory that
+  does not exist) and from 7 disagreements to **0**.
+  Two repos is not a benchmark either. The lesson worth keeping is narrower and
+  harder: **a rule whose precision is a property of the repo is not a rule**, and
+  a single validation repo cannot tell you which of your rules those are.
 - **Known failure modes of the precision rule, all deliberate, all one-directional
   toward silence:**
   - *A one-word phantom is invisible.* A bare single-word service name
     documented in a repo that has no such directory is admitted by no rule,
     because bare words cost too much. Recall traded for credibility.
+  - *A phantom only one document names is invisible* unless it is path-shaped.
+    That is the price of the corroboration requirement, and it is paid mostly by
+    plan documents, which is where it should be paid — but a real service dropped
+    from every inventory but one is now silent too.
   - *The worst documents are the hardest to catch.* Rule 2's half-the-group
     threshold means an inventory that is MOSTLY phantoms fails to qualify as an
     inventory at all. A document that is 60% wrong is invisible where one that is
-    20% wrong is caught. Rules 3 and 4 partly cover this; nothing covers it fully.
-  - *A repo whose units share no affix and whose docs have no tables gets only
-    rules 1 and 3* — the report degrades to staleness plus undocumented units,
-    which is still an argument, but a thinner one.
-  - *A third-party dependency that shares the family affix* (`foo-client` in a
-    repo of `*-client` units) is admitted and reported as absent. The `@scope/pkg`
-    reject removes the common case; a bare unscoped one survives.
+    20% wrong is caught. Rule 3 partly covers this; nothing covers it fully. This
+    got *worse* with the narrowing, and knowingly: rule 4 was the only thing that
+    reached inside a mostly-wrong document, and it was wrong far more often than
+    it was right.
+  - *A repo whose docs have no tables and no lists gets only rules 1 and 3* — the
+    report degrades to staleness plus undocumented units, which is still an
+    argument, but a thinner one.
   - *A renamed unit reads as a phantom.* Correct — the prose IS stale — but a
     reader may score it a false positive.
   - *A monorepo package directory outside any unit-bearing parent* evades the
     directory veto, so a real-but-undetected unit filed somewhere unusual can
     still be reported absent.
+  - *A document that disagrees with another about something non-scalar is
+    invisible* — including the genuine case where two documents really do place
+    one unit in two different directories. Every rule tight enough to kill the
+    measured noise also killed that case, which is evidence it was aspirational.
 - **`internal/adopt` is the first package to depend on `internal/skillopt`
   inbound**, for `LooksLikeSymptom` only. That lexicon is now a shared surface
   across three call sites (the export gate, distill's parity test, adopt), which
