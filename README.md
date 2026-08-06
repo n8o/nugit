@@ -78,6 +78,8 @@ go build -o nugit ./cmd/nugit
 ./nugit adopt                      # the pitch: phantom services, undocumented units,
                                    # documents that disagree, and how stale each one is
 ./nugit adopt -format json         # the same report, machine-readable
+./nugit adopt -peer platform=../platform   # a sibling checkout: cited paths that live
+                                   # over there are attributed, not called phantoms
 ./nugit adopt -write-candidates    # …and import the runbook shelf as proposed lessons
 
 # adopt in ANY repo: scaffold .nugit/ and bootstrap a C4 model from the real

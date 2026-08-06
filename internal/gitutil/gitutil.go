@@ -411,6 +411,100 @@ func (r Repo) LastCommitFor(path string) (sha, date string, err error) {
 	return parts[0], parts[1], nil
 }
 
+// Deletion is the commit that removed a path from this repository.
+type Deletion struct {
+	Path string // the queried path this deletion was matched to
+	SHA  string // the commit that removed it
+	Date string // committer date, RFC3339
+	File string // the deleted file that matched the queried path
+}
+
+// maxDeletedSpecs bounds how many pathspecs one DeletedPaths call passes to
+// git, so a docs tree full of path-shaped tokens cannot build a command line
+// the OS refuses. Deterministic: callers pass a sorted slice.
+const maxDeletedSpecs = 1000
+
+// DeletedPaths asks the history which of the given paths this repository once
+// tracked and later deleted, returning the newest deleting commit per path.
+// Paths are repo-relative and slash-separated — the same coordinates
+// TrackedFiles and the filesystem detectors speak.
+//
+// It is ONE call for the whole batch on purpose: the caller asks about every
+// path its input names, and a `git log` per candidate is a history walk per
+// candidate. Renames are deliberately NOT detected (`--no-renames`), so a path
+// moved away still reports as deleted — the question is "did this repository
+// once contain this path", and a rename answers yes.
+//
+// A path that never appears is simply absent from the result; that is the
+// interesting answer, not an error. An error means "no history readable here"
+// (not a git repo, no git binary), and callers must degrade rather than read it
+// as "nothing was ever deleted".
+func (r Repo) DeletedPaths(paths []string, max int) (map[string]Deletion, error) {
+	var specs []string
+	seen := map[string]bool{}
+	for _, p := range paths {
+		p = strings.Trim(strings.TrimSpace(p), "/")
+		// Reject anything that would escape the repo or be read as pathspec
+		// magic. A prose token should never be either, but this call takes its
+		// input from prose.
+		if p == "" || seen[p] || strings.HasPrefix(p, ":") ||
+			strings.Contains(p, "..") || filepath.IsAbs(p) {
+			continue
+		}
+		seen[p] = true
+		specs = append(specs, p)
+		if len(specs) >= maxDeletedSpecs {
+			break
+		}
+	}
+	if len(specs) == 0 {
+		return map[string]Deletion{}, nil
+	}
+	args := []string{"-c", "core.quotepath=false", "log", "--no-renames",
+		"--diff-filter=D", "--name-only",
+		"--pretty=format:" + commitSep + "%H" + fieldSep + "%cI"}
+	if max > 0 {
+		args = append(args, "--max-count="+strconv.Itoa(max))
+	}
+	args = append(args, "--")
+	args = append(args, specs...)
+	out, err := r.git(args...)
+	if err != nil {
+		return nil, err
+	}
+	found := map[string]Deletion{}
+	// git log is newest-first, so the first match for a path is its newest
+	// deletion — the one a reader would go looking for.
+	for _, rec := range strings.Split(out, commitSep) {
+		lines := strings.Split(strings.Trim(rec, "\n"), "\n")
+		if len(lines) == 0 || lines[0] == "" {
+			continue
+		}
+		head := strings.SplitN(lines[0], fieldSep, 2)
+		del := Deletion{SHA: head[0]}
+		if len(head) > 1 {
+			del.Date = head[1]
+		}
+		for _, name := range lines[1:] {
+			name = strings.TrimSpace(name)
+			if name == "" {
+				continue
+			}
+			for _, p := range specs {
+				if _, done := found[p]; done {
+					continue
+				}
+				if name == p || strings.HasPrefix(name, p+"/") {
+					d := del
+					d.Path, d.File = p, name
+					found[p] = d
+				}
+			}
+		}
+	}
+	return found, nil
+}
+
 // CountCommits returns how many commits revRange contains ("HEAD", or
 // "<sha>..HEAD"), bounded by max: the walk stops there and capped reports that
 // the true number is at least n. The bound exists so a staleness scan over a
