@@ -234,6 +234,7 @@ deps:
     mayDependOn:
       - "cmake"
       - "deploy"
+      - "gitutil"
   "narrative":
     mayDependOn:
       - "model_"

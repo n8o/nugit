@@ -137,6 +137,7 @@ graph LR
   mcp --> usage
   modelfacts --> cmake
   modelfacts --> deploy
+  modelfacts --> gitutil
   narrative --> model_
   notion --> knowledge
   notion --> model_

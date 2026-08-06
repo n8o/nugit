@@ -10,6 +10,7 @@ import (
 
 	"github.com/n8o/nugit/internal/cmake"
 	"github.com/n8o/nugit/internal/deploy"
+	"github.com/n8o/nugit/internal/gitutil"
 )
 
 // Unit is one detected buildable or deployable code unit — the currency of the
@@ -27,7 +28,21 @@ type Unit struct {
 // target dirs, and Go package dirs (Go is an enforced backend, so its package
 // layout is unit-shaped by convention). Best-effort and deterministic; units
 // are deduped by directory with deployable evidence preferred over buildable.
+//
+// Only units whose EVIDENCE FILE git tracks are admitted. The detectors are
+// filesystem walks, so a scratch copy of the repo, a build output tree, or a
+// nested git worktree lying in the working directory otherwise mints units
+// that exist nowhere in the committed tree — and, worse, can win the dedup and
+// attribute a real unit's evidence to a file inside the scratch copy. That
+// noise reaches every consumer of this inventory: the model-drift check
+// (ADR-0021) and doctor's coverage scan both turn it into warnings.
 func Units(repoDir string) []Unit {
+	tracked := trackedFiles(repoDir)
+	// admits gates a unit on its evidence file. With no tracking information
+	// (see trackedFiles) every candidate is admitted: the pre-fix, walk-only
+	// behaviour.
+	admits := func(evidenceFile string) bool { return tracked == nil || tracked[evidenceFile] }
+
 	byDir := map[string]Unit{}
 	add := func(u Unit) {
 		if u.Dir == "" || u.Dir == "." {
@@ -39,16 +54,22 @@ func Units(repoDir string) []Unit {
 	}
 	if containers, _, err := deploy.Detect(repoDir); err == nil {
 		for _, c := range containers {
+			if !admits(c.Dockerfile) {
+				continue
+			}
 			add(Unit{Dir: c.SourceDir, Name: c.Name, Kind: "deployable",
 				Evidence: "dockerfile " + c.Dockerfile})
 		}
 	}
 	g, _ := cmake.Discover(repoDir)
 	for _, d := range g.Dirs {
+		if !admits(d + "/CMakeLists.txt") {
+			continue
+		}
 		add(Unit{Dir: d, Name: path.Base(d), Kind: "cmake",
 			Evidence: "CMake target defined in " + d + "/CMakeLists.txt"})
 	}
-	for _, d := range goPackageDirs(repoDir) {
+	for _, d := range goPackageDirs(repoDir, admits) {
 		add(Unit{Dir: d, Name: path.Base(d), Kind: "go",
 			Evidence: "Go package in " + d})
 	}
@@ -86,6 +107,20 @@ func Unmodeled(units []Unit, prefix string, resolveDir func(string) string, elem
 	return out
 }
 
+// trackedFiles returns the set of repoDir-relative paths git tracks, or nil
+// when git cannot say — repoDir is not a git repo, the git binary is missing,
+// the call failed, or the checkout has nothing committed yet. nil means "no
+// tracking information", and every caller falls back to the plain filesystem
+// walk: a detector that silently finds NOTHING is worse than one that finds too
+// much, so an empty answer is never taken at face value.
+func trackedFiles(repoDir string) map[string]bool {
+	t, err := gitutil.Repo{Dir: repoDir}.TrackedFiles()
+	if err != nil || len(t) == 0 {
+		return nil
+	}
+	return t
+}
+
 // goUnitSkip prunes dirs that hold no first-party Go units (mirrors the
 // deploy/cmake prune sets; testdata is invisible to the Go toolchain anyway).
 func goUnitSkip(name string) bool {
@@ -97,9 +132,9 @@ func goUnitSkip(name string) bool {
 }
 
 // goPackageDirs returns every dir under repoDir containing at least one
-// buildable (non-test) .go file, when repoDir is a Go module root. The root
-// itself is excluded: it is the module, not a sub-unit.
-func goPackageDirs(repoDir string) []string {
+// buildable (non-test) .go file that admits accepts, when repoDir is a Go
+// module root. The root itself is excluded: it is the module, not a sub-unit.
+func goPackageDirs(repoDir string, admits func(string) bool) []string {
 	if _, err := os.Stat(filepath.Join(repoDir, "go.mod")); err != nil {
 		return nil
 	}
@@ -117,9 +152,13 @@ func goPackageDirs(repoDir string) []string {
 		if !strings.HasSuffix(d.Name(), ".go") || strings.HasSuffix(d.Name(), "_test.go") {
 			return nil
 		}
-		rel, _ := filepath.Rel(repoDir, filepath.Dir(p))
-		if rel = filepath.ToSlash(rel); rel != "." {
-			seen[rel] = true
+		rel, _ := filepath.Rel(repoDir, p)
+		rel = filepath.ToSlash(rel)
+		if !admits(rel) {
+			return nil // untracked/ignored source file: not evidence of a unit
+		}
+		if dir := path.Dir(rel); dir != "." {
+			seen[dir] = true
 		}
 		return nil
 	})

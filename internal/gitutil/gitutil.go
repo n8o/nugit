@@ -297,6 +297,31 @@ func (r Repo) ListTree(ref string) ([]string, error) {
 	return splitNUL(out), nil
 }
 
+// TrackedFiles returns the set of paths git tracks under Dir, Dir-relative and
+// slash-separated (`git ls-files` reports relative to the -C directory, the
+// same coordinates the filesystem detectors speak). -z keeps paths with spaces
+// or non-ASCII bytes unambiguous, matching NameStatus.
+//
+// It is ONE call for the whole subtree on purpose: callers ask it about
+// thousands of candidate files, so a per-candidate `git ls-files <path>` is not
+// an option. An error means "no tracking information here" (not a git repo, no
+// git binary, a bare repo) — callers must degrade to their non-git behaviour
+// rather than read it as "nothing is tracked".
+func (r Repo) TrackedFiles() (map[string]bool, error) {
+	out, err := r.git("-c", "core.quotepath=false", "ls-files", "-z")
+	if err != nil {
+		return nil, err
+	}
+	paths := splitNUL(out)
+	tracked := make(map[string]bool, len(paths))
+	for _, p := range paths {
+		if p != "" {
+			tracked[p] = true
+		}
+	}
+	return tracked, nil
+}
+
 // RawDiff returns the unified text diff between base and head, optionally
 // limited to the given paths.
 func (r Repo) RawDiff(base, head string, paths ...string) (string, error) {
