@@ -332,3 +332,86 @@ func TestNumstatCachedErrors(t *testing.T) {
 		t.Error("an already-expired timeout must surface as an error")
 	}
 }
+
+// DeletedPaths is the corroboration ADR-0038 gives `nugit adopt`: a path this
+// repository once tracked and later removed is a fact the index already knows,
+// and a path it never tracked is not this repository's to claim.
+func TestDeletedPaths(t *testing.T) {
+	dir := t.TempDir()
+	mustGit(t, dir, "init")
+	writeFile := func(rel, body string) {
+		t.Helper()
+		p := filepath.Join(dir, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeFile("apps/lathe/main.go", "package main\n")
+	writeFile("apps/anvil/main.go", "package main\n")
+	writeFile("libs/press/press.go", "package press\n")
+	mustGit(t, dir, "add", "-A")
+	mustGit(t, dir, "commit", "-m", "seed")
+
+	if err := os.RemoveAll(filepath.Join(dir, "apps", "lathe")); err != nil {
+		t.Fatal(err)
+	}
+	mustGit(t, dir, "add", "-A")
+	mustGit(t, dir, "commit", "-m", "retire the milling service")
+
+	// A rename away is a deletion too: the question is whether this repository
+	// ever contained the path, and a rename answers yes.
+	mustGit(t, dir, "mv", "libs/press", "libs/presser")
+	mustGit(t, dir, "commit", "-m", "rename the press library")
+
+	r := Repo{Dir: dir}
+	got, err := r.DeletedPaths([]string{
+		"apps/lathe", "apps/anvil", "libs/press", "apps/never-existed",
+	}, 500)
+	if err != nil {
+		t.Fatalf("DeletedPaths: %v", err)
+	}
+	del, ok := got["apps/lathe"]
+	if !ok {
+		t.Fatalf("apps/lathe was tracked and removed; got %+v", got)
+	}
+	if del.SHA == "" || del.Date == "" || del.File != "apps/lathe/main.go" {
+		t.Errorf("a deletion must be citeable: %+v", del)
+	}
+	if _, ok := got["libs/press"]; !ok {
+		t.Errorf("a renamed-away path must report as deleted: %+v", got)
+	}
+	if _, ok := got["apps/anvil"]; ok {
+		t.Errorf("apps/anvil still exists and must not report a deletion: %+v", got)
+	}
+	if _, ok := got["apps/never-existed"]; ok {
+		t.Errorf("a path this repo never tracked must be absent from the result: %+v", got)
+	}
+}
+
+// The batch takes its input from prose, so it must refuse anything that would
+// escape the repo or be read as pathspec magic — and must never error on it.
+func TestDeletedPathsRejectsUnsafeSpecs(t *testing.T) {
+	dir := t.TempDir()
+	mustGit(t, dir, "init")
+	mustGit(t, dir, "commit", "--allow-empty", "-m", "root")
+	got, err := (Repo{Dir: dir}).DeletedPaths([]string{
+		"../outside", ":(top)apps", "/etc/passwd", "", "   ",
+	}, 100)
+	if err != nil {
+		t.Fatalf("unsafe specs must be dropped, not errored: %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("got %+v, want nothing", got)
+	}
+}
+
+// No history readable is an ERROR, never "nothing was ever deleted": a caller
+// must be able to tell the two apart before it asserts a phantom.
+func TestDeletedPathsOutsideAGitRepo(t *testing.T) {
+	if _, err := (Repo{Dir: t.TempDir()}).DeletedPaths([]string{"apps/lathe"}, 100); err == nil {
+		t.Error("want an error outside a git repo")
+	}
+}

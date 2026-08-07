@@ -49,6 +49,11 @@ type Options struct {
 	WriteCandidates bool
 	// Now stamps written candidates; empty means time.Now().UTC().
 	Now string
+	// Peers are sibling checkouts to attribute cited paths to (ADR-0038). They
+	// are passed IN rather than read from `.nugit/config.yml` because adopt
+	// still reads no store (ADR-0036 clause 1) and its primary caller has none;
+	// with no peers the report falls back to history corroboration alone.
+	Peers []Peer
 }
 
 // Doc is one prose inventory and how far behind the code it is.
@@ -67,8 +72,39 @@ type Doc struct {
 // service. Rule records which admission rule let the name in, so a reader can
 // audit the finding rather than trust it.
 type Absent struct {
+	Name string `json:"name"`
+	Rule string `json:"rule"`
+	// DeletedPath / DeletedIn / DeletedAt are the history's corroboration
+	// (ADR-0038): the path this repository once tracked, and the commit that
+	// removed it. Set for every `path-anchor` finding, because that rule may no
+	// longer assert a phantom without it. A `inventory-colocation` finding
+	// carries them when the history happens to agree and is unaffected when it
+	// does not — that rule's corroboration is two documents, not the index.
+	DeletedPath string `json:"deleted_path,omitempty"`
+	DeletedIn   string `json:"deleted_in,omitempty"`
+	DeletedAt   string `json:"deleted_at,omitempty"`
+	// Peer names a configured peer whose checkout ALSO contains this path — a
+	// unit that moved to a sibling rather than one that simply went away.
+	Peer     string    `json:"also_in_peer,omitempty"`
+	Mentions []mention `json:"mentions"`
+}
+
+// Elsewhere is a name this repo's prose cites that this repo has never
+// contained: no such directory now, and nothing by that path in its history.
+// It is deliberately NOT reported as this repo's phantom — the measured case is
+// a decision record about the boundary with a sibling repo, naming the
+// sibling's directories, which `path-anchor` cannot distinguish from its own
+// tree (ADR-0038).
+//
+// Peer names the sibling that does contain it, when one is configured and
+// checked out. Empty means nobody nugit can see contains it — still worth
+// listing, in its own clearly-labelled bucket, but never as an assertion about
+// this repo.
+type Elsewhere struct {
 	Name     string    `json:"name"`
 	Rule     string    `json:"rule"`
+	Peer     string    `json:"peer,omitempty"`
+	PeerPath string    `json:"peer_path,omitempty"`
 	Mentions []mention `json:"mentions"`
 }
 
@@ -99,6 +135,12 @@ type Report struct {
 	Units        []Unit   `json:"units"`
 	Docs         []Doc    `json:"prose_inventories"`
 	Absent       []Absent `json:"documented_but_absent"`
+	// Elsewhere are cited paths this repo never contained — another repo's, as
+	// far as this repo's own history knows (ADR-0038).
+	Elsewhere []Elsewhere `json:"cited_but_never_here,omitempty"`
+	// Peers records what each configured peer checkout contributed, including
+	// the ones that were not on disk (ADR-0032 clause 3).
+	Peers []PeerStatus `json:"peers,omitempty"`
 	// Undocumented are detected units no prose inventory mentions anywhere —
 	// searched over the FULL text of every document, not just its inventory
 	// slots, so "undocumented" means genuinely unnamed.
@@ -158,8 +200,16 @@ func Run(opt Options) (Report, error) {
 		}
 	}
 
+	peers, peerStatus := loadPeers(opt.Peers)
+	rep.Peers = peerStatus
+	for _, ps := range peerStatus {
+		if !ps.Present {
+			rep.Notes = append(rep.Notes, "peer `"+ps.Name+"` is not checked out at `"+ps.Dir+"` — it contributed nothing (ADR-0032: an absent peer is never an error)")
+		}
+	}
+
 	claims, perDoc := gatherClaims(docs, sh, repoDir)
-	rep.Absent = absentUnits(claims, sh, repoDir)
+	rep.Absent, rep.Elsewhere = partitionClaims(claims, sh, repoDir, peers, &rep)
 	rep.Undocumented = undocumented(units, docs)
 	rep.Disagreements = disagreements(claims)
 	rep.Docs = staleness(repoDir, docs, perDoc, &rep)
@@ -227,8 +277,9 @@ func gatherClaims(docs []docText, sh shape, repoDir string) (map[string]*claim, 
 	return claims, perDoc
 }
 
-// absentUnits is the phantom-service set: a claimed unit that is neither a
-// detected unit nor a real directory anywhere nugit knows to look.
+// partitionClaims splits the claims that survive the absence veto into the two
+// buckets this report may assert: the phantoms of THIS repo, and the paths this
+// repo cites but has never contained.
 //
 // The directory check is the load-bearing precision guard. modelfacts.Units has
 // documented blind spots (ADR-0021: no Python or Rust unit detector), so a real
@@ -241,9 +292,23 @@ func gatherClaims(docs []docText, sh shape, repoDir string) (map[string]*claim, 
 // under. A claim is keyed by basename, so `apps/gateway/api/v1` files under
 // `v1`; asking only whether `v1` exists at the root or beside a unit answers a
 // question the document never asked.
-func absentUnits(claims map[string]*claim, sh shape, repoDir string) []Absent {
-	var out []Absent
-	for name, c := range claims {
+func partitionClaims(claims map[string]*claim, sh shape, repoDir string, peers []*peerRepo, rep *Report) ([]Absent, []Elsewhere) {
+	// Survivors of the veto, in a deterministic order.
+	names := make([]string, 0, len(claims))
+	for n := range claims {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+
+	type candidate struct {
+		name string
+		rule string
+		c    *claim
+	}
+	var cands []candidate
+	var query []string
+	for _, name := range names {
+		c := claims[name]
 		rule := strongestRule(c)
 		if rule == RuleExact {
 			continue
@@ -260,24 +325,128 @@ func absentUnits(claims map[string]*claim, sh shape, repoDir string) []Absent {
 		// group, none of them a claim this repo makes about itself. Two
 		// independent documents naming the same missing unit is the shape of the
 		// finding this report exists to make.
-		//
-		// The path-anchor rule is exempt: its evidence is not the document's
-		// structure but the TREE — a parent directory that really exists and
-		// really holds units — which one document cannot manufacture.
 		if rule == RuleColocated && c.docCount() < minCorroborating {
 			continue
 		}
-		ms := append([]mention(nil), c.Mentions...)
+		cands = append(cands, candidate{name: name, rule: rule, c: c})
+		query = append(query, c.historyPaths(sh)...)
+	}
+	if len(cands) == 0 {
+		return nil, nil
+	}
+
+	// ONE history call for the whole report: which of these paths did this
+	// repository once track and later delete? That is the corroboration
+	// path-anchor now requires, and it is the same principle ADR-0037 used —
+	// ask the version-control system, it already knows what this repo owns.
+	sort.Strings(query)
+	deleted, herr := gitutil.Repo{Dir: repoDir}.DeletedPaths(query, commitScanCap)
+	if herr != nil {
+		rep.Notes = append(rep.Notes, "no git history readable here — a cited path could not be corroborated against this repo's own history, so nothing admitted by `"+RulePathAnchor+"` alone is asserted as a phantom")
+	}
+
+	var absent []Absent
+	var elsewhere []Elsewhere
+	for _, cd := range cands {
+		ms := append([]mention(nil), cd.c.Mentions...)
 		sort.Slice(ms, func(i, j int) bool {
 			if ms[i].Doc != ms[j].Doc {
 				return ms[i].Doc < ms[j].Doc
 			}
 			return ms[i].Line < ms[j].Line
 		})
-		out = append(out, Absent{Name: name, Rule: rule, Mentions: ms})
+		peerName, peerPath := "", ""
+		for _, p := range peers {
+			if hit := p.holds(cd.c); hit != "" {
+				peerName, peerPath = p.name, hit
+				break
+			}
+		}
+		del, everHere := cd.c.deletion(sh, deleted)
+
+		// THE NARROWING (ADR-0038). `path-anchor`'s evidence is that a real
+		// parent directory has an empty slot where the document points. That is
+		// evidence about the LAYOUT, and two sibling repos in one org share a
+		// layout — so it is exactly as consistent with "this path is the other
+		// repo's" as with "this repo deleted it". The history tells the two
+		// apart deterministically: a path this repo once tracked is a phantom,
+		// a path it never tracked is not this repo's to claim.
+		//
+		// Co-location is untouched. Its corroboration is two independent
+		// documents of THIS repo naming the same missing unit, which is a claim
+		// this repo makes about itself; requiring the index to agree as well
+		// would silence exactly the finding this report exists to make (a
+		// service deleted long enough ago to fall outside any bounded walk, or
+		// one that never had a directory of its own).
+		//
+		// The peer half is the same judgement from the other side: a sibling
+		// that really holds the path answers the question better than "absent"
+		// does, whatever rule admitted it — the name is not missing, it is over
+		// there. ADR-0032 made the sibling readable; this is the first place
+		// adopt spends it.
+		if !everHere && (cd.rule == RulePathAnchor || peerName != "") {
+			elsewhere = append(elsewhere, Elsewhere{
+				Name: cd.name, Rule: cd.rule, Peer: peerName, PeerPath: peerPath, Mentions: ms,
+			})
+			continue
+		}
+		a := Absent{Name: cd.name, Rule: cd.rule, Peer: peerName, Mentions: ms}
+		if everHere {
+			a.DeletedPath, a.DeletedIn, a.DeletedAt = del.Path, del.SHA, del.Date
+		}
+		absent = append(absent, a)
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	sort.Slice(absent, func(i, j int) bool { return absent[i].Name < absent[j].Name })
+	sort.Slice(elsewhere, func(i, j int) bool { return elsewhere[i].Name < elsewhere[j].Name })
+	return absent, elsewhere
+}
+
+// historyPaths are the paths worth asking this repo's history about: every
+// path-shaped spelling the prose actually wrote, plus the slot this name would
+// occupy under each directory that holds a detected unit.
+//
+// The second half is why the true positive measured on a real repo is
+// citeable. That finding is a bare NAME in three tables — the prose never
+// writes its directory — so the spellings alone ask git nothing, and the report
+// could say "this unit is gone" without being able to show when. `apps/<name>`
+// is the same slot the absence veto already walks, so asking about it costs
+// nothing new and turns an assertion into a citation. Both separator spellings
+// are asked: a claim is filed under a hyphenated key, and a repo that names its
+// directories with underscores would otherwise never match its own history.
+func (c *claim) historyPaths(sh shape) []string {
+	var out []string
+	for _, s := range c.Spellings {
+		if strings.Contains(s, "/") {
+			out = append(out, strings.Trim(strings.TrimSpace(s), "/"))
+		}
+	}
+	variants := []string{c.Name}
+	if u := strings.ReplaceAll(c.Name, "-", "_"); u != c.Name {
+		variants = append(variants, u)
+	}
+	for _, p := range sh.parentsRaw {
+		for _, v := range variants {
+			out = append(out, p+"/"+v)
+		}
+	}
 	return out
+}
+
+// deletion looks this claim's paths up in the batched history answer, returning
+// the newest deletion of any of them.
+func (c *claim) deletion(sh shape, deleted map[string]gitutil.Deletion) (gitutil.Deletion, bool) {
+	var best gitutil.Deletion
+	found := false
+	for _, s := range c.historyPaths(sh) {
+		d, ok := deleted[s]
+		if !ok {
+			continue
+		}
+		if !found || d.Date > best.Date {
+			best, found = d, true
+		}
+	}
+	return best, found
 }
 
 // ruleRank orders the admission rules by how much evidence they carry.
@@ -307,15 +476,18 @@ func (c *claim) docCount() int {
 	return len(docs)
 }
 
-// addSpelling records one raw token that produced this claim, deduped.
+// addSpelling records one raw token that produced this claim, deduped on its
+// normalized form. The RAW text is kept: every consumer that only compares
+// names normalizes on the way in, and the one consumer that asks git about a
+// path (ADR-0038) needs the bytes the document actually wrote.
 func (c *claim) addSpelling(tok string) {
 	t := normalize(tok)
 	for _, s := range c.Spellings {
-		if s == t {
+		if normalize(s) == t {
 			return
 		}
 	}
-	c.Spellings = append(c.Spellings, t)
+	c.Spellings = append(c.Spellings, strings.TrimSpace(tok))
 }
 
 // anySpellingResolves reports whether any spelling the prose used names

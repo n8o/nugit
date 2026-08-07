@@ -60,13 +60,23 @@ func (r Report) Markdown() string {
 
 	if len(r.Absent) > 0 {
 		b.WriteString("## Documented but absent\n\n")
-		b.WriteString("Named in prose; no such unit in the tree, and no directory of that name either.\n\n")
+		b.WriteString("Named in prose; no such unit in the tree, and no directory of that name either. A path-shaped claim is listed here only when **this repo's own history** once tracked it — a path this repo never contained is another repo's, not this one's phantom (ADR-0038).\n\n")
 		for i, a := range r.Absent {
 			if i == maxListed {
 				fmt.Fprintf(&b, "\n_…and %d more._\n", len(r.Absent)-maxListed)
 				break
 			}
-			fmt.Fprintf(&b, "- **`%s`** — admitted by `%s`\n", a.Name, a.Rule)
+			fmt.Fprintf(&b, "- **`%s`** — admitted by `%s`", a.Name, a.Rule)
+			if a.DeletedIn != "" {
+				fmt.Fprintf(&b, "; this repo deleted `%s` in `%s`", a.DeletedPath, shortSHA(a.DeletedIn))
+				if a.DeletedAt != "" {
+					fmt.Fprintf(&b, " (%s)", dateOnly(a.DeletedAt))
+				}
+			}
+			if a.Peer != "" {
+				fmt.Fprintf(&b, "; peer `%s` has it now", a.Peer)
+			}
+			b.WriteString("\n")
 			for j, m := range a.Mentions {
 				if j == 3 {
 					fmt.Fprintf(&b, "  - _…%d more mention(s)_\n", len(a.Mentions)-3)
@@ -74,6 +84,33 @@ func (r Report) Markdown() string {
 				}
 				fmt.Fprintf(&b, "  - `%s:%d` — %s\n", m.Doc, m.Line, m.Text)
 			}
+		}
+		b.WriteString("\n")
+	}
+
+	if len(r.Elsewhere) > 0 {
+		b.WriteString("## Cited here, but never in this repo\n\n")
+		b.WriteString("Named by this repo's prose, absent from its tree, and **never present in its history** — so nugit does not assert these are this repo's phantoms. In an organization of sibling repos that document their shared boundary, this is usually the other repo's code.\n\n")
+		for i, e := range r.Elsewhere {
+			if i == maxListed {
+				fmt.Fprintf(&b, "\n_…and %d more._\n", len(r.Elsewhere)-maxListed)
+				break
+			}
+			if e.Peer != "" {
+				fmt.Fprintf(&b, "- **`%s`** — documented here, lives in peer `%s` (`%s`)\n", e.Name, e.Peer, e.PeerPath)
+			} else {
+				fmt.Fprintf(&b, "- **`%s`** — cited here; no configured peer contains it either\n", e.Name)
+			}
+			for j, m := range e.Mentions {
+				if j == 2 {
+					fmt.Fprintf(&b, "  - _…%d more mention(s)_\n", len(e.Mentions)-2)
+					break
+				}
+				fmt.Fprintf(&b, "  - `%s:%d` — %s\n", m.Doc, m.Line, m.Text)
+			}
+		}
+		if len(r.Peers) == 0 {
+			b.WriteString("\n_No peers are configured, so nugit could only say where these are **not**. Configure `peers:` (ADR-0032) and it can name the repo that has them._\n")
 		}
 		b.WriteString("\n")
 	}
@@ -173,6 +210,19 @@ func (r Report) Headlines() []string {
 	if n := len(r.Absent); n > 0 {
 		out = append(out, fmt.Sprintf("**%d name(s) documented but absent** — the prose describes units the tree does not contain.", n))
 	}
+	if n := len(r.Elsewhere); n > 0 {
+		peered := 0
+		for _, e := range r.Elsewhere {
+			if e.Peer != "" {
+				peered++
+			}
+		}
+		line := fmt.Sprintf("**%d cited path(s) this repo has never contained** — documented here, but not this repo's code.", n)
+		if peered > 0 {
+			line += fmt.Sprintf(" %d of them live in a configured peer.", peered)
+		}
+		out = append(out, line)
+	}
 	if n := len(r.Undocumented); n > 0 {
 		out = append(out, fmt.Sprintf("**%d unit(s) present but undocumented** — real code no inventory mentions at all.", n))
 	}
@@ -216,8 +266,8 @@ func (r Report) stalest() *Doc {
 
 // SummaryLine is the one-line counts summary for stderr.
 func (r Report) SummaryLine() string {
-	return fmt.Sprintf("adopt: %d units, %d prose inventories, %d documented-but-absent, %d present-but-undocumented, %d disagreements, %d runbook candidates\n",
-		len(r.Units), len(r.Docs), len(r.Absent), len(r.Undocumented), len(r.Disagreements), len(r.Runbooks))
+	return fmt.Sprintf("adopt: %d units, %d prose inventories, %d documented-but-absent, %d cited-but-never-here, %d present-but-undocumented, %d disagreements, %d runbook candidates\n",
+		len(r.Units), len(r.Docs), len(r.Absent), len(r.Elsewhere), len(r.Undocumented), len(r.Disagreements), len(r.Runbooks))
 }
 
 func plural(n int, one, many string) string {

@@ -100,6 +100,10 @@ context flags:
 adopt flags:
   -C dir              repo directory (default ".")
   -format f           markdown (default: the adoption pitch) | json
+  -peer name=path     a sibling checkout to attribute cited paths to, repeatable.
+                      Defaults to peers: in .nugit/config.yml when there is one;
+                      this flag is how a repo that has not adopted nugit yet
+                      names its siblings (ADR-0032, ADR-0038).
   -write-candidates   ALSO write the runbook candidates into .nugit/lessons/ as
                       status: proposed (the candidate lane, ADR-0016). Nothing
                       else is ever written — the model and config are init's job.
@@ -239,12 +243,16 @@ func cmdAdopt(args []string) int {
 	dir := fs.String("C", ".", "repo directory")
 	format := fs.String("format", "markdown", "output: markdown | json")
 	write := fs.Bool("write-candidates", false, "also write runbook candidates into .nugit/lessons/ as status: proposed")
+	var peerFlags stringList
+	fs.Var(&peerFlags, "peer", "sibling checkout as name=path, repeatable (default: peers: from config.yml)")
 	_ = fs.Parse(args)
 	if *format != "markdown" && *format != "json" {
 		fmt.Fprintf(os.Stderr, "nugit adopt: unknown format %q (want: markdown | json)\n", *format)
 		return 2
 	}
-	rep, err := adopt.Run(adopt.Options{RepoDir: *dir, WriteCandidates: *write})
+	rep, err := adopt.Run(adopt.Options{
+		RepoDir: *dir, WriteCandidates: *write, Peers: adoptPeers(*dir, peerFlags),
+	})
 	if err != nil {
 		// Even a hard failure stays out of gate territory: report it and stop,
 		// but never invite a caller to wire this into CI as a check.
@@ -259,6 +267,49 @@ func cmdAdopt(args []string) int {
 	}
 	fmt.Fprint(os.Stderr, rep.SummaryLine())
 	return 0
+}
+
+// stringList is a repeatable string flag.
+type stringList []string
+
+func (l *stringList) String() string     { return strings.Join(*l, ",") }
+func (l *stringList) Set(v string) error { *l = append(*l, v); return nil }
+
+// adoptPeers resolves the sibling checkouts adopt may attribute a cited path to
+// (ADR-0038). `-peer name=path` wins outright when given; otherwise the
+// `peers:` block of .nugit/config.yml is used when there is one, which also
+// carries `org.hub` (ADR-0035) since a hub IS a configured peer.
+//
+// This resolution lives in the CLI on purpose: `internal/adopt` reads no
+// `.nugit/` at all (ADR-0036 clause 1) and its primary caller is a repo that
+// has none. A config that cannot be read is simply no peers — adopt is a
+// report and must never fail on one.
+func adoptPeers(repoDir string, flags []string) []adopt.Peer {
+	if len(flags) > 0 {
+		var out []adopt.Peer
+		for _, f := range flags {
+			name, p, ok := strings.Cut(f, "=")
+			name, p = strings.TrimSpace(name), strings.TrimSpace(p)
+			if !ok || name == "" || p == "" {
+				fmt.Fprintf(os.Stderr, "nugit adopt: ignoring -peer %q (want name=path)\n", f)
+				continue
+			}
+			if !filepath.IsAbs(p) {
+				p = filepath.Join(repoDir, p)
+			}
+			out = append(out, adopt.Peer{Name: name, Dir: p})
+		}
+		return out
+	}
+	cfg, err := config.Load(repoDir)
+	if err != nil {
+		return nil
+	}
+	var out []adopt.Peer
+	for _, p := range cfg.Peers {
+		out = append(out, adopt.Peer{Name: p.Name, Dir: p.Dir(repoDir)})
+	}
+	return out
 }
 
 func cmdInit(args []string) int {

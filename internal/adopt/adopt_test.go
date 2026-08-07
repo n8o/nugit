@@ -599,13 +599,72 @@ func TestColocationNeedsAMajority(t *testing.T) {
 	}
 }
 
-func TestPathAnchorFindsAPhantomUnderARealParent(t *testing.T) {
+// --- path-anchor needs this repo's own history (ADR-0038) --------------------
+
+// citingRepo is the cross-repo fixture: two real services, and a document that
+// cites `apps/lathe` under the same real parent. Whether that citation is this
+// repo's phantom is NOT decidable from the layout — two sibling repos in one org
+// share a layout — so the history decides it.
+func citingRepo(t *testing.T) string {
+	t.Helper()
 	dir := t.TempDir()
 	initRepo(t, dir)
 	service(t, dir, "anvil")
 	service(t, dir, "chisel")
 	write(t, dir, "README.md", "# Platform\n\nThe milling path lives in `apps/lathe` and the forging path in `apps/anvil`.\n")
 	commitAll(t, dir, "seed")
+	return dir
+}
+
+// THE DEFECT. A document about the boundary with a sibling repo names the
+// sibling's directories; the parent exists here (both repos lay their services
+// out the same way) and the full path does not, so path-anchor called it this
+// repo's phantom. Measured on a real repo: 5 of 6 documented-but-absent were
+// this shape, every one of them a real directory in the sibling.
+func TestAPathThisRepoNeverContainedIsNotItsPhantom(t *testing.T) {
+	rep := run(t, citingRepo(t))
+	if has(names(rep.Absent), "lathe") {
+		t.Errorf("apps/lathe was never in this repo's history, but it was asserted as this repo's phantom: %v", names(rep.Absent))
+	}
+	var got *Elsewhere
+	for i := range rep.Elsewhere {
+		if rep.Elsewhere[i].Name == "lathe" {
+			got = &rep.Elsewhere[i]
+		}
+	}
+	if got == nil {
+		t.Fatalf("a cited path this repo never contained belongs in its own bucket; got %+v", rep.Elsewhere)
+	}
+	if got.Rule != RulePathAnchor {
+		t.Errorf("rule = %q, want %q", got.Rule, RulePathAnchor)
+	}
+	if got.Peer != "" {
+		t.Errorf("no peers were configured, so nothing may be attributed to one: %+v", got)
+	}
+	if len(got.Mentions) == 0 {
+		t.Error("an unattributed citation with no mentions is unauditable")
+	}
+	md := rep.Markdown()
+	if !strings.Contains(md, "## Cited here, but never in this repo") {
+		t.Errorf("the bucket must be its own clearly-labelled section:\n%s", md)
+	}
+	if !strings.Contains(md, "No peers are configured") {
+		t.Error("with no peers the report must say it could only rule this repo out")
+	}
+}
+
+// ...and the same rule with the history AGREEING is still a phantom, now with
+// the commit that removed it. Deterministic, cheap, and the same principle
+// ADR-0037 established: ask the version-control system, it already knows.
+func TestADeletedPathIsStillReportedAsAPhantom(t *testing.T) {
+	dir := citingRepo(t)
+	service(t, dir, "lathe")
+	commitAll(t, dir, "add the milling service")
+	if err := os.RemoveAll(filepath.Join(dir, "apps", "lathe")); err != nil {
+		t.Fatal(err)
+	}
+	commitAll(t, dir, "retire the milling service")
+
 	rep := run(t, dir)
 	var got *Absent
 	for i := range rep.Absent {
@@ -614,10 +673,202 @@ func TestPathAnchorFindsAPhantomUnderARealParent(t *testing.T) {
 		}
 	}
 	if got == nil {
-		t.Fatalf("apps/lathe is documented and absent under a real parent; got %v", names(rep.Absent))
+		t.Fatalf("this repo tracked and deleted apps/lathe and still documents it; got absent=%v elsewhere=%+v", names(rep.Absent), rep.Elsewhere)
 	}
 	if got.Rule != RulePathAnchor {
 		t.Errorf("rule = %q, want %q", got.Rule, RulePathAnchor)
+	}
+	if got.DeletedIn == "" || got.DeletedPath != "apps/lathe" {
+		t.Errorf("a history-corroborated phantom must cite the commit that removed it: %+v", got)
+	}
+	for _, e := range rep.Elsewhere {
+		if e.Name == "lathe" {
+			t.Errorf("lathe is in both buckets: %+v", e)
+		}
+	}
+	if !strings.Contains(rep.Markdown(), "this repo deleted `apps/lathe` in") {
+		t.Error("the pitch must show the deletion that corroborates the finding")
+	}
+}
+
+// Co-location is untouched by the narrowing. Its corroboration is two
+// independent documents of THIS repo naming the same missing unit — a claim the
+// repo makes about itself — and requiring the index to agree as well would
+// silence the genuine finding measured on a real repo, where the one true
+// positive of six was admitted by exactly this rule.
+func TestColocatedPhantomsDoNotNeedTheHistory(t *testing.T) {
+	rep := run(t, baseRepo(t))
+	var got *Absent
+	for i := range rep.Absent {
+		if rep.Absent[i].Name == "depot-service" {
+			got = &rep.Absent[i]
+		}
+	}
+	if got == nil {
+		t.Fatalf("the co-located phantom must survive: absent=%v elsewhere=%+v", names(rep.Absent), rep.Elsewhere)
+	}
+	if got.Rule != RuleColocated {
+		t.Errorf("rule = %q, want %q", got.Rule, RuleColocated)
+	}
+	if got.DeletedIn != "" {
+		t.Errorf("depot-service was never in this repo's history; it must not claim a deletion: %+v", got)
+	}
+}
+
+// ...and where the history DOES have one, the co-located finding cites it. The
+// true positive measured on a real repo is a bare NAME in three tables — the
+// prose never writes its directory — so the slot it would occupy under a
+// unit-bearing parent is asked about too. Without that the report can assert
+// "this unit is gone" but cannot show when.
+func TestACoLocatedPhantomCitesItsDeletionWhenThereIsOne(t *testing.T) {
+	dir := baseRepo(t)
+	service(t, dir, "depot-service")
+	commitAll(t, dir, "add the depot service")
+	if err := os.RemoveAll(filepath.Join(dir, "apps", "depot-service")); err != nil {
+		t.Fatal(err)
+	}
+	commitAll(t, dir, "retire the depot service")
+
+	rep := run(t, dir)
+	var got *Absent
+	for i := range rep.Absent {
+		if rep.Absent[i].Name == "depot-service" {
+			got = &rep.Absent[i]
+		}
+	}
+	if got == nil {
+		t.Fatalf("absent = %v, want the deleted depot-service", names(rep.Absent))
+	}
+	if got.Rule != RuleColocated {
+		t.Errorf("rule = %q, want %q — the history corroborates, it does not re-admit", got.Rule, RuleColocated)
+	}
+	if got.DeletedPath != "apps/depot-service" || got.DeletedIn == "" {
+		t.Errorf("a bare-name phantom whose slot this repo deleted must cite the commit: %+v", got)
+	}
+}
+
+// With no history to ask, the layout alone may not assert a phantom — and the
+// report says why rather than silently reporting one number or the other.
+func TestWithoutAHistoryTheLayoutAloneAssertsNothing(t *testing.T) {
+	dir := t.TempDir() // deliberately NOT a git repo
+	service(t, dir, "anvil")
+	service(t, dir, "chisel")
+	write(t, dir, "README.md", "# Platform\n\nThe milling path lives in `apps/lathe`.\n")
+	rep, err := Run(Options{RepoDir: dir})
+	if err != nil {
+		t.Fatalf("Run outside git must not fail: %v", err)
+	}
+	if len(rep.Absent) != 0 {
+		t.Errorf("no history is readable, so nothing may be asserted from the layout: %v", names(rep.Absent))
+	}
+	var noted bool
+	for _, n := range rep.Notes {
+		if strings.Contains(n, RulePathAnchor) {
+			noted = true
+		}
+	}
+	if !noted {
+		t.Errorf("the report must name what it could not corroborate: %v", rep.Notes)
+	}
+}
+
+// --- peers earn their keep (ADR-0032 spent at adoption time) -----------------
+
+func TestPeerAttributionNamesTheRepoThatHasIt(t *testing.T) {
+	sibling := t.TempDir()
+	initRepo(t, sibling)
+	service(t, sibling, "lathe")
+	commitAll(t, sibling, "seed")
+
+	dir := citingRepo(t)
+	rep, err := Run(Options{RepoDir: dir, Peers: []Peer{{Name: "bindery", Dir: sibling}}})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if has(names(rep.Absent), "lathe") {
+		t.Errorf("a path that lives in a configured peer must not be called absent: %v", names(rep.Absent))
+	}
+	var got *Elsewhere
+	for i := range rep.Elsewhere {
+		if rep.Elsewhere[i].Name == "lathe" {
+			got = &rep.Elsewhere[i]
+		}
+	}
+	if got == nil {
+		t.Fatalf("elsewhere = %+v, want lathe attributed to the peer", rep.Elsewhere)
+	}
+	if got.Peer != "bindery" || got.PeerPath != "apps/lathe" {
+		t.Errorf("attribution = %+v, want peer bindery at apps/lathe", got)
+	}
+	if len(rep.Peers) != 1 || !rep.Peers[0].Present {
+		t.Errorf("peer status = %+v, want one present peer", rep.Peers)
+	}
+	if md := rep.Markdown(); !strings.Contains(md, "lives in peer `bindery`") {
+		t.Errorf("the pitch must name the repo that has it:\n%s", md)
+	}
+}
+
+// A peer that is not checked out is the NORMAL state in CI (ADR-0032 clause 3):
+// it is reported and contributes nothing, and the report falls back to history
+// corroboration alone.
+func TestAbsentPeerDegradesToTheHistoryRule(t *testing.T) {
+	dir := citingRepo(t)
+	rep, err := Run(Options{RepoDir: dir, Peers: []Peer{{Name: "bindery", Dir: filepath.Join(dir, "no-such-checkout")}}})
+	if err != nil {
+		t.Fatalf("an absent peer must never error the report: %v", err)
+	}
+	if has(names(rep.Absent), "lathe") {
+		t.Errorf("an unreachable peer must not turn a cross-repo citation into a phantom: %v", names(rep.Absent))
+	}
+	if len(rep.Elsewhere) != 1 || rep.Elsewhere[0].Peer != "" {
+		t.Errorf("elsewhere = %+v, want lathe with no attribution", rep.Elsewhere)
+	}
+	if len(rep.Peers) != 1 || rep.Peers[0].Present {
+		t.Errorf("peer status = %+v, want one absent peer", rep.Peers)
+	}
+	var noted bool
+	for _, n := range rep.Notes {
+		if strings.Contains(n, "bindery") {
+			noted = true
+		}
+	}
+	if !noted {
+		t.Errorf("an absent peer must be reported, not silently ignored: %v", rep.Notes)
+	}
+}
+
+// A unit this repo really deleted and a sibling really has is BOTH: still this
+// repo's phantom (its prose is stale) and now the peer's code. The finding stays
+// where a reader needs it and carries the peer as extra information.
+func TestAMovedUnitIsStillThisReposPhantom(t *testing.T) {
+	sibling := t.TempDir()
+	initRepo(t, sibling)
+	service(t, sibling, "lathe")
+	commitAll(t, sibling, "seed")
+
+	dir := citingRepo(t)
+	service(t, dir, "lathe")
+	commitAll(t, dir, "add the milling service")
+	if err := os.RemoveAll(filepath.Join(dir, "apps", "lathe")); err != nil {
+		t.Fatal(err)
+	}
+	commitAll(t, dir, "move the milling service to the bindery repo")
+
+	rep, err := Run(Options{RepoDir: dir, Peers: []Peer{{Name: "bindery", Dir: sibling}}})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	var got *Absent
+	for i := range rep.Absent {
+		if rep.Absent[i].Name == "lathe" {
+			got = &rep.Absent[i]
+		}
+	}
+	if got == nil {
+		t.Fatalf("a unit this repo deleted is still its phantom; got %+v / %+v", rep.Absent, rep.Elsewhere)
+	}
+	if got.DeletedIn == "" || got.Peer != "bindery" {
+		t.Errorf("a moved unit must carry both the deletion and the peer: %+v", got)
 	}
 }
 

@@ -91,10 +91,13 @@ type claim struct {
 	Name     string
 	Mentions []mention
 	Ports    map[string][]mention // doc -> port values asserted there
-	// Spellings are the raw tokens that produced this claim. A claim is filed
-	// under its basename, so `apps/gateway/api/v1` files under `v1` — and the
-	// only way to check whether the document was pointing at something that
-	// really exists is to keep the path it actually wrote.
+	// Spellings are the RAW tokens that produced this claim, deduped on their
+	// normalized form. A claim is filed under its basename, so
+	// `apps/gateway/api/v1` files under `v1` — and the only way to check whether
+	// the document was pointing at something that really exists is to keep the
+	// path it actually wrote. Raw, not normalized, because git is asked about
+	// these paths verbatim (ADR-0038) and `libs/crate_index` is not
+	// `libs/crate-index` to the index.
 	Spellings []string
 }
 
@@ -169,19 +172,34 @@ func readDoc(repoDir, rel string) (docText, bool) {
 // prose is the thing under suspicion, so it never gets to define what a unit
 // looks like.
 type shape struct {
-	repoDir     string
+	tree        tree
 	names       map[string]bool // normalized unit names + dir basenames
 	unitDirs    map[string]bool // normalized detected unit directories
 	parentDir   map[string]bool // directories that CONTAIN a detected unit
 	parents     []string        // parentDir, sorted — deterministic lookup order
+	parentsRaw  []string        // the same directories AS SPELLED on disk, sorted
 	unitDirList []string        // unitDirs, sorted — deterministic lookup order
 
-	// unitLike / existing / listings memoize the filesystem side of the two
-	// resolution tests. The maps are shared by every copy of the shape value,
-	// which is the point: the quorum test runs once per slot in a whole docs tree.
+	// unitLike / existing memoize the filesystem side of the two resolution
+	// tests. The maps are shared by every copy of the shape value, which is the
+	// point: the quorum test runs once per slot in a whole docs tree.
 	unitLike map[string]bool
 	existing map[string]bool
+}
+
+// tree is one checkout's directory layout, read lazily and memoized. It is a
+// separate type because the same walk answers the same question about a PEER's
+// checkout (ADR-0038): "does this repo contain the path the prose wrote?".
+type tree struct {
+	root     string
 	listings map[string]map[string]string // dir -> normalized child name -> real name
+}
+
+func newTree(root string) tree {
+	if root == "" {
+		root = "."
+	}
+	return tree{root: root, listings: map[string]map[string]string{}}
 }
 
 var sepChars = []string{"-", "_", "."}
@@ -191,19 +209,24 @@ func newShape(units []unitRef, repoDir string) shape {
 		repoDir = "."
 	}
 	s := shape{
-		repoDir: repoDir,
-		names:   map[string]bool{}, unitDirs: map[string]bool{}, parentDir: map[string]bool{},
+		tree:  newTree(repoDir),
+		names: map[string]bool{}, unitDirs: map[string]bool{}, parentDir: map[string]bool{},
 		unitLike: map[string]bool{}, existing: map[string]bool{},
-		listings: map[string]map[string]string{},
 	}
+	rawParents := map[string]bool{}
 	for _, u := range units {
 		s.names[normalize(u.Name)] = true
 		s.names[normalize(path.Base(u.Dir))] = true
 		s.unitDirs[normalize(u.Dir)] = true
 		if d := path.Dir(u.Dir); d != "." && d != "/" && d != "" {
 			s.parentDir[normalize(d)] = true
+			rawParents[d] = true
 		}
 	}
+	for d := range rawParents {
+		s.parentsRaw = append(s.parentsRaw, d)
+	}
+	sort.Strings(s.parentsRaw)
 	for p := range s.parentDir {
 		s.parents = append(s.parents, p)
 	}
@@ -475,7 +498,9 @@ func (s shape) lookup(memo map[string]bool, tok string, fn func(string) bool) bo
 
 // dirExists walks a repo-relative path segment by segment, matching each
 // segment against the real directory entries by normalized name.
-func (s shape) dirExists(rel string) bool {
+func (s shape) dirExists(rel string) bool { return s.tree.dirExists(rel) }
+
+func (t tree) dirExists(rel string) bool {
 	cur := "."
 	segs := strings.Split(strings.Trim(rel, "/"), "/")
 	if len(segs) == 0 || len(segs) > 8 {
@@ -485,7 +510,7 @@ func (s shape) dirExists(rel string) bool {
 		if seg == "" || seg == "." || seg == ".." {
 			return false
 		}
-		real, ok := s.listing(cur)[normalize(seg)]
+		real, ok := t.listing(cur)[normalize(seg)]
 		if !ok {
 			return false
 		}
@@ -501,13 +526,13 @@ func (s shape) dirExists(rel string) bool {
 // listing returns one directory's child DIRECTORIES, keyed by normalized name,
 // read at most once per run and capped so a docs tree full of path-shaped
 // tokens cannot turn this report into a tree walk.
-func (s shape) listing(rel string) map[string]string {
-	if m, ok := s.listings[rel]; ok {
+func (t tree) listing(rel string) map[string]string {
+	if m, ok := t.listings[rel]; ok {
 		return m
 	}
 	m := map[string]string{}
-	if len(s.listings) < maxDirListings {
-		ents, err := os.ReadDir(filepath.Join(s.repoDir, filepath.FromSlash(rel)))
+	if len(t.listings) < maxDirListings {
+		ents, err := os.ReadDir(filepath.Join(t.root, filepath.FromSlash(rel)))
 		if err == nil {
 			for _, e := range ents {
 				if !e.IsDir() {
@@ -520,7 +545,7 @@ func (s shape) listing(rel string) map[string]string {
 			}
 		}
 	}
-	s.listings[rel] = m
+	t.listings[rel] = m
 	return m
 }
 
