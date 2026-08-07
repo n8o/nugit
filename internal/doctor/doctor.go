@@ -84,13 +84,8 @@ func Run(repoDir string) Report {
 	add("workspace.dsl parses with components", derr == nil && len(m.Components) > 0,
 		fmt.Sprintf("%d component(s), %d relationship(s)", len(m.Components), len(m.Relationships)))
 
-	hooks := gitutil.Repo{Dir: repoDir}.HooksDir()
-	hookInstalled := false
-	if hooks != "" {
-		_, e := os.Stat(filepath.Join(hooks, "commit-msg"))
-		hookInstalled = e == nil
-	}
-	add("commit-msg hook installed", hookInstalled, hookDetail(hookInstalled))
+	hook := gitutil.Repo{Dir: repoDir}.CommitMsgHook()
+	add("commit-msg hook installed", hook.Installed(), hookDetail(repoDir, hook))
 
 	add("language backend detected", backend(repoDir) != "", backend(repoDir))
 
@@ -689,9 +684,44 @@ func errOr(err error, ok string) string {
 	return ok
 }
 
-func hookDetail(ok bool) string {
-	if ok {
-		return "validates trailer blocks on commit"
+// hookDetail words the commit-msg hook check. It always names WHERE the hook
+// was found (or where one belongs), because under a shim-generating hook
+// manager that is not `.git/hooks` and a reader cannot guess which convention
+// the repo is running.
+func hookDetail(repoDir string, h gitutil.CommitMsgHook) string {
+	rel := relTo(repoDir)
+	if h.Installed() {
+		s := "validates trailer blocks on commit — found at " + rel(h.Path)
+		if h.Shimmed() {
+			s += fmt.Sprintf(" (core.hooksPath=%s is a generated shim dir; its shims run this file)", rel(h.GitHooksDir))
+		}
+		return s
 	}
-	return "run `nugit init` to install"
+	if h.Target == "" {
+		return "not a git repo (or git is unavailable) — nothing to install into"
+	}
+	s := "run `nugit init` to install it at " + rel(h.Target)
+	if f := h.ForeignAtTarget(); f != "" {
+		s += fmt.Sprintf("; %s already holds a hook nugit did not write, and nugit never overwrites one — chain it by hand instead (`nugit hook commit-msg \"$1\"`)", rel(f))
+	}
+	if h.Inert != "" {
+		s += fmt.Sprintf("; a nugit hook sits at %s but core.hooksPath sends git to %s, so it never runs", rel(h.Inert), rel(h.GitHooksDir))
+	}
+	return s
+}
+
+// relTo renders absolute paths relative to repoDir when they are inside it,
+// and verbatim otherwise (a linked worktree's hooks live in the main checkout).
+func relTo(repoDir string) func(string) string {
+	base, err := filepath.Abs(repoDir)
+	return func(p string) string {
+		if err != nil || p == "" {
+			return p
+		}
+		r, rerr := filepath.Rel(base, p)
+		if rerr != nil || strings.HasPrefix(r, "..") {
+			return p
+		}
+		return filepath.ToSlash(r)
+	}
 }
