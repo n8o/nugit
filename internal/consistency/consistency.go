@@ -351,6 +351,7 @@ func OtherFindings(in Input) []model.Finding {
 	fs = append(fs, checkSpecLinkage(in)...)
 	fs = append(fs, checkCaptureHygiene(in)...)
 	fs = append(fs, checkProseSupersession(in)...)
+	fs = append(fs, checkDuplicateID(in)...)
 	fs = append(fs, checkRecurrence(in)...)
 	fs = append(fs, checkContractObligations(in)...)
 	fs = append(fs, checkLandscapeOwnership(in)...)
@@ -385,6 +386,50 @@ func checkProseSupersession(in Input) []model.Finding {
 			Detail: fmt.Sprintf("%s (%s) says it supersedes %s, but declares no front-matter edge, so %s (%s) still serves as live; "+
 				"add `supersedes: %s` (or `relates_to: [amends:%s]` for partial supersession) so EffectiveStatus updates",
 				p.ObjectID, p.ObjectPath, p.Target, p.Target, p.TargetPath, p.Target, p.Target),
+		})
+	}
+	return fs
+}
+
+// checkDuplicateID: two knowledge objects at the reviewed ref carry the same id
+// (ADR-0039). Identity is `(origin, id)` (ADR-0032), so a within-store collision
+// defeats identity before any peer is involved: `ratify <id>` is ambiguous, the
+// retrieval byKey map and its one-hop relates_to traversal keep one object and
+// shadow the other, and every `supersedes:`/`amends:`/`reinforces:` edge naming
+// the id has an undefined target.
+//
+// FAIL, not warn — the reason ADR-0022 held its lifecycle checks at warn was
+// irreducible false positives in prose matching; this is an exact grouping over
+// committed text and has none. Scoped to objects the PR adds or modifies, so it
+// fails a collision AT THE MOMENT IT LANDS; a pre-existing one the PR never
+// touches stays `nugit doctor`'s job, like every other store-wide check here.
+//
+// Cross-store reuse is never flagged: two repos both minting ADR-0001 is the
+// federated norm, and DuplicateIDs groups on (origin, id) precisely so it
+// cannot mistake that for a defect.
+func checkDuplicateID(in Input) []model.Finding {
+	touched := map[string]bool{}
+	for _, kc := range in.Knowledge.Changes {
+		if kc.Object != nil && kc.Object.ID != "" && (kc.Status == "A" || kc.Status == "M") {
+			touched[kc.Object.ID] = true
+		}
+	}
+	if len(touched) == 0 {
+		return nil
+	}
+	var fs []model.Finding
+	for _, d := range knowledge.DuplicateIDs(in.AllObjects) {
+		if !touched[d.ID] {
+			continue
+		}
+		fs = append(fs, model.Finding{
+			Check:    "duplicate-knowledge-id",
+			Severity: model.SevFail,
+			Title:    fmt.Sprintf("duplicate knowledge id %s (%d files)", d.QualifiedID(), len(d.Paths)),
+			Detail: fmt.Sprintf("%s is carried by %d files at this ref (%s); ids are the store's stable cross-reference keys (ADR-0001), "+
+				"so a collision makes one record shadow the other in retrieval and in every `relates_to`/`supersedes`/`amends` edge naming it, "+
+				"and `nugit ratify %s` cannot tell which file to promote — give one of them its own id",
+				d.QualifiedID(), len(d.Paths), strings.Join(d.Paths, ", "), d.ID),
 		})
 	}
 	return fs

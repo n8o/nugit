@@ -888,17 +888,31 @@ func cmdRatify(args []string) int {
 	list := fs.Bool("list", false, "list proposed objects pending ratification")
 	_ = fs.Parse(args)
 	if *list {
-		pending, err := ratify.Pending(*dir)
+		l, err := ratify.List(*dir)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "nugit ratify: %v\n", err)
 			return 1
 		}
-		if len(pending) == 0 {
+		if len(l.Pending) == 0 && len(l.Duplicates) == 0 {
 			fmt.Println("Nothing pending — no proposed objects in the store.")
 			return 0
 		}
-		for _, o := range pending {
+		if len(l.Pending) == 0 {
+			fmt.Println("Nothing pending — no proposed objects in the store.")
+		}
+		for _, o := range l.Pending {
 			fmt.Printf("  %-14s %-9s %s  %s\n", o.ID, o.Type, o.Created.Format("2006-01-02"), o.Path)
+		}
+		// A duplicated id is shown even when its other half is not a candidate:
+		// `nugit ratify <id>` refuses on it, so hiding it would leave the operator
+		// with an error and no second file to look at (ADR-0039).
+		if len(l.Duplicates) > 0 {
+			fmt.Printf("\n%d ambiguous id(s) — `nugit ratify <id>` refuses until each record has its own id:\n", len(l.Duplicates))
+			for _, d := range l.Duplicates {
+				fmt.Printf("  %-14s %d files: %s\n", d.QualifiedID(), len(d.Paths), strings.Join(d.Paths, ", "))
+			}
+			fmt.Println("\nSee `nugit explain duplicate-knowledge-id`.")
+			return 1
 		}
 		return 0
 	}

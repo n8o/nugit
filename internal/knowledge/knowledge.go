@@ -201,6 +201,62 @@ func EdgeKeyFrom(o model.KnowledgeObject, target string) Key {
 	return Key{Origin: o.Origin, ID: target}
 }
 
+// DuplicateID is one id carried by more than one object in the SAME store.
+// It is the within-store identity collision that defeats `(origin, id)` before
+// a peer is ever involved (ADR-0032): every index that resolves by id — the
+// retrieval byKey map and its one-hop relates_to traversal, ResolveEffectiveStatus,
+// ResolveAmendedBy, ResolveReinforcedBy, `nugit ratify` — silently picks one
+// object and shadows the other.
+type DuplicateID struct {
+	ID     string // the colliding id
+	Origin string // "" for the local store; a peer's name for that peer's own store
+	// Paths is EVERY file carrying the id, sorted. All of them, never a sample:
+	// a duplicate is only actionable when the reader knows which files collide.
+	Paths []string
+}
+
+// QualifiedID renders the colliding id for display: bare locally, `origin:id`
+// for a peer's own store (ADR-0032 point 8).
+func (d DuplicateID) QualifiedID() string { return model.QualifyID(d.Origin, d.ID) }
+
+// DuplicateIDs groups a set by (origin, id) and returns every id carried by more
+// than one object WITHIN ONE store, sorted. Pure grouping over objects the caller
+// already loaded — no I/O.
+//
+// Cross-store id reuse is deliberately NOT reported. Every repo mints ADR-0001,
+// so a peer's ADR-0001 and this repo's are two different objects under two
+// different keys, and flagging that pair would make federation itself look like
+// a defect (ADR-0032 point 4). Only a collision inside one store is the bug.
+//
+// Id-less objects are skipped: they are invisible to retrieval for a different
+// reason (doctor's untyped check owns that), and grouping them on "" would
+// report every untyped file as a duplicate of every other.
+func DuplicateIDs(objs []model.KnowledgeObject) []DuplicateID {
+	byKey := map[Key][]string{}
+	for _, o := range objs {
+		if o.ID == "" {
+			continue
+		}
+		k := KeyOf(o)
+		byKey[k] = append(byKey[k], o.Path)
+	}
+	var out []DuplicateID
+	for k, paths := range byKey {
+		if len(paths) < 2 {
+			continue
+		}
+		sort.Strings(paths)
+		out = append(out, DuplicateID{ID: k.ID, Origin: k.Origin, Paths: paths})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Origin != out[j].Origin {
+			return out[i].Origin < out[j].Origin
+		}
+		return out[i].ID < out[j].ID
+	})
+	return out
+}
+
 // ResolveEffectiveStatus marks any object that another object supersedes as
 // Superseded, in place on the slice. Supersession resolves by (origin, id): a
 // foreign record can never supersede a same-id local one (ADR-0032).

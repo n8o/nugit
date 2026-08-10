@@ -152,6 +152,20 @@ var adversarial = []Case{
 		WantClean: true,
 	},
 	{
+		// ADR-0039's negative twin: a NEAR-MISS id. The grouping is exact
+		// equality over (origin, id) — a shared prefix is two distinct records
+		// and must stay silent, or every numbered family would collide.
+		Name: "duplicate-id-near-miss",
+		Base: mergeFiles(baseFiles, map[string]string{
+			".nugit/decisions/0027.md": adr("ADR-P-0027", "a", ""),
+		}),
+		Head: map[string]string{
+			".nugit/decisions/0027-b.md": adr("ADR-P-0027-B", "a", ""),
+		},
+		WantTier:  model.TierFeature, // knowledge changed
+		WantClean: true,
+	},
+	{
 		// The spec id is derivable from the FILENAME (SPEC-014-cache.md), even
 		// though the front-matter id differs — spec-linkage must stay silent.
 		Name: "spec-linkage-filename-id",

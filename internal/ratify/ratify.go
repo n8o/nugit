@@ -53,16 +53,32 @@ func Ratify(repoDir, id string) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	var obj *model.KnowledgeObject
+	// Collect EVERY match before choosing one. knowledge.Load is local-only, so
+	// every object here has an empty Origin and a bare-id match is exactly an
+	// (origin, id) match (ADR-0032) — the ambiguity below is a within-store
+	// collision, never a peer's legitimate same-id record.
+	var matches []*model.KnowledgeObject
 	for i := range objs {
 		if objs[i].ID == id {
-			obj = &objs[i]
-			break
+			matches = append(matches, &objs[i])
 		}
 	}
-	if obj == nil {
+	if len(matches) == 0 {
 		return Result{}, fmt.Errorf("no knowledge object with id %q", id)
 	}
+	if len(matches) > 1 {
+		// Refuse, never guess: promoting "the first one the walk found" would
+		// silently ratify an arbitrary file and leave the other behind, looking
+		// like success (ADR-0039).
+		paths := make([]string, 0, len(matches))
+		for _, m := range matches {
+			paths = append(paths, m.Path)
+		}
+		sort.Strings(paths)
+		return Result{}, fmt.Errorf("%s is ambiguous: %d files carry that id (%s) — ratifying one would leave the other behind; give one of them its own id (see `nugit explain duplicate-knowledge-id`)",
+			id, len(paths), strings.Join(paths, ", "))
+	}
+	obj := matches[0]
 	if obj.EffectiveStatus == model.StatusSuperseded || obj.EffectiveStatus == model.StatusInvalidated {
 		return Result{}, fmt.Errorf("%s is %s — supersession outranks promotion", id, obj.EffectiveStatus)
 	}
@@ -111,6 +127,27 @@ func promote(content string, to model.Status) (string, error) {
 	return statusLineRE.ReplaceAllString(head, "status: "+string(to)+"$1") + tail, nil
 }
 
+// Listing is what `nugit ratify -list` shows: the candidate lane, plus the id
+// collisions that make `nugit ratify <id>` refuse.
+//
+// Duplicates are carried alongside Pending rather than folded into them because
+// the collision's other half is usually NOT a candidate — the pilot case was one
+// `accepted` and one `proposed` file under the same id, so the candidate filter
+// showed one file and the operator had no way to learn the second existed.
+type Listing struct {
+	Pending    []model.KnowledgeObject
+	Duplicates []knowledge.DuplicateID
+}
+
+// List reads the store once and returns both halves of the ratify view.
+func List(repoDir string) (Listing, error) {
+	objs, err := knowledge.Load(repoDir)
+	if err != nil {
+		return Listing{}, err
+	}
+	return Listing{Pending: pendingOf(objs), Duplicates: knowledge.DuplicateIDs(objs)}, nil
+}
+
 // Pending lists proposed objects awaiting ratification, sorted by id.
 // Superseded/invalidated candidates and malformed (id-less) objects are
 // skipped — the former are dead, the latter are doctor's problem.
@@ -119,6 +156,10 @@ func Pending(repoDir string) ([]model.KnowledgeObject, error) {
 	if err != nil {
 		return nil, err
 	}
+	return pendingOf(objs), nil
+}
+
+func pendingOf(objs []model.KnowledgeObject) []model.KnowledgeObject {
 	var out []model.KnowledgeObject
 	for _, o := range objs {
 		if o.ID == "" || o.Status != model.StatusProposed {
@@ -129,6 +170,13 @@ func Pending(repoDir string) ([]model.KnowledgeObject, error) {
 		}
 		out = append(out, o)
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
-	return out, nil
+	// Sorted by id, then by path: two candidates sharing an id must still order
+	// deterministically, and the path is what tells them apart on screen.
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].ID != out[j].ID {
+			return out[i].ID < out[j].ID
+		}
+		return out[i].Path < out[j].Path
+	})
+	return out
 }
