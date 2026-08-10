@@ -95,6 +95,14 @@ func Run(repoDir string) Report {
 	bad := untypedObjects(repoDir)
 	add("knowledge objects are typed", len(bad) == 0, untypedDetail(bad))
 
+	// GATING, like the typed check above and for the same reason: both are silent
+	// data loss. An untyped object vanishes from retrieval; a duplicated id makes
+	// one object shadow another everywhere identity resolves by id (ADR-0039).
+	// Unlike the ADR-0022 lifecycle checks this is an exact grouping over
+	// committed text, so it has no false positives to be advisory about.
+	dups := knowledge.DuplicateIDs(objs)
+	add("knowledge object ids are unique", len(dups) == 0, duplicateIDDetail(dups))
+
 	// Lifecycle integrity (ADR-0022), both advisory: a supersession declared
 	// only in prose leaves the target serving as live, and a drifting
 	// provenance block silently loses data.
@@ -158,6 +166,23 @@ func Run(repoDir string) Report {
 	}
 
 	return r
+}
+
+// duplicateIDDetail words the duplicate-id check (ADR-0039). Every colliding id
+// and every file carrying it is named — deliberately untruncated, unlike the
+// advisory details above: this check gates, and its remediation is "open these
+// exact files", which a "… 3 more" tail would send the reader searching for.
+func duplicateIDDetail(dups []knowledge.DuplicateID) string {
+	if len(dups) == 0 {
+		return "every id is carried by exactly one file"
+	}
+	items := make([]string, 0, len(dups))
+	for _, d := range dups {
+		items = append(items, fmt.Sprintf("%s is carried by %d files (%s)",
+			d.QualifiedID(), len(d.Paths), strings.Join(d.Paths, ", ")))
+	}
+	return fmt.Sprintf("%d duplicated id(s): %s — one object shadows the other in retrieval, in `nugit ratify`, and in every `relates_to`/`supersedes`/`amends` edge naming it; give each record its own id",
+		len(dups), strings.Join(items, "; "))
 }
 
 // proseDetail words the prose-only supersession check (ADR-0022).

@@ -278,6 +278,22 @@ var corpus = []Case{
 		WantClean:  true,
 	},
 	{
+		// ADR-0039: the PR adds a SECOND file carrying an id the store already
+		// uses. Identity collides within one store, so retrieval, the edge
+		// resolvers and `nugit ratify` all silently pick one and shadow the
+		// other — caught at the reviewed ref, at the moment it lands.
+		Name: "duplicate-knowledge-id-introduced",
+		Base: mergeFiles(baseFiles, map[string]string{
+			".nugit/decisions/0027-first.md": adr("ADR-P-0027", "a", ""),
+		}),
+		Head: map[string]string{
+			".nugit/decisions/0027-second.md": adrWith("ADR-P-0027", "a", "proposed", ""),
+		},
+		WantTier:   model.TierFeature, // knowledge changed
+		WantChecks: []string{"duplicate-knowledge-id"},
+		WantClean:  false, // it is a fail
+	},
+	{
 		Name:      "large-churn-single-component",
 		Head:      map[string]string{"a/a.go": bigFunc},
 		WantTier:  model.TierFeature, // > trivial churn threshold

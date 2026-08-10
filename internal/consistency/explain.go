@@ -37,6 +37,16 @@ var explanations = map[string]string{
 		"store object, but carries no front-matter `supersedes:`/`amends:` edge. Effective status is derived from edges\n" +
 		"only (ADR-0003), so retrieval keeps serving both the new object and the contradicted one as live (ADR-0022).\n" +
 		"Fix: add `supersedes: <id>` (whole-object) or `relates_to: [amends:<id>]` (partial, ADR-0015) to the superseding object.",
+	"duplicate-knowledge-id": "Two knowledge objects in THIS store carry the same `id:` at the reviewed ref (ADR-0039).\n" +
+		"Ids are the store's stable cross-reference keys (ADR-0001), so a collision is silent data loss: retrieval's\n" +
+		"byKey map and its one-hop `relates_to` traversal keep one object and shadow the other, `supersedes:`/`amends:`/\n" +
+		"`reinforces:` edges naming the id have an undefined target, and `nugit ratify <id>` cannot tell which file to promote.\n" +
+		"Fix: give one of the colliding records its own id (nothing resolves to it correctly today, so no working reference breaks),\n" +
+		"or merge them into one record.\n" +
+		"The same id in a PEER store is legitimate and never flagged — identity is `(origin, id)` and every repo mints ADR-0001\n" +
+		"(ADR-0032). Only a duplicate WITHIN one store is the defect.\n" +
+		"This is a FAIL: unlike the prose-matching lifecycle checks (ADR-0022) it is an exact grouping over committed text,\n" +
+		"so it has no false positives. It fires only for objects this PR adds or modifies; `nugit doctor` reports the whole store.",
 	"model-drift": "The PR touches a detected buildable/deployable unit (deploy artifact, CMake target dir, or Go package)\n" +
 		"that no workspace.dsl element maps — model coverage decayed since the last refresh (ADR-0021).\n" +
 		"Fix: run the nugit-model skill to refresh the model, or add a component/container stub with `properties { paths \"<dir>/**\" }`.\n" +
