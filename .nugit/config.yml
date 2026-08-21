@@ -19,6 +19,19 @@ pr_render:
   # Exit non-zero when a finding reaches this severity (CI gate).
   fail_on: fail
 
+plan:
+  # scope: touched (default) | all — ADR-0040.
+  # A Beads store is repo-wide: under agent fan-out every concurrent session
+  # writes the same .beads/. `touched` renders only the plans THIS PR moved, so
+  # a PR cannot present another agent's progress as its own; `all` renders the
+  # whole board.
+  scope: touched
+  # mode: warn (default) | fail | off — gates the `plan-store` checks.
+  # warn while a store is being cleaned up; fail once it is (an id collision
+  # makes one step invisible). off for a repo that keeps a store and does not
+  # want nugit's opinion about its shape.
+  mode: warn
+
 capture:
   # warn (default) | nudge | block | off — ADR-0023.
   # nudge: on a SIGNIFICANT commit with no trailer block, the commit-msg hook

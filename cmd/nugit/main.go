@@ -5,6 +5,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -12,11 +13,13 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime/debug"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/n8o/nugit/internal/adopt"
 	"github.com/n8o/nugit/internal/agentcfg"
+	"github.com/n8o/nugit/internal/beads"
 	"github.com/n8o/nugit/internal/c4"
 	"github.com/n8o/nugit/internal/config"
 	"github.com/n8o/nugit/internal/consistency"
@@ -24,6 +27,7 @@ import (
 	"github.com/n8o/nugit/internal/distill"
 	"github.com/n8o/nugit/internal/doctor"
 	"github.com/n8o/nugit/internal/engine"
+	"github.com/n8o/nugit/internal/gitutil"
 	"github.com/n8o/nugit/internal/icepanel"
 	"github.com/n8o/nugit/internal/knowledge"
 	"github.com/n8o/nugit/internal/localmem"
@@ -70,6 +74,8 @@ usage:
   nugit deploy [flags]        deterministic deployable-container inventory (Dockerfiles + CMake)
   nugit model facts [flags]   deterministic grounding bundle for the bootstrap agent
   nugit doctor [flags]        setup pre-flight health checks
+  nugit plan check [flags]    lint the Beads plan store the way pr-render reads it
+  nugit plan normalize [flags] canonicalize the store so concurrent agents stop conflicting
   nugit obsidian [flags]      (re)generate .nugit/INDEX.md for the Obsidian vault
   nugit notion publish [flags] publish the knowledge corpus to a Notion database
   nugit export [flags]        export the knowledge store as eval cases (JSONL, skill-optimizer)
@@ -131,6 +137,12 @@ promote flags:
   -force         overwrite an occupied path / override the near-duplicate refusal
   -dry-run       print what would be written, and where, without writing it
 
+plan flags:
+  check      -C dir  -ref r    lint the store at a ref ("" reads the working tree)
+             -fail-on f        exit non-zero on: fail (default) | warn | none
+  normalize  -C dir  -write    canonicalize the store (default: report what would change)
+             -split            shard into .beads/plans/<plan>.jsonl, one file per plan
+
 pr-render flags:
   -C dir         repo directory (default ".")
   -base ref      base ref / target branch (default "HEAD~1")
@@ -181,6 +193,8 @@ func main() {
 		os.Exit(cmdExport(os.Args[2:]))
 	case "explain":
 		os.Exit(cmdExplain(os.Args[2:]))
+	case "plan":
+		os.Exit(cmdPlan(os.Args[2:]))
 	case "doctor":
 		os.Exit(cmdDoctor(os.Args[2:]))
 	case "deploy":
@@ -1321,5 +1335,207 @@ func exitCode(rep model.Report, failOn string) int {
 			return 1
 		}
 	}
+	return 0
+}
+
+// cmdPlan is the plan-store surface: `check` lints a committed store the way
+// pr-render reads it, `normalize` rewrites it into a form concurrent agents can
+// merge. Both exist because the store is nugit's ONLY input it does not own the
+// format of — everything the reader silently tolerates is a step that quietly
+// fails to render, and every repo that noticed ended up reimplementing these
+// rules in a shell script against this package's internals.
+func cmdPlan(args []string) int {
+	if len(args) == 0 {
+		fmt.Fprintln(os.Stderr, "usage: nugit plan <check|normalize> [flags]")
+		return 2
+	}
+	switch args[0] {
+	case "check":
+		return cmdPlanCheck(args[1:])
+	case "normalize":
+		return cmdPlanNormalize(args[1:])
+	default:
+		fmt.Fprintf(os.Stderr, "nugit plan: unknown subcommand %q (want check|normalize)\n", args[0])
+		return 2
+	}
+}
+
+func cmdPlanCheck(args []string) int {
+	fs := flag.NewFlagSet("plan check", flag.ExitOnError)
+	dir := fs.String("C", ".", "repo directory")
+	ref := fs.String("ref", "HEAD", "git ref to read the store at (\"\" reads the working tree)")
+	failOn := fs.String("fail-on", "fail", "exit non-zero on: fail | warn | none")
+	_ = fs.Parse(args)
+
+	var st beads.Store
+	var err error
+	if *ref == "" {
+		st, err = beads.ReadDir(*dir)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "nugit plan check: %v\n", err)
+			return 1
+		}
+	} else {
+		repo := gitutil.Repo{Dir: *dir}
+		var ok bool
+		st, ok = beads.Read(repo, *ref, repo.Prefix())
+		if !ok {
+			fmt.Printf("no plan store at %s — nothing to check\n", *ref)
+			return 0
+		}
+	}
+
+	plans := st.Plans()
+	fmt.Printf("%d step(s) across %d plan(s) in %d file(s)\n", len(st.Issues), len(plans), len(st.Files))
+	for _, p := range plans {
+		var done, live, rest int
+		for _, it := range st.Issues {
+			if it.Plan != p {
+				continue
+			}
+			switch {
+			case beads.IsDone(it.Status):
+				done++
+			case beads.IsActive(it.Status):
+				live++
+			default:
+				rest++
+			}
+		}
+		fmt.Printf("  %-24s %d done, %d in flight, %d remaining\n", p, done, live, rest)
+	}
+
+	findings := beads.Lint(st)
+	worst := 0
+	fmt.Println()
+	for _, f := range findings {
+		mark := map[model.Severity]string{model.SevFail: "✗", model.SevWarn: "!", model.SevInfo: "-"}[f.Severity]
+		fmt.Printf("  %s [%s] %s\n      %s\n", mark, f.Severity, f.Title, f.Detail)
+		if r := sevRankCLI(f.Severity); r > worst {
+			worst = r
+		}
+	}
+	if len(findings) == 0 {
+		fmt.Println("  no findings — the store renders as written.")
+		return 0
+	}
+	fmt.Printf("\n%d finding(s)\n", len(findings))
+	if worst >= sevThresholdCLI(*failOn) {
+		return 1
+	}
+	return 0
+}
+
+func sevRankCLI(s model.Severity) int {
+	switch s {
+	case model.SevFail:
+		return 2
+	case model.SevWarn:
+		return 1
+	}
+	return 0
+}
+
+func sevThresholdCLI(failOn string) int {
+	switch strings.ToLower(strings.TrimSpace(failOn)) {
+	case "none":
+		return 99
+	case "warn":
+		return 1
+	default:
+		return 2
+	}
+}
+
+func cmdPlanNormalize(args []string) int {
+	fs := flag.NewFlagSet("plan normalize", flag.ExitOnError)
+	dir := fs.String("C", ".", "repo directory")
+	write := fs.Bool("write", false, "write the files (default: report what would change)")
+	split := fs.Bool("split", false, "shard the store into .beads/plans/<plan>.jsonl, one file per plan")
+	_ = fs.Parse(args)
+
+	st, err := beads.ReadDir(*dir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "nugit plan normalize: %v\n", err)
+		return 1
+	}
+	// A file that contributed no steps is not a plan store — a `bd` sidecar log,
+	// or something else that happens to end in .jsonl. Rewriting it would be
+	// destructive and splitting would scatter it, so it is left strictly alone.
+	for _, f := range st.Files {
+		if st.Stats[f].Parsed == 0 {
+			fmt.Printf("  skip %s (no plan steps — not a plan store)\n", f)
+		}
+	}
+	// Normalizing collapses a duplicate id the way the reader does, last write
+	// wins — which means it WRITES DOWN a step's disappearance that was until
+	// now only a rendering quirk. Say so: a store this tool silently pruned is
+	// the same failure the tool exists to surface.
+	if len(st.DuplicateIDs) > 0 {
+		fmt.Printf("  ! %d duplicate id(s) collapsed, last occurrence wins: %s\n",
+			len(st.DuplicateIDs), strings.Join(st.DuplicateIDs, ", "))
+		fmt.Println("    Check each one in `bd` first — normalizing makes the drop permanent.")
+	}
+	out, err := beads.Normalize(st, *split)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "nugit plan normalize: %v\n", err)
+		return 1
+	}
+
+	var dests []string
+	for d := range out {
+		dests = append(dests, d)
+	}
+	sort.Strings(dests)
+
+	changed := 0
+	for _, d := range dests {
+		cur, _ := os.ReadFile(filepath.Join(*dir, d))
+		n := bytes.Count(out[d], []byte("\n"))
+		switch {
+		case bytes.Equal(cur, out[d]):
+			fmt.Printf("  ok      %s (%d steps, already canonical)\n", d, n)
+		case cur == nil:
+			changed++
+			fmt.Printf("  create  %s (%d steps)\n", d, n)
+		default:
+			changed++
+			fmt.Printf("  rewrite %s (%d steps)\n", d, n)
+		}
+	}
+	// With -split the sources are consumed, not kept: leaving them behind would
+	// double every step in the store, and nugit's reader would then dedup them
+	// last-write-wins with no way to tell which copy is current.
+	var stale []string
+	if *split {
+		for _, f := range st.Files {
+			if _, kept := out[f]; !kept && st.Stats[f].Parsed > 0 {
+				stale = append(stale, f)
+				fmt.Printf("  remove  %s (its steps moved into per-plan files)\n", f)
+			}
+		}
+	}
+	if !*write {
+		fmt.Printf("\n%d file(s) would change. Re-run with -write to apply, then commit and re-export from `bd` as usual.\n", changed+len(stale))
+		return 0
+	}
+	for _, d := range dests {
+		full := filepath.Join(*dir, d)
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			fmt.Fprintf(os.Stderr, "nugit plan normalize: %v\n", err)
+			return 1
+		}
+		if err := os.WriteFile(full, out[d], 0o644); err != nil {
+			fmt.Fprintf(os.Stderr, "nugit plan normalize: %v\n", err)
+			return 1
+		}
+	}
+	for _, f := range stale {
+		if err := os.Remove(filepath.Join(*dir, f)); err != nil {
+			fmt.Fprintf(os.Stderr, "nugit plan normalize: %v\n", err)
+			return 1
+		}
+	}
+	fmt.Printf("\nwrote %d file(s).\n", len(dests))
 	return 0
 }

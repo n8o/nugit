@@ -120,6 +120,7 @@ deps:
     mayDependOn:
       - "adopt"
       - "agentcfg"
+      - "beads"
       - "c4"
       - "config"
       - "consistency"
@@ -127,6 +128,7 @@ deps:
       - "distill"
       - "doctor"
       - "engine"
+      - "gitutil"
       - "icepanel"
       - "knowledge"
       - "localmem"

@@ -567,8 +567,14 @@ type KnowledgeDelta struct {
 
 func (d KnowledgeDelta) Empty() bool { return len(d.Changes) == 0 }
 
-// PlanPosition is the (optional, Beads-deferred) plan delta. In the keystone it
-// is sourced from a simple committed plan file, if present.
+// PlanPosition is the plan delta, sourced from a Beads store if present and
+// otherwise from a simple committed plan file.
+//
+// A store holds every plan the repo is currently executing, which on a repo
+// with concurrent agents is many. The flat Completed/Current/Remaining fields
+// are the union over the plans SHOWN (see Tracks) — with the default
+// `plan.scope: touched`, that is the plans this PR actually moved, not the
+// repo's whole board (ADR-0040).
 type PlanPosition struct {
 	Present   bool
 	Completed []string
@@ -581,6 +587,42 @@ type PlanPosition struct {
 	AddedItems     []string
 	RemovedItems   []string
 	Regressed      []string // were done at base, no longer done at head (reopened)
+	// Tracks is the per-plan breakdown of everything shown, in the store's own
+	// order. Empty when the source is a plan.yml (one implicit plan) or when
+	// scoping selected nothing.
+	//
+	// omitempty on every field added here, like the C4Delta container fields:
+	// a repo with no Beads store must keep the JSON contract it already had.
+	Tracks []PlanTrack `json:",omitempty"`
+	// PlansTotal counts the plans present in the store at head, shown or not.
+	PlansTotal int `json:",omitempty"`
+	// Hidden names the plans deliberately not rendered — other agents' work in
+	// flight. Named, never merely counted: "12 other plans" is noise, but
+	// "acme-rift is also in flight" is how you notice you are about to collide.
+	Hidden []string `json:",omitempty"`
+}
+
+// PlanTrack is one plan's position within a multi-plan store.
+type PlanTrack struct {
+	Name      string
+	Completed []string `json:",omitempty"`
+	// Current is plural because two in-flight steps in ONE plan is a real
+	// condition worth showing, not a rendering accident. Across plans it is
+	// normal and expected; within one it usually means a step was never closed.
+	Current   []string `json:",omitempty"`
+	Remaining []string `json:",omitempty"`
+	// Diff vs the base ref, populated by delta.DiffPlan.
+	NewlyCompleted []string `json:",omitempty"`
+	NewlyStarted   []string `json:",omitempty"`
+	AddedItems     []string `json:",omitempty"`
+	RemovedItems   []string `json:",omitempty"`
+	Regressed      []string `json:",omitempty"`
+}
+
+// Changed reports whether this plan moved between base and head.
+func (t PlanTrack) Changed() bool {
+	return len(t.NewlyCompleted) > 0 || len(t.NewlyStarted) > 0 ||
+		len(t.AddedItems) > 0 || len(t.RemovedItems) > 0 || len(t.Regressed) > 0
 }
 
 // Changed reports whether the plan moved between base and head.

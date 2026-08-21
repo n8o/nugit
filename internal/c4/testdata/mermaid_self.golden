@@ -58,6 +58,7 @@ graph LR
   c4 --> model_
   cli --> adopt
   cli --> agentcfg
+  cli --> beads
   cli --> c4
   cli --> config
   cli --> consistency
@@ -65,6 +66,7 @@ graph LR
   cli --> distill
   cli --> doctor
   cli --> engine
+  cli --> gitutil
   cli --> icepanel
   cli --> knowledge
   cli --> localmem

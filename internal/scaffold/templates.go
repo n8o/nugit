@@ -22,6 +22,16 @@ significance:
 pr_render:
   fail_on: fail
 
+plan:
+  # Only relevant if this repo keeps a Beads plan store (.beads/**/*.jsonl).
+  # scope: touched (default) | all — ADR-0040. A Beads store is repo-wide: with
+  # several agent sessions on one clone, every plan any of them is executing
+  # lands in the same store, and "touched" renders only the plans THIS PR moved.
+  scope: touched
+  # mode: warn (default) | fail | off — the plan-store checks.
+  # See: nugit explain plan-store / nugit plan check
+  mode: warn
+
 capture:
   # commit_msg: warn | nudge | block | off — validate the trailer block on commit
   #   nudge — additionally print a copy-pasteable trailer stub when a significant

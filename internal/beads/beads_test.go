@@ -24,7 +24,7 @@ func TestParseJSONLAndCompute(t *testing.T) {
 	if len(issues) != 4 {
 		t.Fatalf("want 4 parsed issues, got %d: %+v", len(issues), issues)
 	}
-	pos := compute(issues)
+	pos := Position(storeOf(issues), nil)
 	if !pos.Present {
 		t.Fatal("present should be true")
 	}
@@ -38,6 +38,19 @@ func TestParseJSONLAndCompute(t *testing.T) {
 	if len(pos.Remaining) != 1 || !strings.Contains(pos.Remaining[0], "Search") {
 		t.Errorf("remaining = %v, want [Search]", pos.Remaining)
 	}
+}
+
+// storeOf builds an in-memory store the way Read would, so tests exercise the
+// same plan assignment the reader uses.
+func storeOf(issues []Issue) Store {
+	const f = ".beads/issues.jsonl"
+	for i := range issues {
+		issues[i].File = f
+	}
+	st := Store{Issues: issues, Files: []string{f},
+		Stats: map[string]FileStat{f: {Lines: len(issues), Parsed: len(issues)}}}
+	assignPlans(&st)
+	return st
 }
 
 func gitRun(t *testing.T, dir string, args ...string) {
@@ -89,7 +102,7 @@ func TestDedupByIDLastWins(t *testing.T) {
 		{ID: "bd-1", Title: "old", Status: "open", Type: "epic"},
 		{ID: "bd-1", Title: "new", Status: "closed", Type: "epic"},
 	}
-	pos := compute(dedupByID(issues))
+	pos := Position(storeOf(dedupByID(issues)), nil)
 	if len(pos.Completed) != 1 || len(pos.Remaining) != 0 {
 		t.Errorf("duplicate id not collapsed last-wins: %+v", pos)
 	}
