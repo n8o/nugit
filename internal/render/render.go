@@ -254,35 +254,75 @@ func planSection(p model.PlanPosition) string {
 		return strings.Join(out, ", ")
 	}
 	var b strings.Builder
-	if len(p.Completed) > 0 {
-		fmt.Fprintf(&b, "- ✅ done: %s\n", clean(p.Completed))
-	}
-	if p.Current != "" {
-		fmt.Fprintf(&b, "- ▶️ current: %s\n", esc(oneLine(p.Current)))
-	}
-	if len(p.Remaining) > 0 {
-		fmt.Fprintf(&b, "- ⏳ remaining: %s\n", clean(p.Remaining))
-	}
-	if p.Changed() {
-		b.WriteString("\n**Changes since base:**\n")
-		if len(p.NewlyCompleted) > 0 {
-			fmt.Fprintf(&b, "- ✅ newly completed: %s\n", clean(p.NewlyCompleted))
+	if len(p.Tracks) > 0 {
+		for i, t := range p.Tracks {
+			if i > 0 {
+				b.WriteString("\n")
+			}
+			// Name the plan even when there is only one. A reader who cannot see
+			// WHICH plan a position belongs to has no way to tell a scoped view
+			// from the repo's whole board — which is the confusion this section
+			// was rendering before it grouped (ADR-0040).
+			fmt.Fprintf(&b, "**%s**\n", esc(oneLine(t.Name)))
+			if len(t.Completed) > 0 {
+				fmt.Fprintf(&b, "- ✅ done: %s\n", clean(t.Completed))
+			}
+			if len(t.Current) > 0 {
+				fmt.Fprintf(&b, "- ▶️ current: %s\n", clean(t.Current))
+			}
+			if len(t.Remaining) > 0 {
+				fmt.Fprintf(&b, "- ⏳ remaining: %s\n", clean(t.Remaining))
+			}
+			b.WriteString(trackMoves(t, clean))
 		}
-		if len(p.NewlyStarted) > 0 {
-			fmt.Fprintf(&b, "- ▶️ newly started: %s\n", clean(p.NewlyStarted))
+	} else {
+		if len(p.Completed) > 0 {
+			fmt.Fprintf(&b, "- ✅ done: %s\n", clean(p.Completed))
 		}
-		if len(p.AddedItems) > 0 {
-			fmt.Fprintf(&b, "- ➕ added: %s\n", clean(p.AddedItems))
+		if p.Current != "" {
+			fmt.Fprintf(&b, "- ▶️ current: %s\n", esc(oneLine(p.Current)))
 		}
-		if len(p.RemovedItems) > 0 {
-			fmt.Fprintf(&b, "- ➖ removed: %s\n", clean(p.RemovedItems))
+		if len(p.Remaining) > 0 {
+			fmt.Fprintf(&b, "- ⏳ remaining: %s\n", clean(p.Remaining))
 		}
-		if len(p.Regressed) > 0 {
-			fmt.Fprintf(&b, "- ⚠️ reopened: %s\n", clean(p.Regressed))
+		if p.Changed() {
+			b.WriteString("\n**Changes since base:**\n")
+			b.WriteString(moves(p.NewlyCompleted, p.NewlyStarted, p.AddedItems, p.RemovedItems, p.Regressed, clean))
 		}
 	}
 	if p.Note != "" {
-		fmt.Fprintf(&b, "- _%s_\n", esc(oneLine(p.Note)))
+		fmt.Fprintf(&b, "\n- _%s_\n", esc(oneLine(p.Note)))
+	}
+	return b.String()
+}
+
+// trackMoves renders what THIS PR did to one plan, under the plan it belongs to
+// rather than in one pooled "Changes since base" block. Attribution is the whole
+// point of the section: a delta detached from its plan is what let a PR's summary
+// read as if it had advanced work it never touched.
+func trackMoves(t model.PlanTrack, clean func([]string) string) string {
+	if !t.Changed() {
+		return "- _no movement in this PR_\n"
+	}
+	return moves(t.NewlyCompleted, t.NewlyStarted, t.AddedItems, t.RemovedItems, t.Regressed, clean)
+}
+
+func moves(done, started, added, removed, regressed []string, clean func([]string) string) string {
+	var b strings.Builder
+	if len(done) > 0 {
+		fmt.Fprintf(&b, "- ✅ newly completed: %s\n", clean(done))
+	}
+	if len(started) > 0 {
+		fmt.Fprintf(&b, "- ▶️ newly started: %s\n", clean(started))
+	}
+	if len(added) > 0 {
+		fmt.Fprintf(&b, "- ➕ added: %s\n", clean(added))
+	}
+	if len(removed) > 0 {
+		fmt.Fprintf(&b, "- ➖ removed: %s\n", clean(removed))
+	}
+	if len(regressed) > 0 {
+		fmt.Fprintf(&b, "- ⚠️ reopened: %s\n", clean(regressed))
 	}
 	return b.String()
 }

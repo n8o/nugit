@@ -28,6 +28,14 @@ type Config struct {
 	PRRender struct {
 		FailOn string `yaml:"fail_on"`
 	} `yaml:"pr_render"`
+	Plan struct {
+		// Scope selects which of the Beads store's plans a PR renders:
+		// `touched` (default) — only the plans this PR moved; `all` — the whole
+		// repo board. See PlanScope.
+		Scope string `yaml:"scope"`
+		// Mode gates the plan-store checks: warn (default) | fail | off.
+		Mode string `yaml:"mode"`
+	} `yaml:"plan"`
 	Capture struct {
 		CommitMsg string `yaml:"commit_msg"` // warn (default) | nudge | block | off
 	} `yaml:"capture"`
@@ -286,6 +294,32 @@ func FailOnRank(s string) int {
 
 // RecurrenceOn reports whether the recurrence check runs (ADR-0019).
 func (c Config) RecurrenceOn() bool { return c.Recurrence.Mode != "off" }
+
+// PlanOn reports whether the plan-store checks run at all. A repo that keeps no
+// store never sees them regardless; `off` is for a repo that keeps one and does
+// not want nugit's opinion about how it is shaped.
+func (c Config) PlanOn() bool { return !strings.EqualFold(strings.TrimSpace(c.Plan.Mode), "off") }
+
+// PlanFail reports whether a structural plan-store defect — an id collision that
+// makes a step invisible — fails the check-run rather than warning.
+//
+// Default warn, like every other check this repo has added since ADR-0016: the
+// store predates the check, so a repo upgrading nugit must not discover a red
+// gate over state that was already there. Raise it once the store is clean.
+func (c Config) PlanFail() bool { return strings.EqualFold(strings.TrimSpace(c.Plan.Mode), "fail") }
+
+// PlanScope resolves `plan.scope`, defaulting to "touched": a Beads store is
+// repo-wide and holds every plan every concurrent agent is executing, so
+// rendering all of it on one PR attributes other people's progress to this
+// change. Only an explicit `all` opts back into the whole board; anything
+// unrecognised (a typo) keeps the honest default rather than silently widening
+// the claim, the same fail-closed rule the other enum knobs follow.
+func (c Config) PlanScope() string {
+	if strings.EqualFold(strings.TrimSpace(c.Plan.Scope), "all") {
+		return "all"
+	}
+	return "touched"
+}
 
 // ContractsOn reports whether cross-repo obligation checking runs at all
 // (ADR-0033). It needs BOTH an explicit mode that isn't `off` and a configured

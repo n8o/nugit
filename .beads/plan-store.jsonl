@@ -1,0 +1,4 @@
+{"id":"PLAN-1","title":"Group a Beads store into plans; scope the PR view to the plans a PR moved (ADR-0040)","issue_type":"epic","status":"closed"}
+{"id":"PLAN-2","title":"nugit plan normalize — canonical serialization so concurrent agents stop conflicting","issue_type":"epic","status":"closed"}
+{"id":"PLAN-3","title":"nugit plan check — the reader's own tolerances, reported instead of silent","issue_type":"epic","status":"closed"}
+{"id":"PLAN-4","title":"Read a PR body so the store can contradict a claimed close","issue_type":"epic","status":"open"}

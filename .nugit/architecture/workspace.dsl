@@ -69,7 +69,7 @@ workspace "nugit" "Git-native typed knowledge & unified PR view — self-model (
                     "paths" "internal/delta/**"
                 }
             }
-            beads = component "Beads adapter" "Reads .beads/*.jsonl for plan position" "Go" {
+            beads = component "Beads adapter" "Reads, lints and canonicalizes the .beads/**/*.jsonl plan store; groups it into plans" "Go" {
                 properties {
                     "paths" "internal/beads/**"
                 }
@@ -384,6 +384,8 @@ workspace "nugit" "Git-native typed knowledge & unified PR view — self-model (
             adopt -> distill "reuses the TriggerTODO refusal placeholder (ADR-0028)"
             adopt -> model_ "uses types"
             cli -> adopt "adopt command"
+            cli -> beads "plan check / plan normalize commands"
+            cli -> gitutil "resolves the repo + prefix for plan check"
 
             modelfacts -> deploy "reads the container inventory"
             modelfacts -> cmake "reads the dependency edges"

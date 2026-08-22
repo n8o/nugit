@@ -67,6 +67,42 @@ for the decision it grounds) and land it as a PR — never paste the full docume
 - After merging a batch: `nugit distill -base <base> -head HEAD` writes the ADRs/
   lessons into the PR for review.
 
+## If this repo keeps a plan store (`.beads/`)
+
+Skip this section if there is no `.beads/` directory.
+
+`.beads/**/*.jsonl` records the plan being executed **now** — one `epic` per
+step — and `nugit pr-render` renders it as **Plan position**. It is not a mirror
+of the issue tracker: epics and the backlog live in GitHub, a bead exists
+because someone is working that step this week, and the two are linked by naming
+the issue in the bead's id or body.
+
+- **Write multi-PR work down as beads before the first commit**, and **move the
+  bead in the same PR that does the work.** A step closed in a later PR is a
+  step nobody can tell was ever finished. Close it when the step is *done*, not
+  when the enabling groundwork lands.
+- **Name step ids `<plan>-<step>`** (`api-rewrite-3`, `gh-142-2b`). nugit groups
+  a store into plans by that family and shows your PR only the plans it moved —
+  other agents' plans are named, never merged into your position. A bare
+  `<prefix>-<n>` id is its own plan of one.
+- **The store is shared.** `bd` keeps one database per repository, resolved from
+  the main checkout even when you run it from a worktree — so `bd export` from a
+  worktree writes into the *main* checkout's branch, not yours, and other
+  sessions' bead changes can ride along in your diff. Export into the checkout
+  you are committing from, and never attribute store lines in a diff to the PR
+  carrying them.
+- **After exporting, before `git add`:**
+
+  ```sh
+  nugit plan normalize -write   # one stable line per bead — this is what stops
+                                # concurrent agents conflicting on the store
+  nugit plan check              # what pr-render will say about it
+  ```
+
+- **Resolve a store conflict with `bd`, never by hand** — reset the file to the
+  base's version, re-import, re-apply only your own closes, re-export,
+  normalize. Hand-merging JSONL invents states no `bd` command produced.
+
 ## Quick reference
 
 | Need | Command |
@@ -77,3 +113,4 @@ for the decision it grounds) and land it as a PR — never paste the full docume
 | Save a working note | `nugit remember -text "..."` |
 | Promote trailers → ADRs | `nugit distill -base <base> -head HEAD` |
 | The unified PR view | `nugit pr-render -base <base> -head HEAD` |
+| Lint / canonicalize the plan store | `nugit plan check` · `nugit plan normalize -write` |

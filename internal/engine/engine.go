@@ -75,7 +75,7 @@ func BuildReport(opt Options) (model.Report, error) {
 	if err != nil {
 		return model.Report{}, err
 	}
-	plan := delta.DiffPlan(repo, base, opt.Head, prefix)
+	plan := delta.DiffPlan(repo, base, opt.Head, prefix, delta.PlanScope(cfg.PlanScope()))
 
 	commits, err := repo.Log(base, opt.Head)
 	if err != nil {
@@ -154,6 +154,9 @@ func BuildReport(opt Options) (model.Report, error) {
 	})
 	in.Architectural = sig.Tier == model.TierArchitectural
 	other := consistency.OtherFindings(in)
+	if cfg.PlanOn() {
+		other = append(other, delta.PlanFindings(repo, opt.Head, prefix, plan, codeDelta, cfg.PlanFail())...)
+	}
 	findings := consistency.Sort(append(c4Findings, other...))
 
 	// PR-time distill (ADR-0018): surface what `nugit distill` would promote

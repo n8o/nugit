@@ -19,7 +19,8 @@ external datastore:
 3. **Knowledge delta** — added/changed/superseded decisions, specs, lessons,
    references, with each decision's `Rejected` rationale.
 4. **Plan position** — live from a **Beads** store (`.beads/*.jsonl`), degrading to
-   `.nugit/plan.yml`.
+   `.nugit/plan.yml`. Scoped to **the plans this PR moved**, not the repo's whole
+   board (ADR-0040) — see [The plan store](#the-plan-store).
 
 …then runs **cross-artifact consistency checks** that make the view *verify* rather
 than present:
@@ -63,6 +64,59 @@ over one named file, optionally negated with `absent: true`. A contract can neve
 execute a script or a command — it is text read out of another repo's checkout.
 Warn by default (`contracts.mode: warn|fail|off`), and entirely inert until you
 configure `org.repo`: nugit never guesses which party a repo is.
+
+### The plan store
+
+`.beads/**/*.jsonl` is the plan the repo is executing **now** — one `epic` per
+step, written by [`bd`](https://github.com/gastownhall/beads), committed, and
+read by `pr-render` at the reviewed ref. It is deliberately **not** a mirror of
+GitHub Issues: the backlog stays in the issue tracker and a bead exists because
+someone is working that step this week. A mirror rots (nothing forces it true); a
+store you must close out to finish a PR does not.
+
+`bd` keeps one database **per repository**, so on a repo running several agent
+sessions every plan any of them is executing lands in the same store. nugit
+groups the store into **plans** and shows a PR only the ones it moved:
+
+| resolved from | when |
+|---|---|
+| a `plan` field on the line | always wins |
+| the store **file's** name | the store spans more than one `.jsonl` |
+| the **id family** — id minus its last segment, for ids with 3+ segments | otherwise |
+
+So `acme-rift-16` and `acme-rift-14` are one plan; `acme-118` (a `bd`-native
+`<prefix>-<n>` id) is its own. A PR that closes `acme-rift-16` renders `acme-rift`
+and names any other plan with a step in flight — it never presents another
+agent's progress as its own. `plan.scope: all` opts back into the whole board.
+
+```bash
+nugit plan check                     # lint the store the way pr-render reads it
+nugit plan normalize -write          # one stable line per bead → git can merge it
+nugit plan normalize -split -write   # one file per plan → agents stop overlapping
+```
+
+**Why normalize.** `bd export` serializes the whole database in the database's
+own order, so two agents who closed two *different* steps still produce two
+whole-file rewrites of the same path — a conflict git cannot resolve and a
+hand-merge invents states no `bd` command produced. Normalizing gives every bead
+one stable line (sorted by plan, then natural id, keys sorted, every field `bd`
+writes preserved byte-exact), so those two agents produce **disjoint hunks that
+merge by themselves**. `-split` goes further and gives each plan its own file, so
+they never touch the same path at all. Both are `bd`-safe: only the
+serialization is rewritten, never a status or a value. Run it after `bd export`,
+before `git add`.
+
+**Why check.** The reader is deliberately tolerant — it skips an unparseable
+line, drops a duplicate id last-write-wins, renders an unknown status as
+`remaining`, and hides non-epics behind a footnote. Every one of those is a step
+that silently renders as something other than what its author wrote, so
+`plan check` reports them, and pr-render raises the same ones as `plan-store`
+findings (`plan.mode: warn|fail|off`).
+
+**The store is `bd`'s, not nugit's** — nugit reads it and rewrites only its
+serialization. Close a step when it is *done*, not when the enabling groundwork
+lands, and move the bead **in the same PR that does the work**: a step closed in
+a later PR is a step nobody can tell was ever finished.
 
 **The store fills itself** — `nugit init` installs a commit-msg hook that validates
 trailer blocks; `nugit remember` jots ephemeral working memory; `nugit distill`

@@ -47,6 +47,14 @@ var explanations = map[string]string{
 		"(ADR-0032). Only a duplicate WITHIN one store is the defect.\n" +
 		"This is a FAIL: unlike the prose-matching lifecycle checks (ADR-0022) it is an exact grouping over committed text,\n" +
 		"so it has no false positives. It fires only for objects this PR adds or modifies; `nugit doctor` reports the whole store.",
+	"plan-store": "The committed Beads plan store (.beads/**/*.jsonl) will render as something other than what its author\n" +
+		"wrote (ADR-0040). nugit's reader is deliberately tolerant — it skips an unparseable or key-less line, keeps only\n" +
+		"the LAST of a duplicated id, renders a status it does not classify as `remaining`, and hides non-epics behind a\n" +
+		"footnote once any bead is an epic — and every one of those tolerances is silent.\n" +
+		"Fix: run `nugit plan check` for the full report; `nugit plan normalize` rewrites the store into one stable line\n" +
+		"per bead (and `-split`, one file per plan) so concurrent agents stop conflicting on it. Gitignore any .jsonl\n" +
+		"under .beads/ that is not the plan store — the glob is recursive, so a `bd` sidecar log renders as phantom steps.\n" +
+		"Severity ramps: `plan.mode: warn` (default) reports, `fail` gates, `off` disables. A repo with no store is never checked.",
 	"model-drift": "The PR touches a detected buildable/deployable unit (deploy artifact, CMake target dir, or Go package)\n" +
 		"that no workspace.dsl element maps — model coverage decayed since the last refresh (ADR-0021).\n" +
 		"Fix: run the nugit-model skill to refresh the model, or add a component/container stub with `properties { paths \"<dir>/**\" }`.\n" +
