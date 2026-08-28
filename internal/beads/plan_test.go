@@ -3,6 +3,7 @@ package beads
 import (
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -284,4 +285,60 @@ func keysOf(m map[string][]byte) []string {
 		out = append(out, k)
 	}
 	return out
+}
+
+// A gitignored file is not part of the store. `bd` writes its sidecar logs
+// beside the plan and repos gitignore them; without this, one such file makes a
+// single-file store look sharded and every bead in it gets assigned to a "plan"
+// named after the file — 131 steps collapsing into one, on the real store that
+// caught this.
+func TestReadDirSkipsGitignoredFiles(t *testing.T) {
+	dir := t.TempDir()
+	run := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+		cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t",
+			"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	run("init", "-q")
+	if err := os.MkdirAll(filepath.Join(dir, ".beads"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	write := func(p, s string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(dir, p), []byte(s), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(".beads/.gitignore", "interactions.jsonl\n")
+	write(".beads/issues.jsonl", strings.Join([]string{
+		`{"id":"p-rift-1","title":"a","issue_type":"epic","status":"open"}`,
+		`{"id":"p-flux-1","title":"b","issue_type":"epic","status":"open"}`,
+	}, "\n")+"\n")
+	// bd's sidecar log, ignored by the repo, sitting right next to the store.
+	write(".beads/interactions.jsonl", `{"id":"int-abc","kind":"interaction"}`+"\n")
+
+	st, err := ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(st.Files) != 1 || st.Sharded {
+		t.Fatalf("the ignored sidecar must not join the store: files=%v sharded=%v", st.Files, st.Sharded)
+	}
+	// …and with it gone, grouping falls back to the id family, as it should.
+	if got := st.Plans(); len(got) != 2 {
+		t.Errorf("plans = %v, want p-rift and p-flux", got)
+	}
+	out, err := Normalize(st, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{".beads/plans/p-rift.jsonl", ".beads/plans/p-flux.jsonl"} {
+		if _, ok := out[want]; !ok {
+			t.Errorf("missing %s; got %v", want, keysOf(out))
+		}
+	}
 }
