@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -15,6 +16,14 @@ import (
 // other read in nugit goes through git on purpose; this one does not, because
 // normalize is a WRITER — it exists to rewrite what `bd export` just put on
 // disk, before it is committed.
+//
+// Reading the working tree does NOT mean reading everything in it: a gitignored
+// file is not part of the store, and skipping it is what keeps this consistent
+// with the ref-addressed reader, which only ever sees tracked files. `bd` keeps
+// its own sidecar logs (interactions.jsonl, events.jsonl) right next to the
+// store and repos gitignore them for exactly this reason — without this, one
+// such file makes the store look sharded, and every bead in it is then assigned
+// to a "plan" named after whichever file it happened to be in.
 func ReadDir(root string) (Store, error) {
 	dir := filepath.Join(root, ".beads")
 	var files []string
@@ -33,6 +42,7 @@ func ReadDir(root string) (Store, error) {
 	if err != nil {
 		return Store{}, err
 	}
+	files = keepTracked(root, files)
 	if len(files) == 0 {
 		return Store{}, fmt.Errorf("no .jsonl store under %s", dir)
 	}
@@ -162,3 +172,39 @@ func naturalLess(a, b string) bool {
 }
 
 func isDigit(c byte) bool { return c >= '0' && c <= '9' }
+
+// keepTracked drops the paths git is told to ignore. A directory that is not a
+// git repository (or a git that cannot be run) keeps every file: this is a
+// filter on a working tree, and failing it closed would make `plan normalize`
+// refuse to work outside a repo for no gain.
+func keepTracked(root string, files []string) []string {
+	if len(files) == 0 {
+		return files
+	}
+	cmd := exec.Command("git", "-C", root, "check-ignore", "--stdin")
+	cmd.Stdin = strings.NewReader(strings.Join(files, "\n") + "\n")
+	out, err := cmd.Output()
+	if err != nil {
+		// Exit 1 means "nothing matched" and is the common, healthy case; any
+		// other failure (not a repo, no git) leaves the list untouched.
+		if ee, ok := err.(*exec.ExitError); !ok || ee.ExitCode() != 1 {
+			return files
+		}
+	}
+	ignored := map[string]bool{}
+	for _, line := range strings.Split(string(out), "\n") {
+		if line = strings.TrimSpace(line); line != "" {
+			ignored[filepath.ToSlash(line)] = true
+		}
+	}
+	if len(ignored) == 0 {
+		return files
+	}
+	kept := files[:0:0]
+	for _, f := range files {
+		if !ignored[f] {
+			kept = append(kept, f)
+		}
+	}
+	return kept
+}
