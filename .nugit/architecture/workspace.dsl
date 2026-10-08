@@ -69,6 +69,11 @@ workspace "nugit" "Git-native typed knowledge & unified PR view — self-model (
                     "paths" "internal/delta/**"
                 }
             }
+            wiring = component "Wiring scan" "Scans CLAUDE.md, skill files and workflows for drift against config.yml (ADR-0026)" "Go" {
+                properties {
+                    "paths" "internal/wiring/**"
+                }
+            }
             beads = component "Beads adapter" "Reads, lints and canonicalizes the .beads/**/*.jsonl plan store; groups it into plans" "Go" {
                 properties {
                     "paths" "internal/beads/**"
@@ -383,6 +388,11 @@ workspace "nugit" "Git-native typed knowledge & unified PR view — self-model (
             adopt -> skillopt "reuses the export gate's symptom lexicon for runbook detection (ADR-0027)"
             adopt -> distill "reuses the TriggerTODO refusal placeholder (ADR-0028)"
             adopt -> model_ "uses types"
+            wiring -> config "compares artifacts against declared enforcement"
+            doctor -> wiring "pre-flight wiring coherence"
+            consistency -> wiring "PR-time wiring drift"
+            consistency -> config "fail-on rank for the wiring detail"
+            engine -> wiring "takes the wiring scan at the reviewed ref"
             cli -> adopt "adopt command"
             cli -> beads "plan check / plan normalize commands"
             cli -> gitutil "resolves the repo + prefix for plan check"

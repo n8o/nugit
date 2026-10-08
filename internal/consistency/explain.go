@@ -37,7 +37,14 @@ var explanations = map[string]string{
 		"store object, but carries no front-matter `supersedes:`/`amends:` edge. Effective status is derived from edges\n" +
 		"only (ADR-0003), so retrieval keeps serving both the new object and the contradicted one as live (ADR-0022).\n" +
 		"Fix: add `supersedes: <id>` (whole-object) or `relates_to: [amends:<id>]` (partial, ADR-0015) to the superseding object.",
-	"duplicate-knowledge-id": "Two knowledge objects in THIS store carry the same `id:` at the reviewed ref (ADR-0039).\n" +
+	"duplicate-knowledge-id": "An id collides, either way it can (ADR-0039, ADR-0041). Within the PR: two objects carry\n" +
+		"the same `id:` at the reviewed ref. Against the target: this PR ADDS an id the branch it merges into already\n" +
+		"uses — a collision neither branch's own history shows, because a sequential id minted from a stale base looks\n" +
+		"free until both land. nugit reads the target's TIP for uniqueness, not the merge base the deltas use, which is\n" +
+		"the only reference point that can see a sibling PR's already-merged record.\n" +
+		"Fix: renumber one record. No edge resolves to a duplicated id, so there is no working reference to preserve.\n" +
+		"Original text follows.\n" +
+		"Two knowledge objects in THIS store carry the same `id:` at the reviewed ref (ADR-0039).\n" +
 		"Ids are the store's stable cross-reference keys (ADR-0001), so a collision is silent data loss: retrieval's\n" +
 		"byKey map and its one-hop `relates_to` traversal keep one object and shadow the other, `supersedes:`/`amends:`/\n" +
 		"`reinforces:` edges naming the id have an undefined target, and `nugit ratify <id>` cannot tell which file to promote.\n" +
@@ -47,6 +54,20 @@ var explanations = map[string]string{
 		"(ADR-0032). Only a duplicate WITHIN one store is the defect.\n" +
 		"This is a FAIL: unlike the prose-matching lifecycle checks (ADR-0022) it is an exact grouping over committed text,\n" +
 		"so it has no false positives. It fires only for objects this PR adds or modifies; `nugit doctor` reports the whole store.",
+	"edge-vocabulary": "A `relates_to` entry this PR adds or modifies carries a verb nugit has no rule for, or names a\n" +
+		"front-matter field instead (ADR-0041). The reader is tolerant — ParseEdge splits on the first colon and returns\n" +
+		"whatever it found — so `ammends:ADR-7` parses, resolves in retrieval's one-hop pull, and amends nothing.\n" +
+		"`supersedes:` matters most: ADR-0003 derives effective status from the FRONT-MATTER field of that name, so an\n" +
+		"edge spelling of it reads like a supersession and declares none, leaving both records live in retrieval.\n" +
+		"Fix: use a declared verb, move a front-matter field to front-matter, or drop the verb — a bare id is a valid\n" +
+		"\"see also\" and means exactly that. `nugit doctor` reports the whole store's vocabulary and its bare share.",
+	"wiring-drift": "This PR touches an artifact that wires nugit into the repo — CLAUDE.md, an agent skill file, or a\n" +
+		"workflow — and that artifact now disagrees with config.yml or with the repo's other wiring (ADR-0026, ADR-0041):\n" +
+		"a workflow running a weaker -fail-on than config declares, install pins naming different versions, or skill\n" +
+		"prose asserting a stale c4.mode.\n" +
+		"Fix: align the artifact with config.yml. `nugit doctor` runs the same scan over the whole checkout, including\n" +
+		"drift this PR did not touch — this check is scoped to what the PR changed, because pre-existing drift is\n" +
+		"doctor's job and a gate that fires on every unrelated PR is one people mute.",
 	"plan-store": "The committed Beads plan store (.beads/**/*.jsonl) will render as something other than what its author\n" +
 		"wrote (ADR-0040). nugit's reader is deliberately tolerant — it skips an unparseable or key-less line, keeps only\n" +
 		"the LAST of a duplicated id, renders a status it does not classify as `remaining`, and hides non-epics behind a\n" +

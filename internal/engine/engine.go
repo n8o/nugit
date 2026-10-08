@@ -4,6 +4,7 @@ package engine
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/n8o/nugit/internal/config"
 	"github.com/n8o/nugit/internal/consistency"
@@ -18,6 +19,7 @@ import (
 	"github.com/n8o/nugit/internal/narrative"
 	"github.com/n8o/nugit/internal/significance"
 	"github.com/n8o/nugit/internal/trailers"
+	"github.com/n8o/nugit/internal/wiring"
 )
 
 // Options configure a render run.
@@ -132,6 +134,10 @@ func BuildReport(opt Options) (model.Report, error) {
 		},
 		Contracts: contractOpts(opt.RepoDir, cfg),
 		Landscape: landscapeOpts(opt.RepoDir, cfg),
+		TargetRef: opt.Base,
+		TargetIDs: targetIDs(repo, opt.Base, base, prefix),
+		Wiring:    wiringScan(repo, opt.Head, prefix, cfg),
+		WiringCfg: cfg,
 	}
 
 	// Order matters: C4<->code first (independent), then significance (uses it),
@@ -236,4 +242,77 @@ func landscapeOpts(repoDir string, cfg config.Config) consistency.LandscapeOpts 
 		opt.Peers = append(opt.Peers, knowledge.PeerSource{Name: p.Name, Dir: p.Dir(repoDir), Hub: p.Hub})
 	}
 	return opt
+}
+
+// targetIDs reads the knowledge ids present on the branch this PR merges INTO,
+// at that branch's TIP — deliberately not at the merge base the deltas use.
+//
+// A delta answers "what changed since we diverged", so the merge base is its
+// only correct reference. Uniqueness answers "is this id free in the tree I am
+// about to join", and the merge base cannot answer that: everything a sibling
+// PR merged after we branched is invisible there. That is how one id got minted
+// three times from three different bases on the pilot, with every PR green
+// (ADR-0041).
+//
+// Returns nil when the tip IS the merge base (the branch is up to date, so the
+// within-store duplicate check already covers everything) or when the ref
+// cannot be read — degrading to the pre-ADR-0041 behaviour rather than failing.
+func targetIDs(repo gitutil.Repo, targetRef, mergeBase, prefix string) map[string][]string {
+	if targetRef == "" {
+		return nil
+	}
+	tip := repo.Resolve(targetRef)
+	if tip == "" || tip == mergeBase {
+		return nil
+	}
+	objs, err := knowledge.LoadAtRef(repo, targetRef, prefix)
+	if err != nil {
+		return nil
+	}
+	out := map[string][]string{}
+	for _, o := range objs {
+		if o.ID == "" || o.Foreign() {
+			continue
+		}
+		out[o.ID] = append(out[o.ID], o.Path)
+	}
+	return out
+}
+
+// wiringScan takes the ADR-0026 wiring scan at the REVIEWED REF, so the
+// PR-time finding is a pure function of (base, head) like every other input —
+// doctor's copy reads the checkout, which is right for a pre-flight and wrong
+// for a gate (LESSON-read-from-reviewed-ref).
+func wiringScan(repo gitutil.Repo, ref, prefix string, cfg config.Config) wiring.Report {
+	paths, err := repo.ListTree(ref)
+	if err != nil {
+		return wiring.Report{}
+	}
+	var claude, skills, workflows []string
+	for _, p := range paths {
+		rel := strings.TrimPrefix(p, prefix)
+		if !wiring.IsWiringPath(rel) {
+			continue
+		}
+		switch {
+		case strings.HasPrefix(rel, ".claude/skills/"):
+			skills = append(skills, p)
+		case strings.HasPrefix(rel, ".github/workflows/"):
+			workflows = append(workflows, p)
+		default:
+			claude = append(claude, p)
+		}
+	}
+	return wiring.Scan(wiring.Source{
+		ClaudeMD:  claude,
+		Skills:    skills,
+		Workflows: workflows,
+		Read: func(rel string) string {
+			src, err := repo.ShowFile(ref, rel)
+			if err != nil {
+				return ""
+			}
+			return src
+		},
+	}, cfg)
 }

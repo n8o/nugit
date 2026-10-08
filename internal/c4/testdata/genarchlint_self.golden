@@ -89,6 +89,8 @@ components:
     in: "internal/tsdeps/**"
   "usage":
     in: "internal/usage/**"
+  "wiring":
+    in: "internal/wiring/**"
 
 deps:
   "adopt":
@@ -156,6 +158,7 @@ deps:
     mayDependOn:
       - "c4"
       - "cmake"
+      - "config"
       - "evidence"
       - "gitutil"
       - "goimports"
@@ -166,6 +169,7 @@ deps:
       - "pyimports"
       - "trailers"
       - "tsdeps"
+      - "wiring"
   "delta":
     mayDependOn:
       - "beads"
@@ -192,6 +196,7 @@ deps:
       - "mapping"
       - "model_"
       - "modelfacts"
+      - "wiring"
   "engine":
     mayDependOn:
       - "config"
@@ -207,6 +212,7 @@ deps:
       - "narrative"
       - "significance"
       - "trailers"
+      - "wiring"
   "eval":
     mayDependOn:
       - "engine"
@@ -322,3 +328,6 @@ deps:
       - "config"
       - "gitutil"
       - "retrieval"
+  "wiring":
+    mayDependOn:
+      - "config"

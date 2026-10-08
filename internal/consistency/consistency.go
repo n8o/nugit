@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	"github.com/n8o/nugit/internal/cmake"
+	"github.com/n8o/nugit/internal/config"
 	"github.com/n8o/nugit/internal/evidence"
 	"github.com/n8o/nugit/internal/gitutil"
 	"github.com/n8o/nugit/internal/goimports"
@@ -24,6 +25,7 @@ import (
 	"github.com/n8o/nugit/internal/pyimports"
 	"github.com/n8o/nugit/internal/trailers"
 	"github.com/n8o/nugit/internal/tsdeps"
+	"github.com/n8o/nugit/internal/wiring"
 )
 
 // Input bundles everything the checks need (all already computed).
@@ -55,6 +57,18 @@ type Input struct {
 	// Landscape configures the org-landscape ownership check (ADR-0034); the
 	// zero value is inert (no configured identity ⇒ nothing is checked).
 	Landscape LandscapeOpts
+	// TargetIDs maps every knowledge id present on the branch this PR merges
+	// INTO to the files carrying it, read at that branch's tip rather than at
+	// the merge base (ADR-0041). Empty disables checkIDTakenOnTarget, so a
+	// caller that cannot resolve a target ref degrades to the old behaviour.
+	TargetIDs map[string][]string
+	// TargetRef names that branch, for the finding's prose only.
+	TargetRef string
+	// Wiring is the ADR-0026 wiring scan taken at the reviewed ref; the zero
+	// value reports no drift.
+	Wiring wiring.Report
+	// WiringCfg is the config the scan was taken against (for detail strings).
+	WiringCfg config.Config
 }
 
 // C4CodeFindings runs the C4<->code check plus model-health checks. The
@@ -352,6 +366,9 @@ func OtherFindings(in Input) []model.Finding {
 	fs = append(fs, checkCaptureHygiene(in)...)
 	fs = append(fs, checkProseSupersession(in)...)
 	fs = append(fs, checkDuplicateID(in)...)
+	fs = append(fs, checkIDTakenOnTarget(in)...)
+	fs = append(fs, checkEdgeVocabulary(in)...)
+	fs = append(fs, checkWiringDrift(in)...)
 	fs = append(fs, checkRecurrence(in)...)
 	fs = append(fs, checkContractObligations(in)...)
 	fs = append(fs, checkLandscapeOwnership(in)...)
@@ -774,4 +791,91 @@ func short(sha string) string {
 		return sha[:8]
 	}
 	return sha
+}
+
+// checkIDTakenOnTarget catches an id collision that checkDuplicateID can only
+// see when the branch happens to be up to date.
+//
+// checkDuplicateID reads the store at the reviewed HEAD, and a head that has
+// not merged the target cannot contain a sibling's record — so there is
+// nothing there to collide with. That is the normal state of a pull request
+// whose siblings are landing, and it is not fixed by re-running CI: a
+// `pull_request` workflow fires on push to the HEAD branch, never on the base
+// branch advancing, so a green check means "green against the base as of the
+// last push to this branch".
+//
+// A hand-assigned sequential id is a shared mutable counter, which makes that
+// window expensive. Three branches cut before ADR-JBS-0051 existed all saw
+// 0050 as the highest, all minted 0051, and all three landed inside three
+// hours on the pilot.
+//
+// The fix is the reference point, not more scope. The engine reduces the base
+// to mergeBase(base, head) because that is what a DELTA is measured against —
+// but uniqueness is not a delta. It is a property of the tree this change is
+// about to JOIN, so it must be read from that branch's tip at render time,
+// which the engine already receives and previously used only to find the merge
+// base (ADR-0041). Read there, the answer no longer depends on how stale the
+// branch is.
+func checkIDTakenOnTarget(in Input) []model.Finding {
+	if len(in.TargetIDs) == 0 {
+		return nil
+	}
+	// Ids this PR introduces. Only ADDED objects can take an id that is already
+	// spoken for; a MODIFIED object's id is already on the target by definition,
+	// and flagging it would fire on every edit to an existing record.
+	type added struct{ id, path string }
+	var news []added
+	for _, kc := range in.Knowledge.Changes {
+		if kc.Status == "A" && kc.Object != nil && kc.Object.ID != "" {
+			news = append(news, added{kc.Object.ID, kc.Object.Path})
+		}
+	}
+	if len(news) == 0 {
+		return nil
+	}
+	// Suppress ids the within-store check already reported, so one collision is
+	// one finding rather than two differently-worded ones.
+	alreadyReported := map[string]bool{}
+	for _, d := range knowledge.DuplicateIDs(in.AllObjects) {
+		alreadyReported[d.ID] = true
+	}
+	var fs []model.Finding
+	seen := map[string]bool{}
+	for _, a := range news {
+		if alreadyReported[a.id] || seen[a.id] {
+			continue
+		}
+		held := in.TargetIDs[a.id]
+		if len(held) == 0 {
+			continue
+		}
+		// The same path on both sides is not a collision: it means the file was
+		// added on the target too (a rebase, a cherry-pick, the same commit
+		// reachable twice), which is this PR's own record, not a rival.
+		var others []string
+		for _, p := range held {
+			if p != a.path {
+				others = append(others, p)
+			}
+		}
+		if len(others) == 0 {
+			continue
+		}
+		seen[a.id] = true
+		fs = append(fs, model.Finding{
+			Check:    "duplicate-knowledge-id",
+			Severity: model.SevFail,
+			Title:    fmt.Sprintf("id %s is already taken on %s", a.id, in.TargetRef),
+			Detail: fmt.Sprintf("this PR adds %s with id %s, but %s already carries that id in %s. "+
+				"This branch's own history cannot show the clash — it was cut before that record landed, and a "+
+				"pull-request check never re-runs just because the base moved, so a green result here only ever "+
+				"meant green against the base as of the last push. "+
+				"Ids are the store's stable cross-reference keys (ADR-0001), so the duplicate would make one "+
+				"record shadow the other in retrieval and in every `relates_to`/`supersedes`/`amends` edge "+
+				"naming it. Renumber this record to a free id — no edge resolves to a duplicated id, so there "+
+				"is no working reference to preserve.",
+				a.path, a.id, in.TargetRef, strings.Join(others, ", ")),
+		})
+	}
+	return fs
 }

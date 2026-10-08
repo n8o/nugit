@@ -1,0 +1,5 @@
+{"id":"REVIEW-1","title":"Uniqueness reads the target branch tip, not the merge base (concurrent-PR id collisions)","issue_type":"epic","status":"closed"}
+{"id":"REVIEW-2","title":"Declare the relates_to vocabulary beside the parser; lint unusable edges","issue_type":"epic","status":"closed"}
+{"id":"REVIEW-3","title":"Run the ADR-0026 wiring scan at PR time, not only in doctor","issue_type":"epic","status":"closed"}
+{"id":"REVIEW-4","title":"Rank uncovered components by churn so the coverage number implies a first move","issue_type":"epic","status":"closed"}
+{"id":"REVIEW-5","title":"Ask the pilot why a real cross-repo dependency was captured as prose instead of a contract","issue_type":"epic","status":"open"}

@@ -45,6 +45,16 @@ for the decision it grounds) and land it as a PR — never paste the full docume
 
 ## Capture the "why" — so the store fills itself
 
+- **Cross-reference with a verb that means something.** `relates_to:` accepts
+  anything, and only some entries change the knowledge graph: `amends:<key>`
+  (partial override), `reinforces:<key>` (re-confirmation), `informs:<key>`
+  (a reference grounding a decision), and `constrains:<component>` (widens
+  scope). Everything else — `prevents:`, `refines:`, `see:`, or a bare id — is a
+  plain "see also" that retrieval follows and nothing else reads. `supersedes:`
+  is a top-level front-matter field, **not** a `relates_to` verb; written as an
+  edge it declares no supersession and both records stay live. `nugit doctor`
+  reports which of your edges are load-bearing.
+
 - Jot ephemeral findings mid-task: `nugit remember -text "..." -scope <component> -keywords a,b`
   (gitignored; surfaces in future `context` calls).
 - For a deliberate decision, put a **trailer block** in the commit message so

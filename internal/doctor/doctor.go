@@ -43,9 +43,13 @@ type StoreHealth struct {
 	// OrphanComponents have zero scoped knowledge (scope match only; edges
 	// deliberately not counted — this measures where capture is thin).
 	OrphanComponents []string
-	ProposedPending  int // candidate lane awaiting `nugit ratify` (ADR-0016)
-	Score            int // 0..100, descriptive only — see Reasons
-	Reasons          []string
+	// ThinHotspots are the orphan components with the most recent churn,
+	// highest first — where the coverage gap is most likely to be felt
+	// (ADR-0041). Descriptive; never scored.
+	ThinHotspots    []string
+	ProposedPending int // candidate lane awaiting `nugit ratify` (ADR-0016)
+	Score           int // 0..100, descriptive only — see Reasons
+	Reasons         []string
 }
 
 // Report is the full pre-flight result.
@@ -110,6 +114,9 @@ func Run(repoDir string) Report {
 	r.Checks = append(r.Checks, Check{Name: "supersession edges match prose",
 		OK: len(prose) == 0, Advisory: true, Detail: proseDetail(prose)})
 
+	// ADR-0041: the relates_to vocabulary, and how much of it is load-bearing.
+	r.Checks = append(r.Checks, edgeVocabularyCheck(objs))
+
 	prov := provenanceIssues(repoDir, objs)
 	r.Checks = append(r.Checks, Check{Name: "provenance is sane",
 		OK: len(prov) == 0, Advisory: true, Detail: provDetail(prov)})
@@ -162,6 +169,13 @@ func Run(repoDir string) Report {
 
 	if kerr == nil {
 		h := storeHealth(m, objs, bad)
+		// ADR-0041: name WHERE the coverage gap is, ranked by recent churn, so
+		// the orphan ratio implies a first move instead of a shrug.
+		if hs := thinHotspots(repoDir, m, objs, h.OrphanComponents); len(hs) > 0 {
+			h.ThinHotspots = hs
+			h.Reasons = append(h.Reasons,
+				"most-changed uncovered component(s), last 90d: "+strings.Join(hs, ", "))
+		}
 		r.Health = &h
 	}
 
