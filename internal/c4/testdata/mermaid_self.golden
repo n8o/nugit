@@ -41,6 +41,7 @@ graph LR
   trailers["Trailer parser"]
   tsdeps["TS analyzer"]
   usage["Usage log"]
+  wiring["Wiring scan"]
   adopt --> distill
   adopt --> gitutil
   adopt --> model_
@@ -88,6 +89,7 @@ graph LR
   cli --> usage
   consistency --> c4
   consistency --> cmake
+  consistency --> config
   consistency --> evidence
   consistency --> gitutil
   consistency --> goimports
@@ -98,6 +100,7 @@ graph LR
   consistency --> pyimports
   consistency --> trailers
   consistency --> tsdeps
+  consistency --> wiring
   delta --> beads
   delta --> c4
   delta --> gitutil
@@ -116,6 +119,7 @@ graph LR
   doctor --> mapping
   doctor --> model_
   doctor --> modelfacts
+  doctor --> wiring
   engine --> config
   engine --> consistency
   engine --> delta
@@ -129,6 +133,7 @@ graph LR
   engine --> narrative
   engine --> significance
   engine --> trailers
+  engine --> wiring
   eval --> engine
   eval --> model_
   evidence --> bootstrap
@@ -188,3 +193,4 @@ graph LR
   usage --> config
   usage --> gitutil
   usage --> retrieval
+  wiring --> config

@@ -51,8 +51,30 @@ commit subject (ADR-0028).
 
 Durable decisions become files under `.nugit/decisions/` (they survive
 squash-merge; trailers do not — ADR-0005). Cross-reference other objects by their
-stable **key** (`ADR-0002`), never by content hash (ADR-0001). Use
-`relates_to: [constrains:<component>, prevents:<key>, satisfies:<spec>]`.
+stable **key** (`ADR-0002`), never by content hash (ADR-0001).
+
+### `relates_to:` verbs — which ones do something
+
+The vocabulary is declared in `internal/knowledge/relations.go` and classified
+by what the engine actually reads (ADR-0041). `nugit doctor` reports the store's
+mix; `pr-render` warns on a verb with no rule.
+
+| verb | kind | what reads it |
+|---|---|---|
+| `amends:<key>` | semantic | `ResolveAmendedBy` — partial override, target stays live (ADR-0015) |
+| `reinforces:<key>` | semantic | `ResolveReinforcedBy` — re-confirmation widens retrieval (ADR-0019) |
+| `informs:<key>` | semantic | reference attribution in a retrieval bundle (ADR-0014) |
+| `constrains:` / `affects:` / `governs:` `<component>` | scope | widens what the object is retrieved for |
+| `prevents:` `satisfies:` `refines:` `elaborates:` `relates:` `see:` | annotation | retrieval's one-hop traversal, and nothing else |
+| a bare id, no verb | annotation | the same traversal — a plain "see also" |
+
+**Only the semantic verbs make a lifecycle claim.** An annotation verb is a
+legitimate cross-reference that carries no further meaning, so reach for a
+semantic one when you mean the graph to change.
+
+`supersedes:` is **not** a `relates_to` verb — it is a top-level front-matter
+field, and ADR-0003 derives effective status from it. Written as an edge it
+parses, resolves, and declares no supersession.
 
 ## Before opening a PR
 

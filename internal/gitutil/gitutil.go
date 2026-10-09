@@ -42,6 +42,18 @@ func (r Repo) MergeBase(base, head string) string {
 	return strings.TrimSpace(out)
 }
 
+// Resolve returns the commit sha a ref names, or "" when it cannot be resolved.
+// Unlike MergeBase it does NOT fall back to the input: a caller that needs to
+// know whether a ref exists must be able to tell "could not resolve" from "a
+// ref that happens to be spelled like this".
+func (r Repo) Resolve(ref string) string {
+	out, err := r.git("rev-parse", "--verify", "--quiet", ref+"^{commit}")
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(out)
+}
+
 // Prefix returns the path of Dir relative to the git toplevel, slash-terminated
 // (e.g. "apps/operator/"), or "" when Dir IS the git root (the common case) or
 // is not inside a git repo. This is the single bridge that lets a nugit root
@@ -529,6 +541,30 @@ const (
 	commitSep = "\x1e" // record separator
 	fieldSep  = "\x1f" // unit separator
 )
+
+// ChurnSince counts, per git-root-relative path, how many of the last maxCount
+// non-merge commits within sinceDays touched it. One git invocation for the
+// whole repo: the alternative — asking per component — is a git call per
+// element, which on a 92-component model is 92 processes to answer one
+// question. Both bounds exist for the same reason LogSince has them: a history
+// scan must stay O(window), never O(history).
+func (r Repo) ChurnSince(ref string, sinceDays, maxCount int) (map[string]int, error) {
+	out, err := r.git("log", "--no-merges", "--name-only", "--pretty=format:"+commitSep,
+		fmt.Sprintf("--since=%d.days", sinceDays),
+		fmt.Sprintf("--max-count=%d", maxCount), ref)
+	if err != nil {
+		return nil, err
+	}
+	churn := map[string]int{}
+	for _, line := range strings.Split(out, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || line == commitSep {
+			continue
+		}
+		churn[line]++
+	}
+	return churn, nil
+}
 
 // LogSince returns up to maxCount non-merge commits reachable from ref whose
 // commit date falls within the last sinceDays days, optionally limited to
