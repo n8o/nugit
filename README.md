@@ -46,6 +46,13 @@ Claude Code can call it. Every served call is appended to a local, gitignored us
 log (`.nugit/.cache/usage.jsonl`; opt out with `usage: {log: off}`), and `nugit stats`
 aggregates it — calls by source, top components, truncation rate, plus the two gap
 signals: unresolved paths (model coverage) and empty bundles (capture coverage).
+Records carry the Claude Code session id (`CLAUDE_CODE_SESSION_ID`) and, under
+agent-deck, `AGENTDECK_INSTANCE_ID`. The optional pre-edit hook (`nugit agent
+-client claude-code -install -hook`) adds **edit coverage**: every Edit/Write is
+recorded with whether a `context()` call for that component or path preceded it,
+and `nugit stats` reports the coverage percentage per session. `context_gate:
+warn` (default) tells the agent to call `context` first; `block` refuses the edit
+until it has; `off` records nothing (ADR-0042).
 
 **External research has a typed home** — `.nugit/references/` holds *distilled*
 external sources (papers, vendor docs, standards, benchmarks): common front-matter
@@ -178,6 +185,7 @@ per-client MCP config:
 
 ```sh
 nugit agent -client claude-code -install   # writes project-scoped .mcp.json (never merges; -force overwrites)
+nugit agent -client claude-code -install -hook  # …and merges the pre-edit hook into .claude/settings.json
 nugit agent -client cursor                 # snippet for ~/.cursor/mcp.json (absolute repo path baked in)
 nugit agent -client codex                  # TOML snippet for ~/.codex/config.toml
 nugit agent -client opencode               # snippet for opencode.json in the project

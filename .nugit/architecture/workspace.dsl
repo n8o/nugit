@@ -174,6 +174,11 @@ workspace "nugit" "Git-native typed knowledge & unified PR view — self-model (
                     "paths" "internal/usage/**"
                 }
             }
+            editgate = component "Context gate" "Claude Code pre-edit hook: records whether context() preceded an edit; warn/block (ADR-0042)" "Go" {
+                properties {
+                    "paths" "internal/editgate/**"
+                }
+            }
             mcp = component "MCP server" "Exposes context() as an MCP stdio tool" "Go" {
                 properties {
                     "paths" "internal/mcp/**"
@@ -199,7 +204,7 @@ workspace "nugit" "Git-native typed knowledge & unified PR view — self-model (
                     "paths" "internal/modelfacts/**"
                 }
             }
-            agentcfg = component "Agent wiring" "Per-client MCP config snippets + claude-code install (nugit agent)" "Go" {
+            agentcfg = component "Agent wiring" "Per-client MCP config snippets + claude-code install, incl. the pre-edit hook (nugit agent)" "Go" {
                 properties {
                     "paths" "internal/agentcfg/**"
                 }
@@ -381,6 +386,14 @@ workspace "nugit" "Git-native typed knowledge & unified PR view — self-model (
             cli -> deploy "deploy command"
             cli -> modelfacts "model facts command"
             cli -> agentcfg "agent command"
+
+            // --- edit-time context coverage (ADR-0042) ---
+            cli -> editgate "hook pre-edit command"
+            editgate -> config "reads context_gate and usage.log"
+            editgate -> gitutil "resolves the edited file's worktree + branch"
+            editgate -> retrieval "resolves the component exactly as context() does"
+            editgate -> usage "reads prior context() calls; records the edit"
+            doctor -> agentcfg "detects the installed pre-edit hook"
 
             // --- brownfield adoption: prose vs code, before any store exists (ADR-0036) ---
             adopt -> modelfacts "reuses the detected-unit inventory (ADR-0021); never a second detector"

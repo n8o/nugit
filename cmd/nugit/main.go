@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -26,6 +27,7 @@ import (
 	"github.com/n8o/nugit/internal/deploy"
 	"github.com/n8o/nugit/internal/distill"
 	"github.com/n8o/nugit/internal/doctor"
+	"github.com/n8o/nugit/internal/editgate"
 	"github.com/n8o/nugit/internal/engine"
 	"github.com/n8o/nugit/internal/gitutil"
 	"github.com/n8o/nugit/internal/icepanel"
@@ -58,7 +60,7 @@ usage:
   nugit skill [flags]         print/install the agent skill files that teach an agent to use nugit
   nugit context [flags]       scoped, typed knowledge bundle for a path (for agents)
   nugit mcp [flags]           run the MCP stdio server (exposes context() to agents)
-  nugit stats [flags]         aggregate the local context() usage log
+  nugit stats [flags]         aggregate the local context() usage log (+ edit coverage, per session)
   nugit remember [flags]      jot ephemeral working memory (.nugit-local/, gitignored)
   nugit distill [flags]       promote commit-trailer decisions/lessons to durable knowledge (as proposed)
   nugit ratify [flags] <id>…  promote proposed knowledge objects to the ratified corpus (ADR-0016)
@@ -66,6 +68,8 @@ usage:
   nugit promote [flags] <id>  copy a ratified local record into the org hub's checkout (ADR-0035)
   nugit hook commit-msg <f>   git hook entrypoint: validate the commit-trailer block
                               (capture.commit_msg: nudge also prompts on significant commits)
+  nugit hook pre-edit         Claude Code PreToolUse entrypoint (hook JSON on stdin): record
+                              whether context() preceded the edit; context_gate: warn|block|off
   nugit c4 render [flags]      render the C4 model as Mermaid
   nugit c4 gen-rules [flags]   generate go-arch-lint YAML from the C4 model
   nugit c4 export [flags]      export the C4 model (-format icepanel) as an import payload
@@ -88,6 +92,8 @@ agent flags:
   -client c      claude-code (default) | cursor | codex | opencode | generic
   -install       write the config file (claude-code only; others print the snippet)
   -force         with -install: overwrite an existing .mcp.json
+  -hook          with -install: also merge the pre-edit PreToolUse hook into
+                 .claude/settings.json (ADR-0042; existing settings are kept)
   -bin path      nugit binary to embed (default "nugit", resolved from PATH)
 
 skill flags:
@@ -415,6 +421,7 @@ func cmdAgent(args []string) int {
 	client := fs.String("client", "claude-code", "coding agent: claude-code|cursor|codex|opencode|generic")
 	install := fs.Bool("install", false, "write the config file (claude-code only)")
 	force := fs.Bool("force", false, "with -install: overwrite an existing .mcp.json")
+	hook := fs.Bool("hook", false, "with -install: also merge the pre-edit hook into .claude/settings.json")
 	bin := fs.String("bin", "", "nugit binary to embed (default \"nugit\", resolved from PATH)")
 	_ = fs.Parse(args)
 
@@ -441,10 +448,24 @@ func cmdAgent(args []string) int {
 	if !created {
 		fmt.Printf("  skipped  %s (exists — never merged automatically; -force to overwrite)\n\n", path)
 		fmt.Printf("Merge this snippet manually:\n\n%s", text)
-		return 0
+	} else {
+		fmt.Printf("  created  %s\n", path)
 	}
-	fmt.Printf("  created  %s\n", path)
-	fmt.Println("Restart Claude Code in this repo to pick up the nugit MCP server (context tool).")
+	if *hook {
+		changed, hpath, err := agentcfg.InstallClaudeCodeHook(*dir, *bin)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "nugit agent: %v\n", err)
+			return 1
+		}
+		if changed {
+			fmt.Printf("  merged   %s (PreToolUse %s → nugit hook pre-edit)\n", hpath, agentcfg.PreEditMatcher)
+		} else {
+			fmt.Printf("  ok       %s (pre-edit hook already installed)\n", hpath)
+		}
+	}
+	if created || *hook {
+		fmt.Println("Restart Claude Code in this repo to pick up the change.")
+	}
 	return 0
 }
 
@@ -1078,7 +1099,7 @@ func cmdRemember(args []string) int {
 
 func cmdHook(args []string) int {
 	if len(args) < 1 {
-		fmt.Fprintln(os.Stderr, "nugit hook: usage: nugit hook commit-msg <file>")
+		fmt.Fprintln(os.Stderr, "nugit hook: usage: nugit hook commit-msg <file> | nugit hook pre-edit")
 		return 2
 	}
 	switch args[0] {
@@ -1123,6 +1144,20 @@ func cmdHook(args []string) int {
 			fmt.Fprint(os.Stderr, txt)
 		}
 		return 0 // warn/nudge mode: advise, don't block
+	case "pre-edit":
+		// ADR-0042: a Claude Code PreToolUse hook. It must never break an edit:
+		// a flag error, unreadable stdin, or any internal failure exits 0 with
+		// nothing printed — which Claude Code treats as "no opinion".
+		fs := flag.NewFlagSet("hook pre-edit", flag.ContinueOnError)
+		fs.SetOutput(io.Discard)
+		dir := fs.String("C", ".", "nugit root (relative to the git toplevel)")
+		if fs.Parse(args[1:]) != nil {
+			return 0
+		}
+		if out := editgate.PreEdit(os.Stdin, editgate.Options{NugitDir: *dir}); out != nil {
+			fmt.Println(string(out))
+		}
+		return 0
 	default:
 		fmt.Fprintf(os.Stderr, "nugit hook: unknown hook %q\n", args[0])
 		return 2
