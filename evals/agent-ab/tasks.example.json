@@ -1,10 +1,20 @@
 [
   {
-    "id": "example-add-endpoint",
+    "id": "example-widget-health",
     "prompt": "Add a read-only HTTP endpoint GET /api/widgets/:name/health to the backend that reports the widget's registration status. Follow the existing route patterns. Commit your work when done.",
     "path": "apps/backend/src/routes/widgets.ts",
-    "base": "origin/main",
-    "verify": "npx vitest run apps/backend/src/routes/widgets.test.ts"
+    "base": "3f2c1a9e0b7d4c5e6f8a9b0c1d2e3f4a5b6c7d8e",
+    "verify": "",
+    "source": {
+      "bead": "acme-142",
+      "commits": ["9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b"],
+      "solution": "9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b"
+    },
+    "solution_files": ["apps/backend/src/routes/widgets.ts", "apps/backend/src/routes/widgets.test.ts"],
+    "hidden_tests": ["apps/backend/src/routes/widgets.test.ts"],
+    "oracle_keys": ["ADR-0012"],
+    "tags": {"kind": "feat", "files": 2, "decision_density": 3, "churn_90d": 14, "has_rejected": true, "has_hidden_tests": true},
+    "rejected": [{"key": "ADR-0012", "text": "Poll each widget from the route handler via `WidgetPoller.pollNow` instead of reading the registry."}]
   },
   {
     "id": "example-cross-service-change",
