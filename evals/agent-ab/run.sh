@@ -113,6 +113,12 @@ ln -sf "$NUGIT_BIN" "$SHIMDIR/nugit"
 DENY=(WebFetch WebSearch "Bash(gh:*)" "Bash(git fetch:*)" "Bash(git pull:*)" "Bash(curl:*)"
       "Bash(git -C:*)" "Read(/$REPO/**)" "Grep(/$REPO/**)" "Glob(/$REPO/**)")
 
+# Local, non-network commands every arm may run without a prompt (headless -p
+# has no one to approve them; a repo with no committed permissions would leave
+# the agent unable to build, test or commit). Same list for every arm; the DENY
+# list above still wins. Override with AB_ALLOW (space-separated rules).
+read -r -a ALLOW <<<"${AB_ALLOW:-Bash(go:*) Bash(gofmt:*) Bash(make:*) Bash(git status:*) Bash(git diff:*) Bash(git log:*) Bash(git show:*) Bash(git add:*) Bash(git commit:*) Bash(git grep:*) Bash(ls:*) Bash(cat:*) Bash(head:*) Bash(tail:*) Bash(wc:*) Bash(grep:*) Bash(rg:*) Bash(find:*) Bash(sed -n:*) Bash(jq:*) Bash(python3 -m pytest:*) Bash(npx vitest:*) Bash(npx jest:*)}"
+
 # --- quota guard -----------------------------------------------------------
 quota_guard() {
   command -v agent-deck >/dev/null 2>&1 || return 0
@@ -270,6 +276,7 @@ run_one() { # task_json arm run_idx reference_json
   fi
   [ -n "$sysfile" ] && flags+=(--append-system-prompt "$(cat "$sysfile")")
   flags+=(--disallowedTools "${DENY[@]}")
+  flags+=(--allowedTools "${ALLOW[@]}")
 
   echo ">> $id / $arm / run $idx" >&2
   local t_start t_end agent_json
