@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+# FAKE `claude` for smoke.sh — spends no quota. Mimics `claude -p --output-format
+# json`: records its argv and what it could see, edits the tiny test repo,
+# commits, and prints a plausible result blob.
+#
+# Behaviour (so smoke.sh can tell the arms apart):
+#   - logs argv + observations to $FAKE_CLAUDE_LOGDIR/<cwd basename>.log
+#   - an --mcp-config naming a nugit server → runs `<that binary> context` once
+#     (a real usage-log record in the clone);
+#   - tries `git cat-file -e $FAKE_SOLUTION` and logs LEAK if it succeeds;
+#   - with an --append-system-prompt → writes a correct Sub; without → a wrong
+#     one that also names the rejected `GlobalRegistry` (the control "re-proposes").
+set -uo pipefail
+log="${FAKE_CLAUDE_LOGDIR:-/dev/null}/$(basename "$PWD").log"
+[ -n "${FAKE_CLAUDE_LOGDIR:-}" ] || log=/dev/null
+sysprompt="" mcpcfg=""
+args=("$@")
+for ((i = 0; i < ${#args[@]}; i++)); do
+  case ${args[$i]} in
+    --append-system-prompt) sysprompt=${args[$((i + 1))]} ;;
+    --mcp-config) mcpcfg=${args[$((i + 1))]} ;;
+  esac
+done
+{
+  echo "=== ARGV"; printf '%s\n' "$@"
+  echo "=== OBSERVED"
+  [ -d .nugit ] && echo "SAW_NUGIT_STORE"
+  grep -qi nugit CLAUDE.md 2>/dev/null && echo "SAW_NUGIT_IN_CLAUDE_MD"
+  git remote -v | grep -q . && echo "HAS_REMOTE"
+  if [ -n "${FAKE_SOLUTION:-}" ] && git cat-file -e "$FAKE_SOLUTION^{commit}" 2>/dev/null; then echo "LEAK"; else echo "NO_LEAK"; fi
+} >> "$log"
+
+if [ -n "$mcpcfg" ]; then
+  cmd=$(jq -r '.mcpServers.nugit.command // empty' "$mcpcfg" 2>/dev/null)
+  if [ -n "$cmd" ]; then "$cmd" context -path calc/calc.go -task "add Sub" >/dev/null 2>&1 && echo "CALLED_CONTEXT" >> "$log"; fi
+fi
+
+if [ -n "$sysprompt" ]; then
+  printf '\n// Sub returns a minus b.\nfunc Sub(a, b int) int { return a - b }\n' >> calc/calc.go
+else
+  printf '\n// Sub is registered in the GlobalRegistry.\nfunc Sub(a, b int) int { return a + b }\n' >> calc/calc.go
+fi
+git add -A >/dev/null 2>&1
+git commit -q -m "add Sub" >/dev/null 2>&1
+
+cat <<'JSON'
+{"type":"result","subtype":"success","is_error":false,"duration_ms":1234,"num_turns":4,"result":"Added Sub.","total_cost_usd":0.0123,"usage":{"input_tokens":100,"output_tokens":50,"cache_read_input_tokens":2000,"cache_creation_input_tokens":300}}
+JSON

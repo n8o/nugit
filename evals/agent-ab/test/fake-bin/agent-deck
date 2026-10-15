@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# FAKE `agent-deck usage --json` for smoke.sh: reports $FAKE_QUOTA_5H / $FAKE_QUOTA_7D.
+[ "${1:-}" = usage ] || exit 1
+cat <<JSON
+{"providers":[{"id":"claude","label":"Claude","windows":[
+  {"kind":"five_hour","label":"5h","used_percentage":${FAKE_QUOTA_5H:-10}},
+  {"kind":"seven_day","label":"7d","used_percentage":${FAKE_QUOTA_7D:-10}}]}]}
+JSON
