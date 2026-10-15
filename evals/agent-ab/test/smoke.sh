@@ -147,6 +147,14 @@ check "summary has the paired table"                          grep -q "paired vs
 check "summary: oracle beats none on t-sub (1 win)"           bash -c "grep -E '^all +oracle +1 +1 +0 +0' $T/summary.txt >/dev/null"
 check "summary warns on small strata"                         grep -q "hint, not result" "$T/summary.txt"
 
+echo "# tests visible (-T)"
+OUT_T="$T/out-tv"
+"$AB/run.sh" -t "$T/tasks.json" -r "$R" -b "$NUGIT" -o "$OUT_T" -w "$T/work" -a none -l 1 -T 2> "$T/tv.stderr" || { cat "$T/tv.stderr"; bad "run.sh -T exited non-zero"; }
+qt() { jq -rs "$1" "$OUT_T/results.jsonl"; }
+check "-T: tests_visible recorded"                            [ "$(qt '.[0].tests_visible')" = true ]
+check "-T: the agent's prompt names the acceptance tests"     bash -c "cat $FAKE_CLAUDE_LOGDIR/ab-t-sub-none-*.log | grep -q 'Acceptance tests for this task are already committed: calc/sub_test.go'"
+check "-T: the committed tests are not scored as agent work"  bash -c "! grep -q 'sub_test.go' $OUT_T/runs/t-sub-none-1/diff.patch"
+
 echo "# quota guard"
 before=$(wc -l < "$RES"); rc=0
 FAKE_QUOTA_5H=90 "$AB/run.sh" -t "$T/tasks.json" -r "$R" -b "$NUGIT" -o "$OUT" -w "$T/work" -a none 2> "$T/guard.stderr" || rc=$?

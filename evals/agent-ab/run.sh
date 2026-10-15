@@ -26,12 +26,16 @@ usage: run.sh -t tasks.json -r repo [options]
   -Q5 pct     stop cleanly when agent-deck's five_hour used_percentage >= pct (default 80)
   -Q7 pct     stop cleanly when agent-deck's seven_day used_percentage >= pct (default 50)
   -j          also run the opt-in LLM re-proposal judge (spends quota)
+  -T          tests visible: commit the task's hidden tests into the clone before
+              the run and tell the agent to make them pass (TDD mode). Use when
+              the tests call internal names the task text cannot reveal. They are
+              re-applied from the solution before scoring, so editing them gains nothing.
 EOF
   exit 2
 }
 
 TASKS="" REPO="" RUNS=1 OUT="$HERE/results" JUDGE=0 KEEP=0 MODEL="" GUARD=""
-ARMS="none,nugit,oracle,dump" NUGIT_BIN="" LIMIT="" FILTER="" WORK="" Q5=80 Q7=50
+ARMS="none,nugit,oracle,dump" TESTS_VISIBLE=0 NUGIT_BIN="" LIMIT="" FILTER="" WORK="" Q5=80 Q7=50
 while [ $# -gt 0 ]; do
   case $1 in
     -t) TASKS=$2; shift ;;
@@ -49,6 +53,7 @@ while [ $# -gt 0 ]; do
     -Q7) Q7=$2; shift ;;
     -k) KEEP=1 ;;
     -j) JUDGE=1 ;;
+    -T) TESTS_VISIBLE=1 ;;
     -h|--help) usage ;;
     *) echo "unknown flag: $1" >&2; usage ;;
   esac
@@ -194,7 +199,8 @@ run_one() { # task_json arm run_idx reference_json
   local base_line
   base_line=$(jq -nc --arg id "$id" --arg arm "$arm" --argjson idx "$idx" --arg model "${MODEL:-default}" \
     --arg base "$base" --arg sol "$sol" --argjson tags "$tags" --argjson ref "$ref" \
-    '{task:$id, arm:$arm, run:$idx, model:$model, base:$base, solution:$sol, tags:$tags} + $ref')
+    --argjson tv "$TESTS_VISIBLE" \
+    '{task:$id, arm:$arm, run:$idx, model:$model, base:$base, solution:$sol, tags:$tags, tests_visible:($tv==1)} + $ref')
 
   # Arm-specific system-prompt text (built from the store AT BASE).
   local sysfile="" kmeta='{}'
@@ -230,6 +236,22 @@ run_one() { # task_json arm run_idx reference_json
     jq -c '. + {leak_check:"fail"}' <<<"$base_line" >> "$RESULTS"
     echo "!! LEAK CHECK FAILED for $rid: solution $sol is reachable in $wt — aborting the batch" >&2
     exit 1
+  fi
+
+  # Score against sbase: base, or base + the committed acceptance tests (-T),
+  # so the visible tests never count as the agent's work.
+  local sbase=$base
+  local -a htests=()
+  while IFS= read -r f; do [ -n "$f" ] && htests+=("$f"); done < <(jq -r '.hidden_tests // [] | .[]' <<<"$task")
+  if [ "$TESTS_VISIBLE" = 1 ] && [ ${#htests[@]} -gt 0 ] && [ -n "$sol" ]; then
+    for f in "${htests[@]}"; do
+      mkdir -p "$wt/$(dirname "$f")"
+      git -C "$REPO" show "$sol:$f" > "$wt/$f" 2>/dev/null || rm -f "$wt/$f"
+    done
+    git -C "$wt" add -- "${htests[@]}" >/dev/null 2>&1 || true
+    git -C "$wt" commit -q -m "eval: acceptance tests for $id" >/dev/null 2>&1 || true
+    sbase=$(git -C "$wt" rev-parse HEAD)
+    prompt=$(printf '%s\n\nAcceptance tests for this task are already committed: %s. Make them pass without editing them.' "$prompt" "${htests[*]}")
   fi
 
   local -a flags=(-p --output-format json --permission-mode acceptEdits --strict-mcp-config)
@@ -270,12 +292,12 @@ run_one() { # task_json arm run_idx reference_json
   fi
   git -C "$wt" add -A -- . ':(exclude).nugit/.cache' >/dev/null
   local committed=true
-  git -C "$wt" diff --cached --quiet && git -C "$wt" diff "$base"..HEAD --quiet 2>/dev/null && committed=false
+  git -C "$wt" diff --cached --quiet && git -C "$wt" diff "$sbase"..HEAD --quiet 2>/dev/null && committed=false
   git -C "$wt" commit -q -m "eval: $id ($arm run $idx)" --allow-empty >/dev/null
-  git -C "$wt" diff "$base"..HEAD > "$rdir/diff.patch" || true
+  git -C "$wt" diff "$sbase"..HEAD > "$rdir/diff.patch" || true
 
   local render fail warn
-  render=$("$NUGIT_BIN" pr-render -C "$wt" -base "$base" -head HEAD -format json -fail-on none 2>/dev/null || echo '{}')
+  render=$("$NUGIT_BIN" pr-render -C "$wt" -base "$sbase" -head HEAD -format json -fail-on none 2>/dev/null || echo '{}')
   jq -e . >/dev/null 2>&1 <<<"$render" || render='{}'
   printf '%s' "$render" > "$rdir/render.json"
   fail=$(jq '[.Findings[]? | select(.Severity=="fail")] | length' <<<"$render")
@@ -300,7 +322,7 @@ run_one() { # task_json arm run_idx reference_json
 
   # File overlap with the real solution (non-test, no .nugit/.beads).
   local overlap=null touched
-  git -C "$wt" diff --name-only "$base"..HEAD | scored_files > "$rdir/touched.txt"
+  git -C "$wt" diff --name-only "$sbase"..HEAD | scored_files > "$rdir/touched.txt"
   jq -r '.solution_files // [] | .[]' <<<"$task" | scored_files > "$rdir/solution-files.txt"
   touched=$(wc -l < "$rdir/touched.txt" | tr -d ' ')
   if [ -s "$rdir/solution-files.txt" ]; then overlap=$(jaccard "$rdir/touched.txt" "$rdir/solution-files.txt"); fi
@@ -308,7 +330,7 @@ run_one() { # task_json arm run_idx reference_json
   # Re-proposal heuristic (deterministic, labelled heuristic).
   jq -c '.rejected // []' <<<"$task" > "$rdir/rejected.json"
   local rep
-  rep=$("$HERE/repropose.sh" "$wt" "$base" "$rdir/rejected.json")
+  rep=$("$HERE/repropose.sh" "$wt" "$sbase" "$rdir/rejected.json")
 
   # Optional LLM judge (old -j behaviour; prefers the task's rejected texts).
   local reproposed=null

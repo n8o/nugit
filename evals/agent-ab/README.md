@@ -93,6 +93,26 @@ them should install them in `verify`.
   arm). Residual leaks the harness cannot see: user-level CLAUDE.md, skills or
   settings outside the clone, identical across arms.
 
+## Blind or tests-visible (`-T`)
+
+By default the hidden tests are withheld: the agent sees only the task text, as
+it stood at base. That is the purest replay, but it only scores tasks whose
+tests go through names the task text reveals. Tests that call **internal**
+functions by name (an unexported Go helper the real solution happened to add)
+fail to compile for every arm, whatever the agent did, so a blind pass rate on
+such tasks is ~0 and measures nothing.
+
+`-T` commits the hidden tests into the clone before the run and tells the agent
+to make them pass (the TDD variant). All arms get the same tests, so the paired
+comparison stays fair; what it measures shifts from "can it infer the change"
+to "can it implement the change the tests specify, and how cheaply, and does it
+respect the architecture". Scores are computed against base + the committed
+tests, so the tests never count as the agent's work, and they are re-applied
+from the solution before scoring, so editing them gains nothing. Results carry
+`tests_visible`. Check which tasks need it before a run: apply each task's
+hidden tests at base — compile errors naming undefined identifiers mean blind
+mode cannot score that task.
+
 ## Scoring (one JSON line per run in `results/results.jsonl`)
 
 | field | what |
