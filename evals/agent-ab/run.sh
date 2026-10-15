@@ -277,7 +277,14 @@ run_one() { # task_json arm run_idx reference_json
   fi
   [ -n "$sysfile" ] && flags+=(--append-system-prompt "$(cat "$sysfile")")
   flags+=(--disallowedTools "${DENY[@]}")
-  flags+=(--allowedTools "${ALLOW[@]}")
+  # The nugit arm must be able to call the tool it is nudged to call: headless
+  # -p never prompts, so an unapproved MCP tool is refused and the treatment is
+  # never delivered.
+  if [ "$arm" = nugit ]; then
+    flags+=(--allowedTools "${ALLOW[@]}" "mcp__nugit__context" "Bash(nugit:*)")
+  else
+    flags+=(--allowedTools "${ALLOW[@]}")
+  fi
 
   echo ">> $id / $arm / run $idx" >&2
   local t_start t_end agent_json

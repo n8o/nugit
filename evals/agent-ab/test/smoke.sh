@@ -129,6 +129,8 @@ check "none arm saw no .nugit store and no nugit CLAUDE.md"   bash -c "! cat $FA
 check "nugit arm kept the store"                              bash -c "cat $FAKE_CLAUDE_LOGDIR/ab-t-sub-nugit-*.log | grep -q SAW_NUGIT_STORE"
 check "every arm denied network tools identically"           [ "$(cat "$FAKE_CLAUDE_LOGDIR"/*.log | grep -c '^WebFetch$')" = 7 ]
 check "allow rules with spaces reach claude as one argument" bash -c "grep -qx 'Bash(python3 -m pytest:\*)' $FAKE_CLAUDE_LOGDIR/ab-t-sub-none-*.log"
+check "nugit arm may call the nugit tool headlessly"          bash -c "grep -qx 'mcp__nugit__context' $FAKE_CLAUDE_LOGDIR/ab-t-sub-nugit-*.log"
+check "control arm is not granted the nugit tool"             bash -c "! grep -qx 'mcp__nugit__context' $FAKE_CLAUDE_LOGDIR/ab-t-sub-none-*.log"
 check "nugit arm: context() call counted from the clone log"  [ "$(q '.[] | select(.task=="t-sub" and .arm=="nugit") | .context_calls')" -ge 1 ]
 check "no control run contaminated"                           [ "$(q '[.[] | select(.arm != "nugit" and .contaminated == true)] | length')" = 0 ]
 check "re-proposal heuristic flags the control"               [ "$(q '.[] | select(.task=="t-sub" and .arm=="none") | .reproposed_heuristic')" = true ]
