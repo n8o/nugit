@@ -22,7 +22,9 @@ An agent with scoped typed memory produces PRs with:
 | field | source | deterministic |
 |---|---|---|
 | `findings_fail` / `findings_warn` | `pr-render -format json` on the run's diff | ✅ |
-| `context_calls` | the worktree's `.nugit/.cache/usage.jsonl` (needs nugit ≥ the usage-log feature) — **the manipulation check**: a "with" run that never called the tool tells you the wiring, not the memory, failed | ✅ |
+| `context_calls` | the usage-log records served to this run: read from the **git common root's** `.nugit/.cache/usage.jsonl` (nugit logs there, not in the eval worktree — ADR-0025), filtered to the run's branch and time window — **the manipulation check**: a "with" run that never called the tool tells you the wiring, not the memory, failed | ✅ |
+| `context_est_tokens` / `context_budget_tokens` / `context_truncated` | the largest bundle served to the run, its budget, and whether it was cut to fit | ✅ |
+| `context_over_limit` (+ `_reason`) | **delivery check**: the bundle was too big for Claude Code to hand to the agent inline (see below) | ✅ |
 | `cost_usd`, `num_turns`, `duration_ms` | `claude -p --output-format json` | ✅ |
 | `committed` | whether the run produced a commit at all | ✅ |
 | `reproposed` | optional `-j` LLM judge: rejected alternatives vs the diff | ❌ opt-in |
@@ -84,6 +86,22 @@ cp tasks.example.json tasks.json && $EDITOR tasks.json
 Requirements: `claude` CLI, `nugit` on PATH, `jq`, and a target repo with a
 `.nugit/` store. Runs are billed agent invocations — size `tasks.json × -n × 2`
 accordingly.
+
+## Was the context actually delivered?
+
+A "with" run that called `context()` has not necessarily *received* it. Claude
+Code ([MCP output limits](https://code.claude.com/docs/en/mcp)) warns above
+10,000 tokens, caps tool output at `MAX_MCP_OUTPUT_TOKENS` (default 25,000),
+and, for a tool that does not declare `anthropic/maxResultSizeChars`, saves any
+result over 50,000 characters to a file and gives the agent a message naming
+the file instead. nugit sizes a bundle at runes÷4 per token, so a bundle near a
+24,000-token budget is ~96,000 characters: under the token cap, over the
+character threshold. `usage-window.sh` sets `context_over_limit` when either
+threshold is crossed (it honours `MAX_MCP_OUTPUT_TOKENS` from the environment).
+Treat an over-limit "with" arm as a measurement of an agent that was handed a
+file path, not of memory in context. Lower the `context` budget (the runner's
+nudge can pass a `budget_tokens` that keeps the bundle under ~12,000 tokens) or
+raise the limit consistently for both arms before comparing.
 
 ## Joining usage to outcomes
 

@@ -12,9 +12,12 @@ jq -s -r '
     (map(select(.committed)) | length),
     mean(.cost_usd), mean(.num_turns),
     (map(select(.reproposed==true)) | length),
-    (map(select(.contaminated==true)) | length) ] |
+    (map(select(.contaminated==true)) | length),
+    (map(select(.context_over_limit==true)) | length),
+    (map(.context_est_tokens) | map(select(. != null)) | if length==0 then "-" else max end),
+    (map(select(.verified==true)) | length) ] |
   @tsv
 ' "$RESULTS" | {
-  printf "task\tarm\truns\tfail(avg)\twarn(avg)\tctx-calls(avg)\tcommitted\tcost(avg$)\tturns(avg)\treproposed\tcontaminated\n"
+  printf "task\tarm\truns\tfail(avg)\twarn(avg)\tctx-calls(avg)\tcommitted\tcost(avg$)\tturns(avg)\treproposed\tcontaminated\tover-limit\tctx-est-tokens(max)\tverified\n"
   cat
 } | column -t -s $'\t'

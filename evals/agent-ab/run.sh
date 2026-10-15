@@ -70,8 +70,11 @@ run_one() { # task_json arm run_idx
   fi
 
   echo ">> $id / $arm / run $idx" >&2
+  local t_start t_end
+  t_start=$(date +%s)
   local agent_json
   agent_json=$( (cd "$wt" && "${agent_env[@]}" claude "${flags[@]}" -- "$prompt" </dev/null) 2>"$OUT/$id-$arm-$idx.stderr" || echo '{}')
+  t_end=$(date +%s)
   printf '%s' "$agent_json" > "$OUT/$id-$arm-$idx.agent.json"
   jq -e '.type == "result" and (.is_error | not)' <<<"$agent_json" >/dev/null 2>&1 \
     || echo "!! agent failed: $id/$arm/$idx (see $OUT/$id-$arm-$idx.stderr); exclude this run" >&2
@@ -94,12 +97,17 @@ run_one() { # task_json arm run_idx
   fail=$(jq '[.Findings[]? | select(.Severity=="fail")] | length' <<<"$render")
   warn=$(jq '[.Findings[]? | select(.Severity=="warn")] | length' <<<"$render")
 
-  # Manipulation / contamination check. context_calls: the worktree's usage
-  # log (restored .nugit is empty of cache in the "without" arm). stub_calls:
-  # times the agent shelled out to the nugit stub. mcp_calls: nugit MCP
-  # tool_use entries in the session transcript. The "without" arm must be 0/0/0.
-  local calls=0 stub_calls mcp_calls=0 tdir
-  [ -f "$wt/.nugit/.cache/usage.jsonl" ] && calls=$(wc -l < "$wt/.nugit/.cache/usage.jsonl" | tr -d ' ')
+  # Manipulation / contamination check. context_calls: the nugit usage-log
+  # records for this run. nugit writes that log to the git COMMON root (the
+  # main checkout's .nugit/.cache, ADR-0025), not to the eval worktree, so read
+  # it from there and keep only this run's branch and time window (the log
+  # outlives runs; a rerun of the same branch must not count earlier attempts).
+  # stub_calls: times the agent shelled out to the nugit stub. mcp_calls: nugit
+  # MCP tool_use entries in the session transcript. The "without" arm must be
+  # 0/0/0.
+  local calls=0 stub_calls mcp_calls=0 tdir ctx_json
+  ctx_json=$("$HERE/usage-window.sh" "$wt" "$branch" "$t_start" "$((t_end + 5))")
+  calls=$(jq .calls <<<"$ctx_json")
   stub_calls=$(wc -l < "$stublog" | tr -d ' ')
   # claude names the transcript dir after the worktree path, ending in its basename.
   tdir=$(find "$HOME/.claude/projects" -maxdepth 1 -type d -name "*-$(basename "$wt")" 2>/dev/null | head -1)
@@ -132,11 +140,13 @@ run_one() { # task_json arm run_idx
 
   jq -nc --arg id "$id" --arg arm "$arm" --argjson idx "$idx" \
     --argjson fail "$fail" --argjson warn "$warn" --argjson calls "$calls" \
-    --argjson stub "$stub_calls" --argjson mcp "$mcp_calls" --argjson contaminated "$contaminated" \
+    --argjson ctx "$ctx_json" --argjson stub "$stub_calls" --argjson mcp "$mcp_calls" --argjson contaminated "$contaminated" \
     --argjson committed "$committed" --argjson verified "$verified" --argjson reproposed "$reproposed" \
     --argjson agent "$(jq '{cost_usd: (.total_cost_usd // null), num_turns: (.num_turns // null), duration_ms: (.duration_ms // null)}' <<<"$agent_json")" \
     '{task:$id, arm:$arm, run:$idx, findings_fail:$fail, findings_warn:$warn,
-      context_calls:$calls, stub_calls:$stub, mcp_calls:$mcp, contaminated:$contaminated, committed:$committed, verified:$verified,
+      context_calls:$calls, context_est_tokens:$ctx.est_tokens, context_budget_tokens:$ctx.budget_tokens,
+      context_truncated:$ctx.truncated, context_over_limit:$ctx.over_limit, context_over_limit_reason:$ctx.reason,
+      stub_calls:$stub, mcp_calls:$mcp, contaminated:$contaminated, committed:$committed, verified:$verified,
       reproposed:$reproposed} + $agent' >> "$RESULTS"
 
   if [ "$KEEP" = 0 ]; then
