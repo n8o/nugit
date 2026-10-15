@@ -111,11 +111,12 @@ func Read(repo gitutil.Repo, ref, prefix string) (Store, bool) {
 	}
 	sort.Strings(files) // stable order across runs
 	st := Store{Files: files, Sharded: len(files) > 1, Stats: map[string]FileStat{}}
+	srcs, err := repo.ShowFiles(ref, files)
+	if err != nil {
+		return Store{}, false
+	}
 	for _, p := range files {
-		src, e := repo.ShowFile(ref, p)
-		if e != nil {
-			continue
-		}
+		src := srcs[p]
 		issues := ParseJSONL([]byte(src))
 		for i := range issues {
 			issues[i].File = p
@@ -259,6 +260,12 @@ func ParseJSONL(b []byte) []Issue {
 	}
 	return out
 }
+
+// Field returns a string field of the original store line by the first key
+// present — for readers that need a field this package does not model
+// (`description`, `close_reason`, `closed_at`), without widening Issue for
+// every consumer.
+func (it Issue) Field(keys ...string) string { return getStr(it.raw, keys...) }
 
 func label(it Issue) string {
 	if it.Title != "" {

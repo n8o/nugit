@@ -94,6 +94,11 @@ workspace "nugit" "Git-native typed knowledge & unified PR view — self-model (
                     "paths" "internal/skillopt/**"
                 }
             }
+            replay = component "Replay-task export" "Mines closed beads + their commits into replay benchmark tasks, read at base (outbound, ADR-0044)" "Go" {
+                properties {
+                    "paths" "internal/replay/**"
+                }
+            }
             consistency = component "Consistency checks" "Cross-artifact verification" "Go" {
                 properties {
                     "paths" "internal/consistency/**"
@@ -354,6 +359,7 @@ workspace "nugit" "Git-native typed knowledge & unified PR view — self-model (
             cli -> icepanel "c4 export command"
             cli -> notion "notion publish command"
             cli -> skillopt "export command"
+            cli -> replay "export -format tasks"
 
             icepanel -> model_ "uses types"
 
@@ -362,6 +368,14 @@ workspace "nugit" "Git-native typed knowledge & unified PR view — self-model (
 
             skillopt -> model_ "uses types"
             skillopt -> knowledge "loads the corpus"
+
+            replay -> model_ "uses types"
+            replay -> beads "reads the plan store (prompts)"
+            replay -> gitutil "walks history, diffs base..solution"
+            replay -> knowledge "loads the store at base"
+            replay -> retrieval "scopes decisions exactly as context() does"
+            replay -> c4 "parses the model at base"
+            replay -> config "reads config at base"
 
             doctor -> config "checks config"
             doctor -> c4 "checks the model parses"

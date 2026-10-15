@@ -43,6 +43,7 @@ import (
 	"github.com/n8o/nugit/internal/ratify"
 	"github.com/n8o/nugit/internal/reinforce"
 	"github.com/n8o/nugit/internal/render"
+	"github.com/n8o/nugit/internal/replay"
 	"github.com/n8o/nugit/internal/retrieval"
 	"github.com/n8o/nugit/internal/scaffold"
 	"github.com/n8o/nugit/internal/skillopt"
@@ -82,7 +83,7 @@ usage:
   nugit plan normalize [flags] canonicalize the store so concurrent agents stop conflicting
   nugit obsidian [flags]      (re)generate .nugit/INDEX.md for the Obsidian vault
   nugit notion publish [flags] publish the knowledge corpus to a Notion database
-  nugit export [flags]        export the knowledge store as eval cases (JSONL, skill-optimizer)
+  nugit export [flags]        export the knowledge store as eval cases (skillopt JSONL | replay tasks)
   nugit explain [check]       rationale + remediation for a consistency check
   nugit pr-render [flags]      compute & render the unified PR view
   nugit version
@@ -132,10 +133,15 @@ init flags:
 export flags:
   -C dir         repo directory (default ".")
   -format f      skillopt (default) — JSONL eval cases for a skill optimizer (ADR-0027)
-  -o path        write the JSONL here instead of stdout
+                 tasks — replay benchmark tasks mined from closed beads + their commits (ADR-0044)
+  -o path        write the output here instead of stdout
   -min-tier t    high-2 (default: emit thin triggers too) | high-3 (rich triggers only)
   -peers         span the corpus across peer/hub lessons too (ADR-0035; off = byte-identical to before)
   -report path   write the full JSON report here (a summary always goes to stderr)
+  -branch ref    tasks: target branch to mine (default: origin/HEAD, origin/main, origin/master, main, master)
+  -require-tests tasks: only tasks whose solution added/modified tests
+  -since date    tasks: only solutions landed on/after date (YYYY-MM-DD or RFC3339)
+  -limit n       tasks: keep the n newest tasks (0 = all)
 
 promote flags:
   -C dir         repo directory (default ".")
@@ -807,14 +813,21 @@ func c4Preview(dir, dslPath, port string) int {
 func cmdExport(args []string) int {
 	fs := flag.NewFlagSet("export", flag.ExitOnError)
 	dir := fs.String("C", ".", "repo directory")
-	format := fs.String("format", "skillopt", "export format: skillopt")
-	out := fs.String("o", "", "write the JSONL to this file instead of stdout")
+	format := fs.String("format", "skillopt", "export format: skillopt | tasks")
+	out := fs.String("o", "", "write the output to this file instead of stdout")
 	minTier := fs.String("min-tier", "high-2", "lowest tier to emit: high-2 | high-3")
 	peers := fs.Bool("peers", false, "span the corpus across configured peer/hub lessons (ADR-0035)")
 	report := fs.String("report", "", "write the full JSON report to this file")
+	branch := fs.String("branch", "", "tasks: target branch (default: origin/HEAD, origin/main, origin/master, main, master)")
+	requireTests := fs.Bool("require-tests", false, "tasks: only tasks with hidden tests")
+	since := fs.String("since", "", "tasks: only solutions landed on/after this date (YYYY-MM-DD or RFC3339)")
+	limit := fs.Int("limit", 0, "tasks: keep the N newest tasks (0 = all)")
 	_ = fs.Parse(args)
+	if *format == "tasks" {
+		return exportTasks(*dir, *out, *report, *branch, *since, *limit, *requireTests)
+	}
 	if *format != "skillopt" {
-		fmt.Fprintf(os.Stderr, "nugit export: unknown format %q (want: skillopt)\n", *format)
+		fmt.Fprintf(os.Stderr, "nugit export: unknown format %q (want: skillopt | tasks)\n", *format)
 		return 2
 	}
 	opt := skillopt.Options{RepoDir: *dir, MinTier: *minTier}
@@ -860,6 +873,51 @@ func cmdExport(args []string) int {
 		}
 	}
 	fmt.Fprint(os.Stderr, rep.SummaryLines())
+	return 0
+}
+
+// exportTasks is `nugit export -format tasks` (ADR-0044): replay benchmark
+// tasks mined from closed beads joined to the commits that implemented them.
+// The JSON array goes to stdout (or -o); the counts-by-reason summary to stderr.
+func exportTasks(dir, out, report, branch, since string, limit int, requireTests bool) int {
+	opt := replay.Options{RepoDir: dir, Branch: branch, Limit: limit, RequireTests: requireTests}
+	if since != "" {
+		t, err := time.Parse("2006-01-02", since)
+		if err != nil {
+			if t, err = time.Parse(time.RFC3339, since); err != nil {
+				fmt.Fprintf(os.Stderr, "nugit export: -since %q: want YYYY-MM-DD or RFC3339\n", since)
+				return 2
+			}
+		}
+		opt.Since = t
+	}
+	tasks, rep, err := replay.Export(opt)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "nugit export: %v\n", err)
+		return 2
+	}
+	w := os.Stdout
+	if out != "" {
+		f, err := os.Create(out)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "nugit export: %v\n", err)
+			return 1
+		}
+		defer f.Close()
+		w = f
+	}
+	if err := replay.WriteJSON(w, tasks); err != nil {
+		fmt.Fprintf(os.Stderr, "nugit export: %v\n", err)
+		return 1
+	}
+	if report != "" {
+		b, _ := json.MarshalIndent(rep, "", "  ")
+		if err := os.WriteFile(report, append(b, '\n'), 0o644); err != nil {
+			fmt.Fprintf(os.Stderr, "nugit export: %v\n", err)
+			return 1
+		}
+	}
+	fmt.Fprint(os.Stderr, rep.Summary())
 	return 0
 }
 

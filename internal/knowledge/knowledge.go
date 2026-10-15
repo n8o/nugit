@@ -92,20 +92,27 @@ func LoadAtRef(repo gitutil.Repo, ref, prefix string) ([]model.KnowledgeObject, 
 		return nil, err
 	}
 	root := prefix + ".nugit/"
-	var objs []model.KnowledgeObject
+	var want []string
 	for _, p := range paths {
 		if !strings.HasPrefix(p, root) || !strings.HasSuffix(p, ".md") {
 			continue
 		}
-		rel := p[len(prefix):]
-		if strings.Contains(rel, "/.cache/") {
+		if strings.Contains(p[len(prefix):], "/.cache/") {
 			continue // derived caches are not knowledge (mirrors Load's SkipDir)
 		}
-		src, err := repo.ShowFile(ref, p)
-		if err != nil {
-			return nil, err
-		}
-		if obj, ok := ParseObject(rel, src); ok {
+		want = append(want, p)
+	}
+	// One batched read for the whole store: a caller loading the store at many
+	// historical refs (the replay-task export, ADR-0044) would otherwise pay a
+	// git process per object per ref.
+	srcs, err := repo.ShowFiles(ref, want)
+	if err != nil {
+		return nil, err
+	}
+	var objs []model.KnowledgeObject
+	for _, p := range want {
+		rel := p[len(prefix):]
+		if obj, ok := ParseObject(rel, srcs[p]); ok {
 			objs = append(objs, *obj)
 		}
 	}

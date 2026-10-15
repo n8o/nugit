@@ -75,6 +75,8 @@ components:
     in: "internal/reinforce/**"
   "render":
     in: "internal/render/**"
+  "replay":
+    in: "internal/replay/**"
   "retrieval":
     in: "internal/retrieval/**"
   "scaffold":
@@ -147,6 +149,7 @@ deps:
       - "ratify"
       - "reinforce"
       - "render"
+      - "replay"
       - "retrieval"
       - "scaffold"
       - "skillopt"
@@ -304,6 +307,15 @@ deps:
     mayDependOn:
       - "c4"
       - "model_"
+  "replay":
+    mayDependOn:
+      - "beads"
+      - "c4"
+      - "config"
+      - "gitutil"
+      - "knowledge"
+      - "model_"
+      - "retrieval"
   "retrieval":
     mayDependOn:
       - "c4"
