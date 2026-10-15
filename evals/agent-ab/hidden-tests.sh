@@ -7,7 +7,11 @@
 #   result: pass | fail | unscored | none
 #     - <verify-cmd> non-empty → run it as-is (it is the task author's command);
 #     - else derive one per language from the test files' extensions:
-#         *.go                         → go test ./<pkg dir>/... (one per dir)
+#         *.go                         → go test -count=1 -run '^(TestX|...)$' ./<pkg>
+#                                        run from the nearest go.mod (nested
+#                                        modules work), only the Test funcs the
+#                                        hidden files declare (a whole package
+#                                        can need services the clone lacks)
 #         *.test|spec.{ts,tsx,js,jsx}  → npx vitest run <files> when "vitest"
 #                                        appears in package.json, else npx jest <files>
 #         *.py                         → python3 -m pytest <files>
@@ -35,17 +39,25 @@ if [ -n "$verify" ]; then
 elif [ $# -eq 0 ]; then
   emit none null ""; exit 0
 else
-  go_dirs="" js_files="" py_files=""
+  go_cmds=() js_files="" py_files=""
   for f in "$@"; do
     case $f in
-      *.go) d=$(dirname "$f"); if [ "$d" = . ]; then d="./..."; else d="./$d/..."; fi
-            case " $go_dirs " in *" $d "*) ;; *) go_dirs+=" $d" ;; esac ;;
+      *_test.go)
+            d=$(dirname "$f"); m=$d
+            while [ "$m" != . ] && [ ! -f "$dir/$m/go.mod" ]; do m=$(dirname "$m"); done
+            if [ "$d" = "$m" ]; then rel=.; elif [ "$m" = . ]; then rel="./$d"; else rel="./${d#"$m"/}"; fi
+            fns=$(grep -hoE '^func (Test[A-Za-z0-9_]+)\(' "$dir/$f" 2>/dev/null | sed -E 's/^func ([^(]+)\(/\1/' | paste -sd'|' -)
+            if [ -n "$fns" ]; then
+              go_cmds+=("cd '$m' && go test -count=1 -run '^($fns)\$' $rel")
+            else
+              go_cmds+=("cd '$m' && go test -count=1 $rel")
+            fi ;;
       *.test.ts|*.test.tsx|*.test.js|*.test.jsx|*.spec.ts|*.spec.tsx|*.spec.js|*.spec.jsx)
             js_files+=" $f" ;;
       *.py) py_files+=" $f" ;;
     esac
   done
-  [ -n "$go_dirs" ] && cmds+=("go test$go_dirs")
+  [ ${#go_cmds[@]} -gt 0 ] && for c in "${go_cmds[@]}"; do case " ${cmds[*]-} " in *"$c"*) ;; *) cmds+=("$c") ;; esac; done
   if [ -n "$js_files" ]; then
     if [ -f "$dir/package.json" ] && grep -q '"vitest"' "$dir/package.json"; then
       cmds+=("npx vitest run$js_files")

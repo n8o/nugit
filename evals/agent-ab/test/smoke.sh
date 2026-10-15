@@ -117,7 +117,7 @@ check "clone has no remote"                                   bash -c "! grep -q
 check "reference_pass true for t-sub"                         [ "$(q '[.[] | select(.task=="t-sub") | .reference_pass] | unique | join(",")')" = true ]
 check "none arm: hidden tests applied and FAIL"               [ "$(q '.[] | select(.task=="t-sub" and .arm=="none") | .hidden_tests_result')" = fail ]
 check "oracle/dump/nugit: hidden tests PASS"                  [ "$(q '[.[] | select(.task=="t-sub" and .arm!="none") | .hidden_tests_result] | unique | join(",")')" = pass ]
-check "hidden test command derived from .go"                  [ "$(q '.[] | select(.task=="t-sub" and .arm=="none") | .hidden_tests_cmd')" = "go test ./calc/..." ]
+check "hidden test command derived from .go"                  [ "$(q '.[] | select(.task=="t-sub" and .arm=="none") | .hidden_tests_cmd')" = "cd '.' && go test -count=1 -run '^(TestSub)$' ./calc" ]
 check "old-format task scored by verify"                      [ "$(q '.[] | select(.task=="t-old" and .arm=="none") | .hidden_tests_result')" = pass ]
 check "oracle text reached the agent (ADR-0001 body)"         bash -c "cat $FAKE_CLAUDE_LOGDIR/ab-t-sub-oracle-*.log | grep -q ORACLE-MARKER-0001"
 check "oracle text excludes other decisions"                  bash -c "! cat $FAKE_CLAUDE_LOGDIR/ab-t-sub-oracle-*.log | grep -q DUMP-MARKER-0003"
