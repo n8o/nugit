@@ -305,7 +305,11 @@ run_one() { # task_json arm run_idx reference_json
     # shellcheck disable=SC2086
     (cd "$wt" && git checkout "$base" -- $scrubbed)
   fi
-  git -C "$wt" add -A -- . ':(exclude).nugit/.cache' >/dev/null
+  # Stage everything, then unstage nugit's cache. An exclude pathspec naming an
+  # ignored path makes `git add` exit 1 once the cache exists (it does as soon as
+  # the nugit arm really calls the tool), which under set -e ends the batch.
+  git -C "$wt" add -A >/dev/null 2>&1 || true
+  git -C "$wt" rm -r -q --cached --ignore-unmatch -- .nugit/.cache >/dev/null 2>&1 || true
   local committed=true
   git -C "$wt" diff --cached --quiet && git -C "$wt" diff "$sbase"..HEAD --quiet 2>/dev/null && committed=false
   git -C "$wt" commit -q -m "eval: $id ($arm run $idx)" --allow-empty >/dev/null

@@ -29,6 +29,7 @@ fi
 R="$T/repo"
 mkdir -p "$R/calc" "$R/.nugit/decisions"
 git -C "$R" init -q -b main
+printf '.nugit/.cache/\n' > "$R/.gitignore"   # as real stores do: makes the cache an ignored path
 git -C "$R" config user.name smoke; git -C "$R" config user.email smoke@example.invalid
 printf 'module example.com/tiny\n\ngo 1.21\n' > "$R/go.mod"
 printf 'package calc\n\n// Add returns a plus b.\nfunc Add(a, b int) int { return a + b }\n' > "$R/calc/calc.go"
