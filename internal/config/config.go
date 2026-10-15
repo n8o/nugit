@@ -46,6 +46,14 @@ type Config struct {
 	Usage struct {
 		Log string `yaml:"log"` // on (default) | off — local .nugit/.cache/usage.jsonl only
 	} `yaml:"usage"`
+	// Retrieval bounds how many items one context() bundle may carry per
+	// section (ADR-0043). Zero or negative means the built-in default; there
+	// is deliberately no "unbounded" value.
+	Retrieval struct {
+		MaxDecisions  int `yaml:"max_decisions"`  // default 12
+		MaxLessons    int `yaml:"max_lessons"`    // default 8
+		MaxReferences int `yaml:"max_references"` // default 6
+	} `yaml:"retrieval"`
 	// ContextGate is the Claude Code pre-edit hook's mode (ADR-0042):
 	// warn (default) — allow, and tell the agent to call context() first;
 	// block — deny the edit until it has; off — the hook records nothing.

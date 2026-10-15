@@ -54,6 +54,14 @@ and `nugit stats` reports the coverage percentage per session. `context_gate:
 warn` (default) tells the agent to call `context` first; `block` refuses the edit
 until it has; `off` records nothing (ADR-0042).
 
+A bundle is filled by relevance, not to the budget: exact-path bindings, then the
+component, then its container, then global, then one-hop pulls, task matches first
+within each tier, and at most 12 decisions / 8 lessons / 6 references (override under
+`retrieval: {max_decisions, max_lessons, max_references}`). The MCP result is also
+hard-capped at 40,000 characters, whatever `budget_tokens` the agent passes, because
+Claude Code puts a larger result in a file the model never reads. A clamp or an
+omission is stated in the bundle's `notices` (ADR-0043).
+
 **External research has a typed home** — `.nugit/references/` holds *distilled*
 external sources (papers, vendor docs, standards, benchmarks): common front-matter
 plus `source:`, scoped + keyworded for retrieval, linked to the decisions they
