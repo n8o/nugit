@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/n8o/nugit/internal/agentcfg"
 	"github.com/n8o/nugit/internal/bootstrap"
 	"github.com/n8o/nugit/internal/c4"
 	"github.com/n8o/nugit/internal/config"
@@ -128,6 +129,11 @@ func Run(repoDir string) Report {
 
 	wired, wdetail := mcpWired(repoDir)
 	r.Checks = append(r.Checks, Check{Name: "MCP wired", OK: wired, Advisory: true, Detail: wdetail})
+
+	// Pre-edit hook (ADR-0042). Advisory: it measures (and optionally gates)
+	// edit-time context() coverage; nugit works without it.
+	hooked, hdetail := preEditHook(repoDir, cfg)
+	r.Checks = append(r.Checks, Check{Name: "pre-edit hook installed", OK: hooked, Advisory: true, Detail: hdetail})
 
 	// Peer stores (ADR-0032). Always advisory: an unreachable peer is the normal
 	// CI state (only the repo under review is checked out) and must never gate.
@@ -454,6 +460,32 @@ func mcpWired(repoDir string) (bool, string) {
 	}
 	sort.Strings(matches)
 	return true, fmt.Sprintf("server %q runs nugit mcp", matches[0]) + lookPathHint()
+}
+
+// preEditHook reports whether the project's Claude Code settings register
+// `nugit hook pre-edit` as a PreToolUse hook — in the shared settings.json or
+// the personal settings.local.json — and which context_gate mode it runs in.
+func preEditHook(repoDir string, cfg config.Config) (bool, string) {
+	for _, name := range []string{"settings.json", "settings.local.json"} {
+		rel := filepath.Join(".claude", name)
+		b, err := os.ReadFile(filepath.Join(repoDir, rel))
+		if err != nil {
+			continue
+		}
+		var s struct {
+			Hooks struct {
+				PreToolUse []json.RawMessage `json:"PreToolUse"`
+			} `json:"hooks"`
+		}
+		if json.Unmarshal(b, &s) != nil {
+			continue
+		}
+		if agentcfg.HookInstalled(s.Hooks.PreToolUse) {
+			return true, fmt.Sprintf("%s runs `nugit hook pre-edit` (context_gate: %s)", rel, cfg.ContextGate) + lookPathHint()
+		}
+	}
+	return false, fmt.Sprintf("not installed — edit-time context() coverage is unmeasured; "+
+		"run `nugit agent -client claude-code -install -hook` (context_gate: %s)", cfg.ContextGate)
 }
 
 func lookPathHint() string {

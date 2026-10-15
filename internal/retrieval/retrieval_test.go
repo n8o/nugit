@@ -438,3 +438,21 @@ func TestContextTiers(t *testing.T) {
 		t.Errorf("warn mode must degrade the tier to checked, got %q", b2.Decisions[0].Tier)
 	}
 }
+
+// ResolveComponent is the pre-edit hook's view of "which component owns this
+// path?" (ADR-0042); it must answer exactly what Context does, file or dir.
+func TestResolveComponentMatchesContext(t *testing.T) {
+	dir := setup(t)
+	for _, p := range []string{"internal/render/render.go", "./internal/util/u.go", "internal/render", "infra/x.tf"} {
+		b, err := Context(Options{RepoDir: dir, Path: p})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := ResolveComponent(dir, p); got != b.Component {
+			t.Errorf("ResolveComponent(%q) = %q, Context says %q", p, got, b.Component)
+		}
+	}
+	if got := ResolveComponent(dir, "internal/render/render.go"); got != "render" {
+		t.Errorf("want render, got %q", got)
+	}
+}

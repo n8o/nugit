@@ -31,6 +31,8 @@ components:
     in: "internal/distill/**"
   "doctor":
     in: "internal/doctor/**"
+  "editgate":
+    in: "internal/editgate/**"
   "engine":
     in: "internal/engine/**"
   "eval":
@@ -129,6 +131,7 @@ deps:
       - "deploy"
       - "distill"
       - "doctor"
+      - "editgate"
       - "engine"
       - "gitutil"
       - "icepanel"
@@ -188,6 +191,7 @@ deps:
       - "trailers"
   "doctor":
     mayDependOn:
+      - "agentcfg"
       - "bootstrap"
       - "c4"
       - "config"
@@ -197,6 +201,12 @@ deps:
       - "model_"
       - "modelfacts"
       - "wiring"
+  "editgate":
+    mayDependOn:
+      - "config"
+      - "gitutil"
+      - "retrieval"
+      - "usage"
   "engine":
     mayDependOn:
       - "config"

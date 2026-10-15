@@ -46,7 +46,11 @@ type Config struct {
 	Usage struct {
 		Log string `yaml:"log"` // on (default) | off — local .nugit/.cache/usage.jsonl only
 	} `yaml:"usage"`
-	Recurrence struct {
+	// ContextGate is the Claude Code pre-edit hook's mode (ADR-0042):
+	// warn (default) — allow, and tell the agent to call context() first;
+	// block — deny the edit until it has; off — the hook records nothing.
+	ContextGate string `yaml:"context_gate"`
+	Recurrence  struct {
 		Mode       string `yaml:"mode"`        // warn (default) | off
 		WindowDays int    `yaml:"window_days"` // history window scanned for fix churn (default 90)
 		MinFixes   int    `yaml:"min_fixes"`   // fix-typed commits that trigger the warn (default 3)
@@ -164,6 +168,7 @@ func Default() Config {
 	c.PRRender.FailOn = "fail"
 	c.Capture.CommitMsg = "warn"
 	c.Usage.Log = "on"
+	c.ContextGate = "warn"
 	c.Recurrence.Mode = "warn"
 	c.Recurrence.WindowDays = 90
 	c.Recurrence.MinFixes = 3
@@ -224,6 +229,14 @@ func LoadBytes(b []byte) (Config, error) {
 	c.Usage.Log = strings.ToLower(strings.TrimSpace(c.Usage.Log))
 	if c.Usage.Log != "off" {
 		c.Usage.Log = "on"
+	}
+	c.ContextGate = strings.ToLower(strings.TrimSpace(c.ContextGate))
+	switch c.ContextGate {
+	case "block", "off":
+	default:
+		// Unknown value: the default (warn). A typo must never silently start
+		// denying edits, nor silently stop measuring them (ADR-0042).
+		c.ContextGate = "warn"
 	}
 	c.Recurrence.Mode = strings.ToLower(strings.TrimSpace(c.Recurrence.Mode))
 	if c.Recurrence.Mode != "off" {

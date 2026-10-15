@@ -141,3 +141,22 @@ func TestFailOnRank(t *testing.T) {
 		t.Error("rank must normalize case/whitespace")
 	}
 }
+
+// context_gate (ADR-0042) defaults to warn; a typo never blocks edits or
+// silently stops measuring them.
+func TestContextGateNormalization(t *testing.T) {
+	for in, want := range map[string]string{
+		"": "warn", "warn": "warn", "BLOCK": "block", " off ": "off", "blok": "warn", "on": "warn",
+	} {
+		c, err := LoadBytes([]byte("context_gate: \"" + in + "\"\n"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if c.ContextGate != want {
+			t.Errorf("context_gate %q → %q, want %q", in, c.ContextGate, want)
+		}
+	}
+	if Default().ContextGate != "warn" {
+		t.Errorf("default context_gate = %q, want warn", Default().ContextGate)
+	}
+}

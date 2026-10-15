@@ -35,25 +35,40 @@ func logFile(repoDir string) string {
 	return filepath.Join(gitutil.Repo{Dir: repoDir}.CommonRoot(), LogPath)
 }
 
-// Record is one served context() call.
+// Record is one served context() call, or (Source == SourceHook) one edit the
+// pre-edit hook saw (ADR-0042). Every field added after the first release is
+// omitempty, so an old line still parses and a new line stays readable by an
+// older nugit.
 type Record struct {
-	Time            time.Time `json:"time"`
-	Source          string    `json:"source"` // cli | mcp
-	Branch          string    `json:"branch,omitempty"`
-	Path            string    `json:"path"`
-	Task            string    `json:"task,omitempty"`
-	Component       string    `json:"component"` // "" = path resolved to no component
-	BudgetTokens    int       `json:"budget_tokens"`
-	EstimatedTokens int       `json:"estimated_tokens"`
-	Truncated       bool      `json:"truncated"`
-	Decisions       int       `json:"decisions"`
-	Lessons         int       `json:"lessons"`
-	References      int       `json:"references"`
-	Glossary        int       `json:"glossary"`
-	WorkingMemory   int       `json:"working_memory"`
-	PathHistory     int       `json:"path_history"`
-	Spec            bool      `json:"spec"`
-	Dropped         int       `json:"dropped"`
+	Time   time.Time `json:"time"`
+	Source string    `json:"source"` // cli | mcp | hook
+	Branch string    `json:"branch,omitempty"`
+	// Session is the Claude Code session id the call or edit belongs to ("" =
+	// unknown: another client, or a Claude Code that does not export it).
+	// AgentSession is the agent-deck instance id, a second, independent
+	// attribution that survives a Claude Code /clear (ADR-0042).
+	Session      string `json:"session,omitempty"`
+	AgentSession string `json:"agent_session,omitempty"`
+	// Hook records only: the editing tool, whether a prior context() call
+	// covered the edit, which attribution matched it, and the gate mode.
+	Tool            string `json:"tool,omitempty"`
+	Covered         *bool  `json:"covered,omitempty"`
+	CoveredBy       string `json:"covered_by,omitempty"` // session | agent_session | branch
+	Gate            string `json:"gate,omitempty"`       // warn | block
+	Path            string `json:"path"`
+	Task            string `json:"task,omitempty"`
+	Component       string `json:"component"` // "" = path resolved to no component
+	BudgetTokens    int    `json:"budget_tokens"`
+	EstimatedTokens int    `json:"estimated_tokens"`
+	Truncated       bool   `json:"truncated"`
+	Decisions       int    `json:"decisions"`
+	Lessons         int    `json:"lessons"`
+	References      int    `json:"references"`
+	Glossary        int    `json:"glossary"`
+	WorkingMemory   int    `json:"working_memory"`
+	PathHistory     int    `json:"path_history"`
+	Spec            bool   `json:"spec"`
+	Dropped         int    `json:"dropped"`
 }
 
 // FromBundle summarizes a served bundle into a Record.
@@ -93,7 +108,30 @@ func Log(repoDir, source, task string, b retrieval.Bundle) error {
 	// under worktree fan-out each record carries that worktree's branch, not
 	// the primary checkout's (ADR-0025).
 	r.Branch = gitutil.Repo{Dir: repoDir}.CurrentBranch()
+	r.Session, r.AgentSession = SessionFromEnv()
 	return Append(repoDir, r)
+}
+
+// Source values.
+const (
+	SourceCLI  = "cli"
+	SourceMCP  = "mcp"
+	SourceHook = "hook"
+)
+
+// SessionEnv is the variable Claude Code sets, to the current session id, in
+// the environment of the processes it spawns: Bash tool commands and stdio MCP
+// servers alike. AgentSessionEnv is agent-deck's per-session instance id.
+// Both are read best-effort: unset means "unattributed", never an error.
+const (
+	SessionEnv      = "CLAUDE_CODE_SESSION_ID"
+	AgentSessionEnv = "AGENTDECK_INSTANCE_ID"
+)
+
+// SessionFromEnv returns the (Claude Code session, agent-deck instance) ids of
+// the current process environment.
+func SessionFromEnv() (session, agentSession string) {
+	return strings.TrimSpace(os.Getenv(SessionEnv)), strings.TrimSpace(os.Getenv(AgentSessionEnv))
 }
 
 // Append writes one record to the shared log, creating .nugit/.cache/ at the
@@ -152,16 +190,76 @@ type Stats struct {
 	EmptyBundles int            `json:"empty_bundles"` // no decisions/spec/lessons matched: capture gap
 	Truncated    int            `json:"truncated"`
 	AvgTokens    int            `json:"avg_estimated_tokens"`
+	// Edits is what the pre-edit hook saw (ADR-0042); zero until it is installed.
+	Edits EditStats `json:"edits"`
+}
+
+// EditStats measures edit-time coverage: how many edits the pre-edit hook saw
+// and how many a context() call for that path preceded.
+type EditStats struct {
+	Seen        int            `json:"seen"`
+	Covered     int            `json:"covered"`
+	CoveragePct float64        `json:"coverage_pct"`
+	ByCoveredBy map[string]int `json:"by_covered_by,omitempty"` // session | agent_session | branch
+	// BySession is present only when some record carries a session id.
+	BySession []SessionStats `json:"by_session,omitempty"`
+}
+
+// SessionStats is one session's context() calls against its edits.
+type SessionStats struct {
+	Session string `json:"session"` // Claude Code session id, or "agent:<id>", or "(none)"
+	Calls   int    `json:"calls"`
+	Edits   int    `json:"edits"`
+	Covered int    `json:"covered"`
+}
+
+// sessionKey is the per-session breakdown's grouping key: the Claude Code
+// session when known, else the agent-deck instance, else "(none)".
+func sessionKey(r Record) string {
+	switch {
+	case r.Session != "":
+		return r.Session
+	case r.AgentSession != "":
+		return "agent:" + r.AgentSession
+	}
+	return "(none)"
 }
 
 // Aggregate computes Stats over records at or after since (zero = all).
 func Aggregate(records []Record, since time.Time) Stats {
 	s := Stats{BySource: map[string]int{}, ByComponent: map[string]int{}, ByBranch: map[string]int{}}
+	s.Edits.ByCoveredBy = map[string]int{}
 	tokens := 0
+	sessions := map[string]*SessionStats{}
+	attributed := false
+	session := func(r Record) *SessionStats {
+		k := sessionKey(r)
+		if k != "(none)" {
+			attributed = true
+		}
+		if sessions[k] == nil {
+			sessions[k] = &SessionStats{Session: k}
+		}
+		return sessions[k]
+	}
 	for _, r := range records {
 		if !since.IsZero() && r.Time.Before(since) {
 			continue
 		}
+		if r.Source == SourceHook {
+			ss := session(r)
+			s.Edits.Seen++
+			ss.Edits++
+			if r.Covered != nil && *r.Covered {
+				s.Edits.Covered++
+				ss.Covered++
+				if r.CoveredBy != "" {
+					s.Edits.ByCoveredBy[r.CoveredBy]++
+				}
+			}
+			continue
+		}
+		session(r).Calls++
 		s.Calls++
 		if s.First.IsZero() || r.Time.Before(s.First) {
 			s.First = r.Time
@@ -189,6 +287,24 @@ func Aggregate(records []Record, since time.Time) Stats {
 	if s.Calls > 0 {
 		s.AvgTokens = tokens / s.Calls
 	}
+	if s.Edits.Seen > 0 {
+		s.Edits.CoveragePct = float64(s.Edits.Covered) * 100 / float64(s.Edits.Seen)
+	}
+	if attributed {
+		for _, ss := range sessions {
+			s.Edits.BySession = append(s.Edits.BySession, *ss)
+		}
+		sort.Slice(s.Edits.BySession, func(i, j int) bool {
+			a, b := s.Edits.BySession[i], s.Edits.BySession[j]
+			if a.Edits != b.Edits {
+				return a.Edits > b.Edits
+			}
+			if a.Calls != b.Calls {
+				return a.Calls > b.Calls
+			}
+			return a.Session < b.Session
+		})
+	}
 	return s
 }
 
@@ -200,6 +316,7 @@ func (s Stats) Markdown() string {
 		b.WriteString("_No context() calls recorded. The log fills as agents call " +
 			"`nugit context` / the MCP `context` tool (local only: `" + LogPath + "`; " +
 			"disable with `usage: {log: off}`)._\n")
+		s.writeEdits(&b)
 		return b.String()
 	}
 	fmt.Fprintf(&b, "- **calls**: %d (%s → %s)\n", s.Calls,
@@ -222,7 +339,37 @@ func (s Stats) Markdown() string {
 			fmt.Fprintf(&b, "  - %s: %d\n", t.k, t.v)
 		}
 	}
+	s.writeEdits(&b)
 	return b.String()
+}
+
+// maxSessionRows caps the per-session table; the JSON output carries them all.
+const maxSessionRows = 15
+
+// writeEdits renders edit-time coverage (ADR-0042). Silent until the
+// pre-edit hook has recorded something, so a repo without it sees no change.
+func (s Stats) writeEdits(b *strings.Builder) {
+	e := s.Edits
+	if e.Seen == 0 {
+		return
+	}
+	b.WriteString("\n### edit coverage (pre-edit hook)\n\n")
+	fmt.Fprintf(b, "- **edits seen**: %d\n", e.Seen)
+	fmt.Fprintf(b, "- **preceded by context()**: %d (%.0f%%)\n", e.Covered, e.CoveragePct)
+	for _, k := range sortedKeys(e.ByCoveredBy) {
+		fmt.Fprintf(b, "  - matched by %s: %d\n", k, e.ByCoveredBy[k])
+	}
+	if len(e.BySession) == 0 {
+		return
+	}
+	b.WriteString("- **by session** (calls · edits · covered):\n")
+	for i, ss := range e.BySession {
+		if i == maxSessionRows {
+			fmt.Fprintf(b, "  - … %d more (see `-format json`)\n", len(e.BySession)-maxSessionRows)
+			break
+		}
+		fmt.Fprintf(b, "  - %s: %d · %d · %d\n", ss.Session, ss.Calls, ss.Edits, ss.Covered)
+	}
 }
 
 type kv struct {

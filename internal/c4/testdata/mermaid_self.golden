@@ -12,6 +12,7 @@ graph LR
   deploy["Deployable detector"]
   distill["Distiller"]
   doctor["Doctor"]
+  editgate["Context gate"]
   engine["Engine"]
   eval["Eval"]
   evidence["Evidence tiers"]
@@ -66,6 +67,7 @@ graph LR
   cli --> deploy
   cli --> distill
   cli --> doctor
+  cli --> editgate
   cli --> engine
   cli --> gitutil
   cli --> icepanel
@@ -111,6 +113,7 @@ graph LR
   distill --> knowledge
   distill --> model_
   distill --> trailers
+  doctor --> agentcfg
   doctor --> bootstrap
   doctor --> c4
   doctor --> config
@@ -120,6 +123,10 @@ graph LR
   doctor --> model_
   doctor --> modelfacts
   doctor --> wiring
+  editgate --> config
+  editgate --> gitutil
+  editgate --> retrieval
+  editgate --> usage
   engine --> config
   engine --> consistency
   engine --> delta

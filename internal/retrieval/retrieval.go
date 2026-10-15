@@ -132,6 +132,31 @@ type Bundle struct {
 	BudgetTokens    int                  `json:"budget_tokens"`
 }
 
+// ResolveComponent maps a repo-relative path to its owning component exactly
+// the way Context does, without composing a bundle — so a caller that only
+// needs "which component is this?" (the pre-edit hook, ADR-0042) cannot drift
+// from what context() would have answered for the same path. "" = unmapped.
+func ResolveComponent(repoDir, path string) string {
+	cfg, _ := config.Load(repoDir)
+	return resolveComponent(mapping.New(loadModel(repoDir, cfg)), strings.TrimPrefix(path, "./"))
+}
+
+func loadModel(repoDir string, cfg config.Config) model.Model {
+	dslPath := cfg.C4.DSL
+	if dslPath == "" {
+		dslPath = ".nugit/architecture/workspace.dsl"
+	}
+	dslSrc, _ := readFile(repoDir, dslPath)
+	return c4.Parse(dslSrc)
+}
+
+func resolveComponent(mp *mapping.Mapper, path string) string {
+	if comp := mp.Resolve(path); comp != "" {
+		return comp
+	}
+	return mp.ResolveDir(path) // allow a directory argument
+}
+
 // Context composes the bundle for opt.Path.
 func Context(opt Options) (Bundle, error) {
 	cfg, _ := config.Load(opt.RepoDir)
@@ -140,19 +165,11 @@ func Context(opt Options) (Bundle, error) {
 		budget = DefaultBudgetTokens
 	}
 
-	dslPath := cfg.C4.DSL
-	if dslPath == "" {
-		dslPath = ".nugit/architecture/workspace.dsl"
-	}
-	dslSrc, _ := readFile(opt.RepoDir, dslPath)
-	m := c4.Parse(dslSrc)
+	m := loadModel(opt.RepoDir, cfg)
 	mp := mapping.New(m)
 
 	path := strings.TrimPrefix(opt.Path, "./")
-	comp := mp.Resolve(path)
-	if comp == "" {
-		comp = mp.ResolveDir(path) // allow a directory argument
-	}
+	comp := resolveComponent(mp, path)
 	// Scope chain: knowledge scoped to the parent CONTAINER also applies to a
 	// path owned by a child component ("" when comp is flat or itself a
 	// container — flat models are untouched). Resolve may itself return a
