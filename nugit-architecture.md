@@ -316,7 +316,7 @@ context(
 2. Read package `.nugit/`, then walk parents to repo-root `.nugit/` (inheritance; nearer scope wins on conflict).
 3. Extract the C4 slice for the component(s) owning `path`.
 4. Query the index (hybrid) for lessons/decisions matching `task`, filtered to in-scope objects.
-5. Assemble, deduplicate by `id`, traverse one hop of `relates_to` for the "why", and **truncate to `budget_tokens`** by type priority (c4_slice > active spec > scoped decisions > matched lessons > glossary).
+5. Assemble, deduplicate by `id`, traverse one hop of `relates_to` for the "why", and **truncate to `budget_tokens`** by type priority (c4_slice > active spec > scoped decisions > matched lessons > glossary). Before the budget, each section is ranked by relevance tier and capped (ADR-0043); the MCP path also clamps the budget and enforces a 40,000-character ceiling on the result.
 
 Composition is deterministic; the LLM does not decide what to fetch (keeps it lean and predictable). Expose a separate `deep_dive(path)` for rare agentic git-history exploration when needed.
 

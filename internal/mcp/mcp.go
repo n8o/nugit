@@ -19,6 +19,16 @@ import (
 
 const protocolVersion = "2024-11-05"
 
+// The delivery window (ADR-0043). Claude Code hands the model only a file path
+// for an MCP result over ~50,000 characters, and warns above ~10k tokens; a
+// bundle that lands in a file is a bundle the agent never reads. So the result
+// text has a hard ceiling with margin under that line, measured on the bytes
+// actually sent, and the token budget is clamped whatever the agent asks for.
+const (
+	MaxResultChars  = 40000
+	MaxBudgetTokens = 8000
+)
+
 // serverVersion reports the module's build version so serverInfo matches
 // `nugit version` instead of a hand-maintained constant that drifts on every
 // release (it said 0.1.0 while v0.2.0 shipped).
@@ -104,7 +114,7 @@ func contextTool() map[string]interface{} {
 			"properties": map[string]interface{}{
 				"path":          map[string]interface{}{"type": "string", "description": "file or dir the agent is operating on"},
 				"task":          map[string]interface{}{"type": "string", "description": "current task, for keyword matching"},
-				"budget_tokens": map[string]interface{}{"type": "integer", "description": "hard cap on returned size"},
+				"budget_tokens": map[string]interface{}{"type": "integer", "description": "token budget for the bundle; the server clamps it to fit the MCP output window (the bundle says so in `notices`)"},
 				"cwd":           map[string]interface{}{"type": "string", "description": "absolute path of the directory you are working in (your checkout/worktree). ALWAYS pass this when the repo uses git worktrees: the server resolves the repo root, knowledge, and branch from it per request, so you read YOUR worktree's checkout instead of the primary one the server was started from. Omitted: the server's start directory is used."},
 			},
 			"required": []string{"path"},
@@ -131,6 +141,7 @@ func callTool(repoDir string, params json.RawMessage) (interface{}, *rpcError) {
 	root := resolveRoot(repoDir, p.Arguments.Cwd)
 	b, err := retrieval.Context(retrieval.Options{
 		RepoDir: root, Path: p.Arguments.Path, Task: p.Arguments.Task, BudgetTokens: p.Arguments.BudgetTokens,
+		MaxBudgetTokens: MaxBudgetTokens, MaxChars: MaxResultChars,
 	})
 	if err != nil {
 		return toolError(err.Error()), nil

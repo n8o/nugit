@@ -25,6 +25,12 @@ type Options struct {
 	Path         string // file or dir the agent is operating on
 	Task         string // optional task text for keyword matching
 	BudgetTokens int    // 0 -> config/default
+	// MaxBudgetTokens, when > 0, clamps BudgetTokens from above; MaxChars, when
+	// > 0, is a hard ceiling on the bundle's JSON encoding. The MCP server sets
+	// both: its result must fit the client's output window whatever budget the
+	// agent asked for (ADR-0043). The CLI leaves them zero.
+	MaxBudgetTokens int
+	MaxChars        int
 }
 
 // DefaultBudgetTokens is the hard cap on returned size when unset.
@@ -65,6 +71,9 @@ type Item struct {
 	// this field.
 	Origin string `json:"origin,omitempty"`
 	tokens int
+	// rank is the relevance rank (ADR-0043; lower is more relevant). Zero for
+	// items built outside Context, which then order exactly as before.
+	rank int
 }
 
 // QualifiedID is how an item is NAMED anywhere a human or an agent reads it:
@@ -130,6 +139,22 @@ type Bundle struct {
 	Dropped         []string             `json:"dropped,omitempty"` // "type id (reason)" — never a silent cut
 	EstimatedTokens int                  `json:"estimated_tokens"`
 	BudgetTokens    int                  `json:"budget_tokens"`
+	// Clamped: the requested budget was lowered to fit the delivery window;
+	// RequestedBudgetTokens is what the caller asked for (ADR-0043).
+	Clamped               bool `json:"clamped,omitempty"`
+	RequestedBudgetTokens int  `json:"requested_budget_tokens,omitempty"`
+	// Omitted counts in-scope items cut by the per-section relevance cap, by
+	// kind. Not a budget cut: these were less relevant than what was kept.
+	Omitted map[string]int `json:"omitted,omitempty"`
+	// DroppedCount is the true number of budget drops when Dropped had to be
+	// shortened (0 = Dropped is complete).
+	DroppedCount int `json:"dropped_count,omitempty"`
+	// Notices are the footer lines a reader must see: a clamp, an omission.
+	Notices []string `json:"notices,omitempty"`
+	// Chars is the size of the bundle's JSON encoding, measured when a char
+	// ceiling applied (0 = not measured). Not serialized: it describes the
+	// serialization.
+	Chars int `json:"-"`
 }
 
 // ResolveComponent maps a repo-relative path to its owning component exactly
@@ -164,6 +189,11 @@ func Context(opt Options) (Bundle, error) {
 	if budget <= 0 {
 		budget = DefaultBudgetTokens
 	}
+	requested := budget
+	if opt.MaxBudgetTokens > 0 && budget > opt.MaxBudgetTokens {
+		budget = opt.MaxBudgetTokens
+	}
+	limits := capsFrom(cfg)
 
 	m := loadModel(opt.RepoDir, cfg)
 	mp := mapping.New(m)
@@ -177,6 +207,9 @@ func Context(opt Options) (Bundle, error) {
 	parent := m.ContainerOf(comp)
 
 	b := Bundle{Path: opt.Path, Component: comp, BudgetTokens: budget}
+	if budget < requested {
+		b.Clamped, b.RequestedBudgetTokens = true, requested
+	}
 	b.C4 = c4Slice(m, comp)
 
 	// Org landscape (ADR-0034), resolved to exactly one authoritative source
@@ -256,6 +289,12 @@ func Context(opt Options) (Bundle, error) {
 		if !bound && landSys == "" && !inScope(o, comp, parent) {
 			continue
 		}
+		// A superseded/invalidated record is known-wrong: never live context,
+		// whether reached directly or through an edge (the traversal below has
+		// always applied this; the direct path now does too — ADR-0043).
+		if o.Type != model.KindSpec && o.Type != model.KindGlossary && dead(o) {
+			continue
+		}
 		switch o.Type {
 		case model.KindDecision:
 			// Component-scoped decisions always; global ones only when relevant to
@@ -267,6 +306,7 @@ func Context(opt Options) (Bundle, error) {
 			it := toItem(o, "")
 			it.PathBound = bound
 			it.SharedSystem = landSys
+			it.rank = relevanceRank(it, o, comp, parent, kw)
 			decisions = append(decisions, it)
 			pulled[knowledge.KeyOf(*o)] = true
 		case model.KindSpec:
@@ -287,6 +327,7 @@ func Context(opt Options) (Bundle, error) {
 				it := toItem(o, "")
 				it.PathBound = bound
 				it.SharedSystem = landSys
+				it.rank = relevanceRank(it, o, comp, parent, kw)
 				lessons = append(lessons, it)
 				pulled[knowledge.KeyOf(*o)] = true
 			}
@@ -297,6 +338,7 @@ func Context(opt Options) (Bundle, error) {
 				it := toItem(o, "")
 				it.PathBound = bound
 				it.SharedSystem = landSys
+				it.rank = relevanceRank(it, o, comp, parent, kw)
 				references = append(references, it)
 				pulled[knowledge.KeyOf(*o)] = true
 			}
@@ -321,10 +363,26 @@ func Context(opt Options) (Bundle, error) {
 
 	// One-hop relates_to traversal: pull the "why" linked by in-scope objects
 	// (including the active spec — its justifying decision is exactly the "why").
-	seeds := append([]Item{}, decisions...)
-	seeds = append(seeds, lessons...)
+	//
+	// Only the items that will survive the relevance cap seed it (ADR-0043): a
+	// hop from a record too weak to be shown is weaker still.
+	sortItems(decisions)
+	sortItems(lessons)
+	seeds := append([]Item{}, head(decisions, limits.decisions)...)
+	seeds = append(seeds, head(lessons, limits.lessons)...)
 	if spec != nil {
 		seeds = append(seeds, *spec)
+	}
+	shown := map[knowledge.Key]bool{}
+	for _, s := range seeds {
+		shown[itemKey(s)] = true
+	}
+	sortItems(references)
+	for _, r := range head(references, limits.references) {
+		shown[itemKey(r)] = true
+	}
+	for _, c := range contracts {
+		shown[itemKey(c)] = true
 	}
 	for _, src := range seeds {
 		o := byKey[itemKey(src)]
@@ -353,12 +411,15 @@ func Context(opt Options) (Bundle, error) {
 				continue
 			}
 			via := edge.Relation + ":" + src.QualifiedID()
+			hop := toItem(tgt, via)
+			hop.rank = hopRank(tgt, kw)
+			shown[knowledge.KeyOf(*tgt)] = true
 			if tgt.Type == model.KindDecision {
-				decisions = append(decisions, toItem(tgt, via))
+				decisions = append(decisions, hop)
 			} else if tgt.Type == model.KindLesson {
-				lessons = append(lessons, toItem(tgt, via))
+				lessons = append(lessons, hop)
 			} else if tgt.Type == model.KindReference {
-				references = append(references, toItem(tgt, via))
+				references = append(references, hop)
 			}
 		}
 	}
@@ -382,8 +443,10 @@ func Context(opt Options) (Bundle, error) {
 			edge := knowledge.ParseEdge(e)
 			// Same-store resolution as the forward pass: a peer reference can
 			// only inform an object from its OWN store (ADR-0032).
-			if edge.Relation == "informs" && pulled[knowledge.EdgeKeyFrom(*o, edge.Target)] {
-				references = append(references, toItem(o, "informs:"+model.QualifyID(o.Origin, edge.Target)))
+			if edge.Relation == "informs" && shown[knowledge.EdgeKeyFrom(*o, edge.Target)] {
+				ref := toItem(o, "informs:"+model.QualifyID(o.Origin, edge.Target))
+				ref.rank = hopRank(o, kw)
+				references = append(references, ref)
 				pulled[knowledge.KeyOf(*o)] = true
 				break
 			}
@@ -397,11 +460,28 @@ func Context(opt Options) (Bundle, error) {
 	sort.Strings(glossary)
 	glossary = dedup(glossary)
 
+	// Relevance cap before the budget (ADR-0043): the budget is a ceiling, not
+	// a target to fill. Contracts are never capped — they are obligations, and
+	// bounded already by "contracts that named this repo".
+	omitted := map[string]int{}
+	decisions, omitted["decision"] = capSection(decisions, limits.decisions)
+	lessons, omitted["lesson"] = capSection(lessons, limits.lessons)
+	references, omitted["reference"] = capSection(references, limits.references)
+	for k, n := range omitted {
+		if n == 0 {
+			delete(omitted, k)
+		}
+	}
+	if len(omitted) > 0 {
+		b.Omitted = omitted
+		b.Truncated = true
+	}
+
 	b.Decisions, b.Spec, b.Lessons, b.References, b.Glossary = decisions, spec, lessons, references, glossary
 	b.Contracts = contracts
 	b.WorkingMemory = workingMemory(opt.RepoDir, comp, kw)
 	b.PathHistory = pathHistory(opt.RepoDir, path)
-	truncate(&b, budget)
+	fitChars(&b, budget, opt.MaxChars)
 	return b, nil
 }
 

@@ -69,6 +69,14 @@ type Record struct {
 	PathHistory     int    `json:"path_history"`
 	Spec            bool   `json:"spec"`
 	Dropped         int    `json:"dropped"`
+	// Delivery (ADR-0043): whether the requested budget was clamped to fit the
+	// output window, what was asked for, the served JSON's size in characters
+	// (0 = not measured, e.g. the CLI), and how many in-scope items the
+	// relevance cap omitted.
+	Clamped         bool `json:"clamped,omitempty"`
+	RequestedBudget int  `json:"requested_budget,omitempty"`
+	Chars           int  `json:"chars,omitempty"`
+	Omitted         int  `json:"omitted,omitempty"`
 }
 
 // FromBundle summarizes a served bundle into a Record.
@@ -89,8 +97,27 @@ func FromBundle(source, task string, b retrieval.Bundle) Record {
 		WorkingMemory:   len(b.WorkingMemory),
 		PathHistory:     len(b.PathHistory),
 		Spec:            b.Spec != nil,
-		Dropped:         len(b.Dropped),
+		Dropped:         droppedCount(b),
+		Clamped:         b.Clamped,
+		RequestedBudget: b.RequestedBudgetTokens,
+		Chars:           b.Chars,
+		Omitted:         omittedCount(b),
 	}
+}
+
+func droppedCount(b retrieval.Bundle) int {
+	if b.DroppedCount > 0 {
+		return b.DroppedCount
+	}
+	return len(b.Dropped)
+}
+
+func omittedCount(b retrieval.Bundle) int {
+	n := 0
+	for _, v := range b.Omitted {
+		n += v
+	}
+	return n
 }
 
 // Log records a served bundle unless config.yml says `usage: {log: off}`.

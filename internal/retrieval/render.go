@@ -128,9 +128,15 @@ func (b Bundle) Markdown() string {
 
 	fmt.Fprintf(&w, "_~%d/%d tokens", b.EstimatedTokens, b.BudgetTokens)
 	if b.Truncated {
-		fmt.Fprintf(&w, " · truncated, dropped: %s", strings.Join(b.Dropped, "; "))
+		fmt.Fprintf(&w, " · truncated")
+		if len(b.Dropped) > 0 {
+			fmt.Fprintf(&w, ", dropped: %s", strings.Join(b.Dropped, "; "))
+		}
 	}
 	w.WriteString("_\n")
+	for _, n := range b.Notices {
+		fmt.Fprintf(&w, "_%s_\n", n)
+	}
 	return w.String()
 }
 

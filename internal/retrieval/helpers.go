@@ -165,9 +165,10 @@ func glossaryTerms(o *model.KnowledgeObject, task, path string) []string {
 	return out
 }
 
-// sortItems orders local before peer, then nearer-scope (component-scoped or
-// path-bound) before global, current status before superseded, then by
-// qualified ID — so truncation drops the least-relevant first.
+// sortItems orders local before peer, then by relevance rank, then
+// nearer-scope (component-scoped or path-bound) before global, current status
+// before superseded, then by qualified ID — so truncation and the relevance cap
+// drop the least-relevant first.
 //
 // Origin is the OUTERMOST dimension (ADR-0032): local always outranks peer,
 // unconditionally. A component-scoped record from this repo is about this code;
@@ -179,6 +180,11 @@ func sortItems(items []Item) {
 		oi, oj := originRank(items[i]), originRank(items[j])
 		if oi != oj {
 			return oi < oj
+		}
+		// Relevance rank (ADR-0043): path binding > component > container >
+		// global > one-hop, task-matching first within each tier.
+		if items[i].rank != items[j].rank {
+			return items[i].rank < items[j].rank
 		}
 		gi, gj := scopeRank(items[i]), scopeRank(items[j])
 		if gi != gj {
