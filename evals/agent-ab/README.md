@@ -22,18 +22,45 @@ An agent with scoped typed memory produces PRs with:
 | field | source | deterministic |
 |---|---|---|
 | `findings_fail` / `findings_warn` | `pr-render -format json` on the run's diff | ✅ |
-| `context_calls` | the worktree's `.nugit/.cache/usage.jsonl` (needs nugit ≥ the usage-log feature) — **the manipulation check**: a "with" run that never called the tool tells you the wiring, not the memory, failed | ✅ |
+| `context_calls` | the usage-log records served to this run: read from the **git common root's** `.nugit/.cache/usage.jsonl` (nugit logs there, not in the eval worktree — ADR-0025), filtered to the run's branch and time window — **the manipulation check**: a "with" run that never called the tool tells you the wiring, not the memory, failed | ✅ |
+| `context_est_tokens` / `context_budget_tokens` / `context_truncated` | the largest bundle served to the run, its budget, and whether it was cut to fit | ✅ |
+| `context_over_limit` (+ `_reason`) | **delivery check**: the bundle was too big for Claude Code to hand to the agent inline (see below) | ✅ |
 | `cost_usd`, `num_turns`, `duration_ms` | `claude -p --output-format json` | ✅ |
 | `committed` | whether the run produced a commit at all | ✅ |
 | `reproposed` | optional `-j` LLM judge: rejected alternatives vs the diff | ❌ opt-in |
 
 ## Fairness rules
 
-- Both arms get the **identical prompt** from `tasks.json`. The only differences
-  in the "with" arm: `--mcp-config` exposing the nugit `context` tool, plus one
-  system-prompt line directing the agent to call it before editing (mirroring
-  how a repo wires nugit via CLAUDE.md — the treatment is *wired memory*, not
-  just tool availability).
+- Both arms get the **identical prompt** from `tasks.json` and the same model
+  (`-m`). The only differences in the "with" arm: `--mcp-config` exposing the
+  nugit `context` tool, plus one system-prompt line directing the agent to call
+  it before editing (mirroring how a repo wires nugit via CLAUDE.md — the
+  treatment is *wired memory*, not just tool availability). The "with" arm
+  otherwise keeps the repo exactly as it is.
+- **The "without" arm is scrubbed of nugit, because a real target repo wires
+  nugit itself** (a checked-in `.mcp.json`, CLAUDE.md rules telling agents to
+  call `nugit context`, a nugit skill, the `.nugit/` store as readable files).
+  Left alone, the control would receive the treatment. Per run, in the
+  worktree only:
+  1. `--strict-mcp-config` with an empty MCP config, so the repo's `.mcp.json`
+     is ignored and no MCP server is available;
+  2. a stub `nugit` that logs and exits 127 is first on `PATH` for the agent
+     process only (the harness's own `pr-render` still uses the real binary);
+  3. `scrub-nugit.sh` removes `.mcp.json`, nugit-named files under `.claude/`,
+     and every top-level block (paragraph, heading, list item with its
+     continuation) of CLAUDE.md / AGENTS.md / `.claude/rules/*.md` that
+     mentions nugit, and hides `.nugit/`. Block-level stripping also drops any
+     *other* nugit-mentioning rule in those files (e.g. a plan-store rule);
+     that is intended — the control should have no nugit at all.
+  The scrub is worktree-local: the scrubbed paths are restored from git before
+  the diff is committed and scored, so it never appears in a result.
+- **Contamination check, recorded per run:** `context_calls` (usage log),
+  `stub_calls` (the agent shelled out to `nugit`), `mcp_calls` (nugit MCP
+  tool_use in the session transcript) and `contaminated` (true when a
+  "without" run shows any of them). The without arm must be `0/0/0`;
+  `summarize.sh` counts contaminated runs. Residual leaks the harness cannot
+  see: an agent calling `nugit` by absolute path, or learning of the store from
+  files outside the scrubbed set.
 - Every run starts from a **fresh worktree at the same base ref**; runs never
   share state.
 - Score only committed work; a run that produced no diff is recorded as
@@ -48,7 +75,9 @@ An agent with scoped typed memory produces PRs with:
 cp tasks.example.json tasks.json && $EDITOR tasks.json
 
 # 2. run both arms, 3 runs each, scoring as it goes
-./run.sh -t tasks.json -r ~/path/to/target-repo -n 3
+./run.sh -t tasks.json -r ~/path/to/target-repo -n 3 -m sonnet
+# optional: -g '<cmd>' runs before every run; a non-zero exit stops the batch
+# (e.g. a quota check), keeping the results gathered so far
 
 # 3. compare arms
 ./summarize.sh results/results.jsonl
@@ -57,6 +86,22 @@ cp tasks.example.json tasks.json && $EDITOR tasks.json
 Requirements: `claude` CLI, `nugit` on PATH, `jq`, and a target repo with a
 `.nugit/` store. Runs are billed agent invocations — size `tasks.json × -n × 2`
 accordingly.
+
+## Was the context actually delivered?
+
+A "with" run that called `context()` has not necessarily *received* it. Claude
+Code ([MCP output limits](https://code.claude.com/docs/en/mcp)) warns above
+10,000 tokens, caps tool output at `MAX_MCP_OUTPUT_TOKENS` (default 25,000),
+and, for a tool that does not declare `anthropic/maxResultSizeChars`, saves any
+result over 50,000 characters to a file and gives the agent a message naming
+the file instead. nugit sizes a bundle at runes÷4 per token, so a bundle near a
+24,000-token budget is ~96,000 characters: under the token cap, over the
+character threshold. `usage-window.sh` sets `context_over_limit` when either
+threshold is crossed (it honours `MAX_MCP_OUTPUT_TOKENS` from the environment).
+Treat an over-limit "with" arm as a measurement of an agent that was handed a
+file path, not of memory in context. Lower the `context` budget (the runner's
+nudge can pass a `budget_tokens` that keeps the bundle under ~12,000 tokens) or
+raise the limit consistently for both arms before comparing.
 
 ## Joining usage to outcomes
 
