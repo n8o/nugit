@@ -34,6 +34,7 @@ graph LR
   ratify["Ratifier"]
   reinforce["Reinforcer"]
   render["Renderer"]
+  replay["Replay-task export"]
   retrieval["Retrieval"]
   scaffold["Scaffold"]
   significance["Significance classifier"]
@@ -83,6 +84,7 @@ graph LR
   cli --> ratify
   cli --> reinforce
   cli --> render
+  cli --> replay
   cli --> retrieval
   cli --> scaffold
   cli --> skillopt
@@ -182,6 +184,13 @@ graph LR
   reinforce --> model_
   render --> c4
   render --> model_
+  replay --> beads
+  replay --> c4
+  replay --> config
+  replay --> gitutil
+  replay --> knowledge
+  replay --> model_
+  replay --> retrieval
   retrieval --> c4
   retrieval --> config
   retrieval --> evidence
