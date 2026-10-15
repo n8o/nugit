@@ -11,9 +11,10 @@ jq -s -r '
     mean(.findings_fail), mean(.findings_warn), mean(.context_calls),
     (map(select(.committed)) | length),
     mean(.cost_usd), mean(.num_turns),
-    (map(select(.reproposed==true)) | length) ] |
+    (map(select(.reproposed==true)) | length),
+    (map(select(.contaminated==true)) | length) ] |
   @tsv
 ' "$RESULTS" | {
-  printf "task\tarm\truns\tfail(avg)\twarn(avg)\tctx-calls(avg)\tcommitted\tcost(avg$)\tturns(avg)\treproposed\n"
+  printf "task\tarm\truns\tfail(avg)\twarn(avg)\tctx-calls(avg)\tcommitted\tcost(avg$)\tturns(avg)\treproposed\tcontaminated\n"
   cat
 } | column -t -s $'\t'

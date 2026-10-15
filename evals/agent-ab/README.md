@@ -29,11 +29,36 @@ An agent with scoped typed memory produces PRs with:
 
 ## Fairness rules
 
-- Both arms get the **identical prompt** from `tasks.json`. The only differences
-  in the "with" arm: `--mcp-config` exposing the nugit `context` tool, plus one
-  system-prompt line directing the agent to call it before editing (mirroring
-  how a repo wires nugit via CLAUDE.md — the treatment is *wired memory*, not
-  just tool availability).
+- Both arms get the **identical prompt** from `tasks.json` and the same model
+  (`-m`). The only differences in the "with" arm: `--mcp-config` exposing the
+  nugit `context` tool, plus one system-prompt line directing the agent to call
+  it before editing (mirroring how a repo wires nugit via CLAUDE.md — the
+  treatment is *wired memory*, not just tool availability). The "with" arm
+  otherwise keeps the repo exactly as it is.
+- **The "without" arm is scrubbed of nugit, because a real target repo wires
+  nugit itself** (a checked-in `.mcp.json`, CLAUDE.md rules telling agents to
+  call `nugit context`, a nugit skill, the `.nugit/` store as readable files).
+  Left alone, the control would receive the treatment. Per run, in the
+  worktree only:
+  1. `--strict-mcp-config` with an empty MCP config, so the repo's `.mcp.json`
+     is ignored and no MCP server is available;
+  2. a stub `nugit` that logs and exits 127 is first on `PATH` for the agent
+     process only (the harness's own `pr-render` still uses the real binary);
+  3. `scrub-nugit.sh` removes `.mcp.json`, nugit-named files under `.claude/`,
+     and every top-level block (paragraph, heading, list item with its
+     continuation) of CLAUDE.md / AGENTS.md / `.claude/rules/*.md` that
+     mentions nugit, and hides `.nugit/`. Block-level stripping also drops any
+     *other* nugit-mentioning rule in those files (e.g. a plan-store rule);
+     that is intended — the control should have no nugit at all.
+  The scrub is worktree-local: the scrubbed paths are restored from git before
+  the diff is committed and scored, so it never appears in a result.
+- **Contamination check, recorded per run:** `context_calls` (usage log),
+  `stub_calls` (the agent shelled out to `nugit`), `mcp_calls` (nugit MCP
+  tool_use in the session transcript) and `contaminated` (true when a
+  "without" run shows any of them). The without arm must be `0/0/0`;
+  `summarize.sh` counts contaminated runs. Residual leaks the harness cannot
+  see: an agent calling `nugit` by absolute path, or learning of the store from
+  files outside the scrubbed set.
 - Every run starts from a **fresh worktree at the same base ref**; runs never
   share state.
 - Score only committed work; a run that produced no diff is recorded as
@@ -48,7 +73,9 @@ An agent with scoped typed memory produces PRs with:
 cp tasks.example.json tasks.json && $EDITOR tasks.json
 
 # 2. run both arms, 3 runs each, scoring as it goes
-./run.sh -t tasks.json -r ~/path/to/target-repo -n 3
+./run.sh -t tasks.json -r ~/path/to/target-repo -n 3 -m sonnet
+# optional: -g '<cmd>' runs before every run; a non-zero exit stops the batch
+# (e.g. a quota check), keeping the results gathered so far
 
 # 3. compare arms
 ./summarize.sh results/results.jsonl
