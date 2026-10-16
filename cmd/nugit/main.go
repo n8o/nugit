@@ -140,6 +140,7 @@ export flags:
   -report path   write the full JSON report here (a summary always goes to stderr)
   -branch ref    tasks: target branch to mine (default: origin/HEAD, origin/main, origin/master, main, master)
   -require-tests tasks: only tasks whose solution added/modified tests
+  -allow-multi   tasks: keep multi-bead / tests-unrelated tasks, tagged, instead of skipping (ADR-0045)
   -since date    tasks: only solutions landed on/after date (YYYY-MM-DD or RFC3339)
   -limit n       tasks: keep the n newest tasks (0 = all)
 
@@ -820,11 +821,12 @@ func cmdExport(args []string) int {
 	report := fs.String("report", "", "write the full JSON report to this file")
 	branch := fs.String("branch", "", "tasks: target branch (default: origin/HEAD, origin/main, origin/master, main, master)")
 	requireTests := fs.Bool("require-tests", false, "tasks: only tasks with hidden tests")
+	allowMulti := fs.Bool("allow-multi", false, "tasks: keep multi-bead / tests-unrelated tasks, tagged, instead of skipping them (ADR-0045)")
 	since := fs.String("since", "", "tasks: only solutions landed on/after this date (YYYY-MM-DD or RFC3339)")
 	limit := fs.Int("limit", 0, "tasks: keep the N newest tasks (0 = all)")
 	_ = fs.Parse(args)
 	if *format == "tasks" {
-		return exportTasks(*dir, *out, *report, *branch, *since, *limit, *requireTests)
+		return exportTasks(*dir, *out, *report, *branch, *since, *limit, *requireTests, *allowMulti)
 	}
 	if *format != "skillopt" {
 		fmt.Fprintf(os.Stderr, "nugit export: unknown format %q (want: skillopt | tasks)\n", *format)
@@ -879,8 +881,8 @@ func cmdExport(args []string) int {
 // exportTasks is `nugit export -format tasks` (ADR-0044): replay benchmark
 // tasks mined from closed beads joined to the commits that implemented them.
 // The JSON array goes to stdout (or -o); the counts-by-reason summary to stderr.
-func exportTasks(dir, out, report, branch, since string, limit int, requireTests bool) int {
-	opt := replay.Options{RepoDir: dir, Branch: branch, Limit: limit, RequireTests: requireTests}
+func exportTasks(dir, out, report, branch, since string, limit int, requireTests, allowMulti bool) int {
+	opt := replay.Options{RepoDir: dir, Branch: branch, Limit: limit, RequireTests: requireTests, AllowMulti: allowMulti}
 	if since != "" {
 		t, err := time.Parse("2006-01-02", since)
 		if err != nil {
