@@ -277,7 +277,14 @@ run_one() { # task_json arm run_idx reference_json
   fi
   [ -n "$sysfile" ] && flags+=(--append-system-prompt "$(cat "$sysfile")")
   flags+=(--disallowedTools "${DENY[@]}")
-  flags+=(--allowedTools "${ALLOW[@]}")
+  # The nugit arm must be able to call the tool it is nudged to call: headless
+  # -p never prompts, so an unapproved MCP tool is refused and the treatment is
+  # never delivered.
+  if [ "$arm" = nugit ]; then
+    flags+=(--allowedTools "${ALLOW[@]}" "mcp__nugit__context" "Bash(nugit:*)")
+  else
+    flags+=(--allowedTools "${ALLOW[@]}")
+  fi
 
   echo ">> $id / $arm / run $idx" >&2
   local t_start t_end agent_json
@@ -298,7 +305,11 @@ run_one() { # task_json arm run_idx reference_json
     # shellcheck disable=SC2086
     (cd "$wt" && git checkout "$base" -- $scrubbed)
   fi
-  git -C "$wt" add -A -- . ':(exclude).nugit/.cache' >/dev/null
+  # Stage everything, then unstage nugit's cache. An exclude pathspec naming an
+  # ignored path makes `git add` exit 1 once the cache exists (it does as soon as
+  # the nugit arm really calls the tool), which under set -e ends the batch.
+  git -C "$wt" add -A >/dev/null 2>&1 || true
+  git -C "$wt" rm -r -q --cached --ignore-unmatch -- .nugit/.cache >/dev/null 2>&1 || true
   local committed=true
   git -C "$wt" diff --cached --quiet && git -C "$wt" diff "$sbase"..HEAD --quiet 2>/dev/null && committed=false
   git -C "$wt" commit -q -m "eval: $id ($arm run $idx)" --allow-empty >/dev/null
