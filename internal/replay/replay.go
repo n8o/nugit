@@ -87,6 +87,13 @@ type Tags struct {
 	Churn90d              int  `json:"churn_90d"`
 	HasRejected           bool `json:"has_rejected"`
 	HasHiddenTests        bool `json:"has_hidden_tests"`
+	// Multi marks a solution that also names another bead or closes an issue
+	// the bead never mentions (ADR-0045). Only ever true under AllowMulti;
+	// by default such a task is skipped as multi-bead.
+	Multi bool `json:"multi"`
+	// TestsUnrelated marks hidden tests with no link to the bead (ADR-0045).
+	// Only ever true under AllowMulti; by default skipped as tests-unrelated.
+	TestsUnrelated bool `json:"tests_unrelated"`
 }
 
 // Rejected is one oracle decision's rejected-alternatives prose, at base.
@@ -104,6 +111,9 @@ type Options struct {
 	Since        time.Time // keep tasks whose solution landed at or after this; zero = no bound
 	Limit        int       // keep the N newest tasks; 0 = all
 	RequireTests bool      // keep only tasks with hidden tests
+	// AllowMulti keeps multi-bead and tests-unrelated tasks, tagged, instead of
+	// skipping them (ADR-0045).
+	AllowMulti bool
 }
 
 // Skip reasons, reported by name.
@@ -112,6 +122,11 @@ const (
 	SkipDocsOnly       = "docs-only"
 	SkipNoBase         = "no-base"
 	SkipTestsOnly      = "tests-only"
+	// SkipMultiBead: the solution also names another bead, or closes an issue
+	// the bead's text never references (ADR-0045).
+	SkipMultiBead = "multi-bead"
+	// SkipTestsUnrelated: no hidden test has any link to the bead (ADR-0045).
+	SkipTestsUnrelated = "tests-unrelated"
 )
 
 // Report is the export's accounting, for stderr.
@@ -301,6 +316,7 @@ type atBase struct {
 type exporter struct {
 	repo   gitutil.Repo
 	prefix string
+	known  map[string]bool // lowercased bead ids in the tip store
 	cache  map[string]*atBase
 	commit map[string]*gitutil.HistoryCommit
 }
@@ -380,6 +396,7 @@ func Export(opt Options) ([]Task, Report, error) {
 			known[strings.ToLower(it.ID)] = true
 		}
 	}
+	e.known = known
 
 	all, fp, err := repo.History(tip)
 	if err != nil {
@@ -453,9 +470,38 @@ func Export(opt Options) ([]Task, Report, error) {
 			rep.Skipped[reason]++
 			continue
 		}
-		rep.Mined++
 		tasks = append(tasks, t)
 	}
+
+	// One bead, one change (ADR-0045). Two beads outside one family mined to
+	// the SAME solution commit are one change implementing two things, whatever
+	// the messages say; then the per-task marks decide skip vs tag.
+	bySol := map[string][]string{}
+	for _, t := range tasks {
+		bySol[t.Source.Solution] = append(bySol[t.Source.Solution], t.ID)
+	}
+	kept := tasks[:0]
+	for _, t := range tasks {
+		for _, other := range bySol[t.Source.Solution] {
+			if !family(other, t.ID) {
+				t.Tags.Multi = true
+				break
+			}
+		}
+		if !opt.AllowMulti {
+			if t.Tags.Multi {
+				rep.Skipped[SkipMultiBead]++
+				continue
+			}
+			if t.Tags.TestsUnrelated {
+				rep.Skipped[SkipTestsUnrelated]++
+				continue
+			}
+		}
+		rep.Mined++
+		kept = append(kept, t)
+	}
+	tasks = kept
 
 	// Newest solution first; id breaks ties so the order is total.
 	sort.SliceStable(tasks, func(i, j int) bool {
@@ -676,6 +722,25 @@ func (e *exporter) mine(it beads.Issue, fp []string, sides [][]string, linked ma
 		}
 	}
 
+	// One bead, one change (ADR-0045).
+	multi := e.multiPurpose(it, src, msgs)
+	var testSrc map[string]string
+	if len(hidden) > 0 {
+		testSrc, _ = e.repo.ShowFiles(sol, hidden)
+	}
+	var primaryDirFiles []string
+	for _, f := range solutionFiles {
+		if path.Dir(f) == path.Dir(primary) && !isDoc(f) {
+			primaryDirFiles = append(primaryDirFiles, f)
+		}
+	}
+	var primaryDiff string // the primary directory's added lines
+	if len(hidden) > 0 && len(primaryDirFiles) > 0 {
+		d, _ := e.repo.RawDiff(base, sol, primaryDirFiles...)
+		primaryDiff = addedLines(d)
+	}
+	unrelated := !testsRelated(src.Title+"\n"+src.Field("description"), hidden, testSrc, solutionFiles, primary, primaryDiff)
+
 	oracle := map[string]bool{}
 	cite := func(key string) {
 		if o := at.byID[strings.ToLower(strings.TrimSpace(key))]; o != nil {
@@ -801,6 +866,8 @@ func (e *exporter) mine(it beads.Issue, fp []string, sides [][]string, linked ma
 			Churn90d:              churn,
 			HasRejected:           len(rejected) > 0,
 			HasHiddenTests:        len(hidden) > 0,
+			Multi:                 multi,
+			TestsUnrelated:        unrelated,
 		},
 		Rejected: rejected,
 	}, ""
