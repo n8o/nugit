@@ -155,6 +155,8 @@ plan flags:
              -fail-on f        exit non-zero on: fail (default) | warn | none
   normalize  -C dir  -write    canonicalize the store (default: report what would change)
              -split            shard into .beads/plans/<plan>.jsonl, one file per plan
+             -merge ref        with -split: keep what ref's store has that a stale database would revert
+             -merge-base f     with -merge: the previous raw bd export, for an exact three-way merge
 
 pr-render flags:
   -C dir         repo directory (default ".")
@@ -1542,11 +1544,28 @@ func sevThresholdCLI(failOn string) int {
 	}
 }
 
+// printIDs lists a merge category, compactly: a database far behind main can
+// hold back hundreds of beads, and the count is what matters.
+func printIDs(what string, ids []string) {
+	if len(ids) == 0 {
+		return
+	}
+	const show = 8
+	list := ids
+	more := ""
+	if len(list) > show {
+		list, more = list[:show], fmt.Sprintf(" … +%d", len(ids)-show)
+	}
+	fmt.Printf("            %d %s: %s%s\n", len(ids), what, strings.Join(list, ", "), more)
+}
+
 func cmdPlanNormalize(args []string) int {
 	fs := flag.NewFlagSet("plan normalize", flag.ExitOnError)
 	dir := fs.String("C", ".", "repo directory")
 	write := fs.Bool("write", false, "write the files (default: report what would change)")
 	split := fs.Bool("split", false, "shard the store into .beads/plans/<plan>.jsonl, one file per plan")
+	merge := fs.String("merge", "", "with -split: fold in the store committed at this ref, so a database behind it cannot revert it (ADR-0047)")
+	mergeBase := fs.String("merge-base", "", "with -merge: the previous raw `bd export` of this database (a missing file means no base)")
 	_ = fs.Parse(args)
 
 	st, err := beads.ReadDir(*dir)
@@ -1554,12 +1573,38 @@ func cmdPlanNormalize(args []string) int {
 		fmt.Fprintf(os.Stderr, "nugit plan normalize: %v\n", err)
 		return 1
 	}
-	// A file that contributed no steps is not a plan store — a `bd` sidecar log,
-	// or something else that happens to end in .jsonl. Rewriting it would be
-	// destructive and splitting would scatter it, so it is left strictly alone.
-	for _, f := range st.Files {
-		if st.Stats[f].Parsed == 0 {
-			fmt.Printf("  skip %s (no plan steps — not a plan store)\n", f)
+	if *merge != "" {
+		if !*split {
+			fmt.Fprintln(os.Stderr, "nugit plan normalize: -merge needs -split (it writes beads back to their committed shards)")
+			return 2
+		}
+		committed, ok := beads.Read(gitutil.Repo{Dir: *dir}, *merge, "")
+		if !ok {
+			fmt.Fprintf(os.Stderr, "nugit plan normalize: no plan store at %s; nothing to merge\n", *merge)
+		} else {
+			// The base is the previous raw export of this database. Without one
+			// (first run, or a deleted file) Merge falls back to timestamps.
+			var base []beads.Issue
+			if *mergeBase != "" {
+				if src, err := os.ReadFile(*mergeBase); err == nil {
+					base = beads.ParseJSONL(src)
+				} else if !os.IsNotExist(err) {
+					fmt.Fprintf(os.Stderr, "nugit plan normalize: %v\n", err)
+					return 1
+				}
+			}
+			var rep beads.MergeReport
+			st, rep = beads.Merge(st, committed, base)
+			how := "three-way against the last export"
+			if rep.NoBase {
+				how = "no base: by timestamp"
+			}
+			fmt.Printf("  merge   %s (%s): %d bead(s) took main's changes\n", *merge, how, rep.Taken())
+			printIDs("not in the database", rep.Missing)
+			printIDs("database behind "+*merge, rep.Committed)
+			printIDs("merged field by field", rep.Merged)
+			printIDs("CONFLICT, both changed a field — kept the database's value", rep.Conflicts)
+			printIDs("deleted", rep.Deleted)
 		}
 	}
 	// Normalizing collapses a duplicate id the way the reader does, last write

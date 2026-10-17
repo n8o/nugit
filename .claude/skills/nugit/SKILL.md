@@ -106,6 +106,8 @@ the issue in the bead's id or body.
   ```sh
   nugit plan normalize -write   # one stable line per bead — this is what stops
                                 # concurrent agents conflicting on the store
+  # sharded store + a local bd database that may be behind main:
+  nugit plan normalize -split -merge HEAD -merge-base <previous export> -write
   nugit plan check              # what pr-render will say about it
   ```
 

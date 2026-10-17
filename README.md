@@ -108,6 +108,8 @@ agent's progress as its own. `plan.scope: all` opts back into the whole board.
 nugit plan check                     # lint the store the way pr-render reads it
 nugit plan normalize -write          # one stable line per bead → git can merge it
 nugit plan normalize -split -write   # one file per plan → agents stop overlapping
+nugit plan normalize -split -merge HEAD -merge-base <last-export> -write
+                                     # …and a database behind HEAD cannot revert it
 ```
 
 **Why normalize.** `bd export` serializes the whole database in the database's
@@ -120,6 +122,17 @@ merge by themselves**. `-split` goes further and gives each plan its own file, s
 they never touch the same path at all. Both are `bd`-safe: only the
 serialization is rewritten, never a status or a value. Run it after `bd export`,
 before `git add`.
+
+**Why merge.** `bd` keeps one local database per clone, and nothing pulls other
+sessions' merged plan changes into it, but `bd export` writes *every* plan from
+it. Exporting from a database that is behind main therefore reopens other
+agents' closes and deletes plans added since the last import. `-merge <ref>`
+folds the store committed at `<ref>` back in. Given `-merge-base`, the previous
+raw export of the same database, it is an exact three-way merge per bead and per
+field (no timestamps needed; `bd` moves none for a label or dependency edit), and
+deleting a bead in `bd` carries through. Without a base it falls back to
+`updated_at` and keeps any committed close. Derived dependency counts are
+recomputed. Save each export as the next run's base (ADR-0047).
 
 **Why check.** The reader is deliberately tolerant — it skips an unparseable
 line, drops a duplicate id last-write-wins, renders an unknown status as
