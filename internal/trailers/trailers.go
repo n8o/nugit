@@ -30,6 +30,12 @@ var trailerLine = regexp.MustCompile(`^([a-z][a-z0-9_-]*):[ \t]+(.*)$`)
 
 // Parse extracts a Trailer from a commit body. Recognized keys are mapped onto
 // typed fields; any other "key: value" line is preserved in Extra.
+//
+// A key may repeat — a commit that makes two decisions, or a squash-merge body
+// carrying several commits' blocks. Nothing is dropped (ADR-0046): every
+// `decision:` lands in Decisions (and Decision joins them), the other prose
+// fields join their values with "; ", and affects/keywords take the ordered
+// union. spec: is an id, not prose, so the first one wins.
 func Parse(body string) model.Trailer {
 	t := model.Trailer{Extra: map[string]string{}}
 	for _, raw := range strings.Split(body, "\n") {
@@ -41,23 +47,28 @@ func Parse(body string) model.Trailer {
 		key, val := m[1], strings.TrimSpace(m[2])
 		switch key {
 		case "decision":
-			t.Decision = val
+			if val != "" {
+				t.Decisions = append(t.Decisions, val)
+			}
 		case "rejected":
-			t.Rejected = val
+			t.Rejected = join(t.Rejected, val)
 		case "learned":
-			t.Learned = val
+			t.Learned = join(t.Learned, val)
 		case "symptom":
-			t.Symptom = val
+			t.Symptom = join(t.Symptom, val)
 		case "spec":
-			t.Spec = val
+			if t.Spec == "" {
+				t.Spec = val
+			}
 		case "affects":
-			t.Affects = splitList(val)
+			t.Affects = union(t.Affects, splitList(val))
 		case "keywords":
-			t.Keywords = splitList(val)
+			t.Keywords = union(t.Keywords, splitList(val))
 		default:
-			t.Extra[key] = val
+			t.Extra[key] = join(t.Extra[key], val)
 		}
 	}
+	t.Decision = strings.Join(t.Decisions, "; ")
 	if len(t.Extra) == 0 {
 		t.Extra = nil
 	}
@@ -73,6 +84,40 @@ func IsTrailerLine(line string) bool {
 }
 
 // splitList splits a comma- or space-separated list and trims empties.
+// join appends a repeated key's value to what is already held, skipping an
+// empty value and an exact repeat (the same line in two squashed commits).
+func join(have, val string) string {
+	switch {
+	case val == "" || val == have:
+		return have
+	case have == "":
+		return val
+	}
+	for _, p := range strings.Split(have, "; ") {
+		if p == val {
+			return have
+		}
+	}
+	return have + "; " + val
+}
+
+// union appends the items of add not already in have, preserving order.
+func union(have, add []string) []string {
+	for _, a := range add {
+		dup := false
+		for _, h := range have {
+			if h == a {
+				dup = true
+				break
+			}
+		}
+		if !dup {
+			have = append(have, a)
+		}
+	}
+	return have
+}
+
 func splitList(s string) []string {
 	fields := strings.FieldsFunc(s, func(r rune) bool { return r == ',' })
 	var out []string

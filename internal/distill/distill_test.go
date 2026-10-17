@@ -9,6 +9,7 @@ import (
 
 	"github.com/n8o/nugit/internal/knowledge"
 	"github.com/n8o/nugit/internal/model"
+	"github.com/n8o/nugit/internal/trailers"
 )
 
 func git(t *testing.T, dir string, args ...string) string {
@@ -431,4 +432,21 @@ func TestDistillStatusLane(t *testing.T) {
 			t.Fatal("want error for unknown status")
 		}
 	})
+}
+
+// ADR-0046: two `decision:` lines in one commit are two decisions, each its own
+// proposal — not one joined record, and not just the last.
+func TestProposeTwoDecisionsOneCommit(t *testing.T) {
+	c := model.Commit{SHA: "4444444444", Subject: "feat(evals): replay", Body: "decision: clone at base\ndecision: add an oracle arm\nlearned: assert isolation\nkeywords: evals"}
+	c.Trailer = trailers.Parse(c.Body)
+	props, _ := Propose([]model.Commit{c}, nil, 0)
+	var got []string
+	for _, p := range props {
+		if p.Kind == model.KindDecision {
+			got = append(got, p.Text)
+		}
+	}
+	if len(got) != 2 || got[0] != "clone at base" || got[1] != "add an oracle arm" {
+		t.Errorf("want both decisions proposed in order, got %q", got)
+	}
 }

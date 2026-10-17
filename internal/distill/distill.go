@@ -197,12 +197,14 @@ func selectCandidates(commits []model.Commit, ix index, minRecur int) []candidat
 	}
 	seen := map[string]bool{}
 	for _, c := range commits {
-		key, d := splitKey(c.Trailer.Decision)
-		if ix.citation(key, d) || seen[norm(d)] {
-			continue
+		for _, raw := range c.Trailer.AllDecisions() {
+			key, d := splitKey(raw)
+			if ix.citation(key, d) || seen[norm(d)] {
+				continue
+			}
+			seen[norm(d)] = true
+			out = append(out, candidate{kind: model.KindDecision, c: c, text: d, dup: ix.decisionText[norm(d)]})
 		}
-		seen[norm(d)] = true
-		out = append(out, candidate{kind: model.KindDecision, c: c, text: d, dup: ix.decisionText[norm(d)]})
 	}
 	seenL := map[string]bool{}
 	for _, c := range commits {

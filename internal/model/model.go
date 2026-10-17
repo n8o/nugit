@@ -234,9 +234,14 @@ type Edge struct {
 
 // Trailer is the parsed nugit commit-trailer block (§6.1).
 type Trailer struct {
-	Decision string
-	Rejected string
-	Learned  string
+	// Decision is every `decision:` value joined with "; ". A commit may make
+	// more than one; Decisions holds them one by one, in commit order, and is
+	// kept out of the JSON so structured output is unchanged. Read them
+	// through AllDecisions.
+	Decision  string
+	Decisions []string `json:"-"`
+	Rejected  string
+	Learned   string
 	// Symptom is the observable behavior that led to the change — what someone
 	// SAW, not what was done about it. Optional (ADR-0028): it is the only
 	// reliable source for a lesson's Trigger, because a symptom is frequently
@@ -247,6 +252,18 @@ type Trailer struct {
 	Keywords []string
 	// Extra captures any other key: value trailer lines verbatim.
 	Extra map[string]string
+}
+
+// AllDecisions returns each decision on its own: Decisions when the trailer
+// was parsed, else Decision as the single one (a hand-built Trailer).
+func (t Trailer) AllDecisions() []string {
+	if len(t.Decisions) > 0 {
+		return t.Decisions
+	}
+	if t.Decision != "" {
+		return []string{t.Decision}
+	}
+	return nil
 }
 
 // Has reports whether the trailer carried any nugit fields at all.
