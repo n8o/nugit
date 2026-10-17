@@ -78,3 +78,50 @@ func TestValidate(t *testing.T) {
 		t.Error("absent block should not warn")
 	}
 }
+
+// ADR-0046: a repeated key keeps every value. Before, the last line won, so a
+// commit that made two decisions silently lost the first.
+func TestParseRepeatedKeys(t *testing.T) {
+	tr := Parse(`symptom: replays could read the solution
+decision: clone at base and check the solution object is absent
+rejected: a worktree per run — shares objects
+rejected: a shallow clone — hides history the agent may use
+decision: add oracle and dump arms
+learned: assert isolation per run
+learned: assert isolation per run
+affects: evals
+affects: evals, replay
+spec: SPEC-001
+spec: SPEC-002
+keywords: evals, replay
+keywords: replay, oracle
+ticket: A-1
+ticket: A-2`)
+	if len(tr.Decisions) != 2 || tr.Decisions[0] != "clone at base and check the solution object is absent" || tr.Decisions[1] != "add oracle and dump arms" {
+		t.Errorf("decisions = %q", tr.Decisions)
+	}
+	if tr.Decision != "clone at base and check the solution object is absent; add oracle and dump arms" {
+		t.Errorf("decision = %q", tr.Decision)
+	}
+	if got := tr.AllDecisions(); len(got) != 2 {
+		t.Errorf("AllDecisions = %q", got)
+	}
+	if tr.Rejected != "a worktree per run — shares objects; a shallow clone — hides history the agent may use" {
+		t.Errorf("rejected = %q", tr.Rejected)
+	}
+	if tr.Learned != "assert isolation per run" {
+		t.Errorf("an exact repeat must collapse, learned = %q", tr.Learned)
+	}
+	if len(tr.Affects) != 2 || tr.Affects[1] != "replay" {
+		t.Errorf("affects = %q", tr.Affects)
+	}
+	if len(tr.Keywords) != 3 || tr.Keywords[2] != "oracle" {
+		t.Errorf("keywords = %q", tr.Keywords)
+	}
+	if tr.Spec != "SPEC-001" {
+		t.Errorf("spec is an id, first wins: %q", tr.Spec)
+	}
+	if tr.Extra["ticket"] != "A-1; A-2" {
+		t.Errorf("extra = %q", tr.Extra)
+	}
+}
