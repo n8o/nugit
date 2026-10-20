@@ -148,6 +148,7 @@ func resolve(o *model.Objective, in Input) {
 // objective, so they say nothing about this one.
 func scoped(objs []model.KnowledgeObject, comps map[string]bool, paths []string, touched map[string]bool) ([]model.ObjectiveRef, int) {
 	var refs []model.ObjectiveRef
+	overlap := map[string]int{}
 	for i := range objs {
 		o := &objs[i]
 		if o.Foreign() || o.ID == "" || (o.Type != model.KindDecision && o.Type != model.KindLesson) {
@@ -156,21 +157,28 @@ func scoped(objs []model.KnowledgeObject, comps map[string]bool, paths []string,
 		if st := o.EffectiveStatus; st == model.StatusSuperseded || st == model.StatusInvalidated {
 			continue
 		}
-		if !governs(o, comps, paths) {
+		n := governs(o, comps, paths)
+		if n == 0 {
 			continue
 		}
-		refs = append(refs, model.ObjectiveRef{ID: o.ID, Type: o.Type, Title: title(o.Body), New: touched[o.ID]})
+		overlap[o.ID] = n
+		refs = append(refs, model.ObjectiveRef{ID: o.ID, Type: o.Type, Title: title(o.ID, o.Body), New: touched[o.ID]})
 	}
-	// What this PR changed first, then decisions before lessons, then by id.
+	// What this PR changed first, then what governs more of the objective's
+	// scope, then decisions before lessons, then newest id first: when the cap
+	// cuts, it keeps the records most specific to this work.
 	sort.SliceStable(refs, func(i, j int) bool {
 		a, b := refs[i], refs[j]
 		if a.New != b.New {
 			return a.New
 		}
+		if overlap[a.ID] != overlap[b.ID] {
+			return overlap[a.ID] > overlap[b.ID]
+		}
 		if a.Type != b.Type {
 			return a.Type == model.KindDecision
 		}
-		return a.ID < b.ID
+		return a.ID > b.ID
 	})
 	if len(refs) > MaxKnowledge {
 		return refs[:MaxKnowledge], len(refs) - MaxKnowledge
@@ -178,22 +186,38 @@ func scoped(objs []model.KnowledgeObject, comps map[string]bool, paths []string,
 	return refs, 0
 }
 
-func governs(o *model.KnowledgeObject, comps map[string]bool, paths []string) bool {
+// governs counts how much of the objective's scope o governs: the objective's
+// components it governs, plus one when it applies to any of the files.
+func governs(o *model.KnowledgeObject, comps map[string]bool, paths []string) int {
+	n := 0
 	for _, c := range evidence.GovernedComponents(*o) {
 		if comps[c] {
-			return true
+			n++
 		}
 	}
 	for _, p := range paths {
 		if knowledge.AppliesTo(o, p) {
-			return true
+			n++
+			break
 		}
 	}
-	return false
+	return n
 }
 
-// title is the first markdown heading of a record's body, else its first line.
-func title(body string) string {
+// title is the first markdown heading of a record's body, else its first
+// line, without a leading copy of the id ("# ADR-0007 — Title" → "Title"):
+// the section prints the id beside it already.
+func title(id, body string) string {
+	t := heading(body)
+	if rest, ok := strings.CutPrefix(t, id); ok {
+		if r := strings.TrimLeft(rest, " —-:·"); r != "" {
+			return r
+		}
+	}
+	return t
+}
+
+func heading(body string) string {
 	first := ""
 	for _, line := range strings.Split(body, "\n") {
 		line = strings.TrimSpace(line)

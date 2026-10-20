@@ -124,7 +124,7 @@ func TestUnknownObjective(t *testing.T) {
 }
 
 func obj(id string, kind model.Kind, scope string, extra func(*model.KnowledgeObject)) model.KnowledgeObject {
-	o := model.KnowledgeObject{Body: "# " + id + " title\n\nbody"}
+	o := model.KnowledgeObject{Body: "# " + id + " — " + id + " title\n\nbody"}
 	o.ID, o.Type, o.Scope = id, kind, scope
 	if extra != nil {
 		extra(&o)
@@ -156,8 +156,8 @@ func TestScopedKnowledge(t *testing.T) {
 	for _, r := range refs {
 		got = append(got, r.ID)
 	}
-	// What the PR changed first, then decisions, then lessons.
-	if want := "ADR-0009,ADR-0004,ADR-0006,LESSON-a"; strings.Join(got, ",") != want {
+	// What the PR changed first, then decisions, then lessons, newest first.
+	if want := "ADR-0009,ADR-0006,ADR-0004,LESSON-a"; strings.Join(got, ",") != want {
 		t.Fatalf("knowledge = %v, want %s", got, want)
 	}
 	if !refs[0].New || refs[1].New || refs[0].Title != "ADR-0009 title" {
@@ -174,5 +174,35 @@ func TestKnowledgeIsCapped(t *testing.T) {
 	o := View(in).Objectives[0]
 	if len(o.Knowledge) != MaxKnowledge || o.KnowledgeMore != 3 {
 		t.Fatalf("listed %d, more %d", len(o.Knowledge), o.KnowledgeMore)
+	}
+}
+
+// A record governing more of the objective's scope outranks one that governs
+// less, so the cap keeps the most specific.
+func TestKnowledgeRanksByOverlap(t *testing.T) {
+	in := input([]model.Commit{commit("a", "acme-1")}, map[string][]string{"a": {"a.go", "b.go"}},
+		model.FileChange{Path: "a.go", Component: "compa"},
+		model.FileChange{Path: "b.go", Component: "compb"})
+	in.AllObjects = []model.KnowledgeObject{
+		obj("ADR-0009", model.KindDecision, "compa", nil),
+		obj("ADR-0001", model.KindDecision, "compa", func(o *model.KnowledgeObject) { o.RelatesTo = []string{"constrains:compb"} }),
+	}
+	refs := View(in).Objectives[0].Knowledge
+	if len(refs) != 2 || refs[0].ID != "ADR-0001" {
+		t.Fatalf("refs = %+v, want ADR-0001 first", refs)
+	}
+}
+
+func TestTitleDropsTheID(t *testing.T) {
+	for body, want := range map[string]string{
+		"# ADR-0007 — Keep it pure\n": "Keep it pure",
+		"# ADR-0007: Keep it pure\n":  "Keep it pure",
+		"# Keep it pure\n":            "Keep it pure",
+		"no heading\nmore":            "no heading",
+		"# ADR-0007\n":                "ADR-0007",
+	} {
+		if got := title("ADR-0007", body); got != want {
+			t.Errorf("title(%q) = %q, want %q", body, got, want)
+		}
 	}
 }
