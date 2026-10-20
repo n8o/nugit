@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/n8o/nugit/internal/beads"
 	"github.com/n8o/nugit/internal/config"
 	"github.com/n8o/nugit/internal/consistency"
 	"github.com/n8o/nugit/internal/delta"
@@ -17,6 +18,7 @@ import (
 	"github.com/n8o/nugit/internal/mapping"
 	"github.com/n8o/nugit/internal/model"
 	"github.com/n8o/nugit/internal/narrative"
+	"github.com/n8o/nugit/internal/objective"
 	"github.com/n8o/nugit/internal/significance"
 	"github.com/n8o/nugit/internal/trailers"
 	"github.com/n8o/nugit/internal/wiring"
@@ -163,6 +165,8 @@ func BuildReport(opt Options) (model.Report, error) {
 	if cfg.PlanOn() {
 		other = append(other, delta.PlanFindings(repo, opt.Head, prefix, plan, codeDelta, cfg.PlanFail())...)
 	}
+	obj := objectiveView(repo, base, opt.Head, prefix, commits, codeDelta, knowDelta, allObjs)
+	other = append(other, objective.Findings(obj.view, obj.hasStore)...)
 	findings := consistency.Sort(append(c4Findings, other...))
 
 	// PR-time distill (ADR-0018): surface what `nugit distill` would promote
@@ -183,6 +187,7 @@ func BuildReport(opt Options) (model.Report, error) {
 		HeadModel:        headModel,
 		Proposals:        proposals,
 		ProposalsDeduped: deduped,
+		Objective:        obj.view,
 	}
 	// ADR-0026: an explicit flag weaker than the config-declared policy is
 	// honored (visibility, not coercion) but must be visible in every render.
@@ -194,6 +199,44 @@ func BuildReport(opt Options) (model.Report, error) {
 	// architectural + ANTHROPIC_API_KEY set. Never alters the deterministic facts.
 	rep.Narrative = narrative.Generate(rep, opt.RepoDir, cfg.Narrative.Enabled, cfg.Narrative.Model)
 	return rep, nil
+}
+
+type objectiveResult struct {
+	view     *model.ObjectiveView
+	hasStore bool
+}
+
+// objectiveView resolves what the range says it is for (ADR-0048). The plan
+// store is read only when a commit names an objective, so a range that names
+// none costs nothing and renders as before.
+func objectiveView(repo gitutil.Repo, base, head, prefix string, commits []model.Commit,
+	code model.CodeDelta, know model.KnowledgeDelta, objs []model.KnowledgeObject) objectiveResult {
+	named := false
+	for _, c := range commits {
+		if c.Trailer.Objective != "" {
+			named = true
+			break
+		}
+	}
+	if !named {
+		return objectiveResult{}
+	}
+	hs, ok := beads.Read(repo, head, prefix)
+	bs, _ := beads.Read(repo, base, prefix)
+	view := objective.View(objective.Input{
+		Commits: commits,
+		Files: func(sha string) []string {
+			fs, _ := repo.CommitFiles(sha)
+			return fs
+		},
+		Code:       code,
+		Knowledge:  know,
+		AllObjects: objs,
+		Head:       hs,
+		Base:       bs,
+		HasStore:   ok,
+	})
+	return objectiveResult{view: view, hasStore: ok}
 }
 
 // contractOpts assembles the cross-repo obligation check's input (ADR-0033).

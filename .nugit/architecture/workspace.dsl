@@ -164,6 +164,11 @@ workspace "nugit" "Git-native typed knowledge & unified PR view — self-model (
                     "paths" "internal/evidence/**"
                 }
             }
+            objective = component "Objective" "Attributes a PR's changes to the objectives its commits name; the Objective section and objective-focus check (ADR-0048)" "Go" {
+                properties {
+                    "paths" "internal/objective/**"
+                }
+            }
             eval = component "Eval" "Labeled corpus measuring heuristic accuracy" "Go" {
                 properties {
                     "paths" "internal/eval/**"
@@ -420,6 +425,12 @@ workspace "nugit" "Git-native typed knowledge & unified PR view — self-model (
             consistency -> wiring "PR-time wiring drift"
             consistency -> config "fail-on rank for the wiring detail"
             engine -> wiring "takes the wiring scan at the reviewed ref"
+            engine -> objective "builds the Objective section (ADR-0048)"
+            engine -> beads "reads the plan store an objective names"
+            objective -> model_ "uses types"
+            objective -> beads "resolves the objective's bead and plan progress"
+            objective -> evidence "governed-components resolver"
+            objective -> knowledge "applies_to_paths matching"
             cli -> adopt "adopt command"
             cli -> beads "plan check / plan normalize commands"
             cli -> gitutil "resolves the repo + prefix for plan check"

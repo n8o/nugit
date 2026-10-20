@@ -125,3 +125,18 @@ ticket: A-2`)
 		t.Errorf("extra = %q", tr.Extra)
 	}
 }
+
+// ADR-0048: objective: is typed, first wins, and does not by itself make a
+// capture block — a commit that only names its objective needs no learned:.
+func TestParseObjective(t *testing.T) {
+	tr := Parse("Adds x.\n\nobjective: acme-142\nobjective: acme-9")
+	if tr.Objective != "acme-142" {
+		t.Errorf("Objective = %q, want acme-142", tr.Objective)
+	}
+	if tr.Has() || len(tr.Extra) != 0 {
+		t.Errorf("objective alone made a capture block: %+v", tr)
+	}
+	if w := Validate(tr); len(w) != 0 {
+		t.Errorf("objective alone warned: %v", w)
+	}
+}

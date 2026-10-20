@@ -761,6 +761,18 @@ func (r Repo) Log(base, head string) ([]model.Commit, error) {
 	return parseCommits(out), nil
 }
 
+// CommitFiles returns the git-root-relative paths one commit changed against
+// its first parent (all of them for a root commit). A merge commit lists
+// nothing, which is what attribution wants: its changes belong to the commits
+// it brought in.
+func (r Repo) CommitFiles(sha string) ([]string, error) {
+	out, err := r.git("diff-tree", "--no-commit-id", "--name-only", "-r", "-z", "--root", sha)
+	if err != nil {
+		return nil, err
+	}
+	return splitNUL(out), nil
+}
+
 // LogPath returns up to n commits touching path (newest first), restricted to
 // the since window when non-empty (git approxidate, e.g. "90 days"). Bodies
 // are full, so callers can read trailer lines. Bounded by construction (-n

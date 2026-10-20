@@ -250,6 +250,10 @@ type Trailer struct {
 	Affects  []string // C4 component ids
 	Spec     string
 	Keywords []string
+	// Objective is the bead this commit works toward (ADR-0048). It names
+	// the task, not a lesson, so it is left out of Has: a commit that only
+	// names its objective is not a capture block.
+	Objective string `json:",omitempty"`
 	// Extra captures any other key: value trailer lines verbatim.
 	Extra map[string]string
 }
@@ -749,7 +753,52 @@ type Report struct {
 	// ProposalsDeduped counts candidates suppressed because the store already
 	// carries an equivalent object (exact text or keyword overlap).
 	ProposalsDeduped int `json:",omitempty"`
+	// Objective is what the range says it is for (ADR-0048); nil when no
+	// commit names an objective, which keeps such a report's JSON unchanged.
+	Objective *ObjectiveView `json:",omitempty"`
 	// HeadModel feeds the in-comment C4 diagram only; kept out of the structured
 	// JSON contract (it would leak every component's path globs to reviewer agents).
 	HeadModel Model `json:"-"`
+}
+
+// ObjectiveView is the PR's declared purpose (ADR-0048): the objectives its
+// commits name, each with the scope those commits touched.
+type ObjectiveView struct {
+	Objectives []Objective
+	// Outside lists the files changed only by commits that name no objective.
+	Outside []string `json:",omitempty"`
+}
+
+// Objective is one bead a range works toward, as the store has it at head.
+type Objective struct {
+	ID string
+	// Known is false when the store at head has no bead with this id (or the
+	// repo has no store); every field below is then empty.
+	Known      bool
+	Title      string `json:",omitempty"`
+	Status     string `json:",omitempty"`
+	BaseStatus string `json:",omitempty"`
+	Acceptance string `json:",omitempty"`
+	Plan       string `json:",omitempty"`
+	PlanDone   int    `json:",omitempty"`
+	PlanTotal  int    `json:",omitempty"`
+	// Commits counts the commits in the range that name this objective.
+	Commits int
+	// Components are the C4 components those commits touched, sorted; "" is
+	// never listed (unmapped files count toward Files only).
+	Components []string `json:",omitempty"`
+	Files      int
+	// Knowledge is the live, non-global knowledge governing Components or
+	// applying to the files, capped; KnowledgeMore counts the rest.
+	Knowledge     []ObjectiveRef `json:",omitempty"`
+	KnowledgeMore int            `json:",omitempty"`
+}
+
+// ObjectiveRef is one knowledge object in an objective's scope.
+type ObjectiveRef struct {
+	ID    string
+	Type  Kind
+	Title string `json:",omitempty"`
+	// New is true when this PR adds or changes the object.
+	New bool `json:",omitempty"`
 }

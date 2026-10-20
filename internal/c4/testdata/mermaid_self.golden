@@ -28,6 +28,7 @@ graph LR
   narrative["LLM narrative"]
   notion["Notion projection"]
   nudge["Capture nudge"]
+  objective["Objective"]
   obsidian["Obsidian vault"]
   promote["Promoter"]
   pyimports["Python analyzer"]
@@ -129,6 +130,7 @@ graph LR
   editgate --> gitutil
   editgate --> retrieval
   editgate --> usage
+  engine --> beads
   engine --> config
   engine --> consistency
   engine --> delta
@@ -140,6 +142,7 @@ graph LR
   engine --> mapping
   engine --> model_
   engine --> narrative
+  engine --> objective
   engine --> significance
   engine --> trailers
   engine --> wiring
@@ -171,6 +174,10 @@ graph LR
   nudge --> model_
   nudge --> significance
   nudge --> trailers
+  objective --> beads
+  objective --> evidence
+  objective --> knowledge
+  objective --> model_
   obsidian --> knowledge
   obsidian --> model_
   promote --> config

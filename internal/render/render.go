@@ -40,6 +40,13 @@ func Markdown(rep model.Report) string {
 		b.WriteString("\n")
 	}
 
+	// The objective frames everything below it (ADR-0048); absent when no
+	// commit names one, which keeps such a view byte-identical.
+	if rep.Objective != nil {
+		b.WriteString(objectiveSection(*rep.Objective))
+		b.WriteString("\n")
+	}
+
 	// Consistency first — it is the trust core and always shown.
 	b.WriteString(consistencySection(rep.Findings))
 	b.WriteString("\n")
@@ -241,6 +248,71 @@ func proposalSection(rep model.Report) string {
 	fmt.Fprintf(&b, "\nApply: `nugit distill -base %s -head %s` writes these as `status: proposed` (candidate lane, ADR-0016); promote with `nugit ratify <id>`.\n",
 		rep.BaseRef, rep.HeadRef)
 	return b.String()
+}
+
+// objectiveSection renders what the PR is for: each objective it names, where
+// it sits in its plan, and the knowledge governing what its commits touched.
+func objectiveSection(v model.ObjectiveView) string {
+	var b strings.Builder
+	b.WriteString("### 🎯 Objective\n\n")
+	for i, o := range v.Objectives {
+		if i > 0 {
+			b.WriteString("\n")
+		}
+		if o.Known {
+			fmt.Fprintf(&b, "**%s** — %s · %s\n", esc(oneLine(o.ID)), esc(oneLine(o.Title)), objectiveStatus(o))
+		} else {
+			fmt.Fprintf(&b, "**%s** · _not in the plan store_\n", esc(oneLine(o.ID)))
+		}
+		if o.Acceptance != "" {
+			fmt.Fprintf(&b, "- ✔️ done when: %s\n", esc(oneLine(o.Acceptance)))
+		}
+		if o.PlanTotal > 0 {
+			fmt.Fprintf(&b, "- 🧭 plan **%s**: %d/%d steps done\n", esc(oneLine(o.Plan)), o.PlanDone, o.PlanTotal)
+		}
+		scope := plural(o.Files, "file")
+		if len(o.Components) > 0 {
+			scope += " in " + strings.Join(o.Components, ", ")
+		}
+		fmt.Fprintf(&b, "- 📦 this PR: %s, %s\n", plural(o.Commits, "commit"), scope)
+		if len(o.Knowledge) > 0 {
+			b.WriteString("- 📚 knowledge in scope:\n")
+			for _, k := range o.Knowledge {
+				mark := ""
+				if k.New {
+					mark = " 🆕"
+				}
+				if k.Title != "" {
+					fmt.Fprintf(&b, "  - %s `%s` — %s%s\n", k.Type, k.ID, esc(oneLine(k.Title)), mark)
+				} else {
+					fmt.Fprintf(&b, "  - %s `%s`%s\n", k.Type, k.ID, mark)
+				}
+			}
+			if o.KnowledgeMore > 0 {
+				fmt.Fprintf(&b, "  - _+%d more_\n", o.KnowledgeMore)
+			}
+		}
+	}
+	if len(v.Outside) > 0 {
+		fmt.Fprintf(&b, "\n_Outside the objective: %s (see `objective-focus`)._\n", plural(len(v.Outside), "file"))
+	}
+	return b.String()
+}
+
+// objectiveStatus is the bead's status at head, with where it started when
+// this PR moved it.
+func objectiveStatus(o model.Objective) string {
+	st := o.Status
+	if st == "" {
+		st = "unknown"
+	}
+	if o.BaseStatus != "" && o.BaseStatus != o.Status {
+		return fmt.Sprintf("%s → **%s**", o.BaseStatus, st)
+	}
+	if o.BaseStatus == "" {
+		return fmt.Sprintf("**%s** (new in this PR)", st)
+	}
+	return "**" + st + "**"
 }
 
 func planSection(p model.PlanPosition) string {
