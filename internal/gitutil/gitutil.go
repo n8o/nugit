@@ -801,3 +801,108 @@ func (r Repo) LogPath(path string, n int, since string) ([]model.Commit, error) 
 	}
 	return parseCommits(out), nil
 }
+
+// Branch is a local branch as the orphan report sees it (ADR-0048).
+type Branch struct {
+	Name string
+	Tip  string
+	// Time is the tip commit's committer time.
+	Time time.Time
+	// Worktree is the checkout the branch is checked out in, or "".
+	Worktree string
+}
+
+// Branches lists the local branches with their tips, and the worktree each is
+// checked out in.
+func (r Repo) Branches() ([]Branch, error) {
+	out, err := r.git("for-each-ref", "--format=%(refname:short)%09%(objectname)%09%(committerdate:unix)", "refs/heads")
+	if err != nil {
+		return nil, err
+	}
+	wts := r.worktreeBranches()
+	var bs []Branch
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		f := strings.Split(line, "\t")
+		if len(f) != 3 {
+			continue
+		}
+		sec, _ := strconv.ParseInt(f[2], 10, 64)
+		bs = append(bs, Branch{Name: f[0], Tip: f[1], Time: time.Unix(sec, 0).UTC(), Worktree: wts[f[0]]})
+	}
+	return bs, nil
+}
+
+// worktreeBranches maps a checked-out branch to its worktree path.
+func (r Repo) worktreeBranches() map[string]string {
+	out, err := r.git("worktree", "list", "--porcelain")
+	if err != nil {
+		return nil
+	}
+	m := map[string]string{}
+	path := ""
+	for _, line := range strings.Split(out, "\n") {
+		switch {
+		case strings.HasPrefix(line, "worktree "):
+			path = strings.TrimPrefix(line, "worktree ")
+		case strings.HasPrefix(line, "branch refs/heads/"):
+			m[strings.TrimPrefix(line, "branch refs/heads/")] = path
+		}
+	}
+	return m
+}
+
+// Ahead counts the commits on branch that base does not have.
+func (r Repo) Ahead(base, branch string) int {
+	out, err := r.git("rev-list", "--count", base+".."+branch)
+	if err != nil {
+		return 0
+	}
+	n, _ := strconv.Atoi(strings.TrimSpace(out))
+	return n
+}
+
+// ContentMerged reports whether merging branch into base would change
+// nothing: base already holds the branch's content. That is how a
+// squash-merged branch looks, whose commits are never ancestors of base.
+// Needs git 2.38+ (`merge-tree --write-tree`); false on any error, so an old
+// git reports branches as unmerged rather than hiding them.
+func (r Repo) ContentMerged(base, branch string) bool {
+	out, err := r.git("merge-tree", "--write-tree", base, branch)
+	if err != nil {
+		return false
+	}
+	tree := strings.SplitN(strings.TrimSpace(out), "\n", 2)[0]
+	baseTree, err := r.git("rev-parse", base+"^{tree}")
+	return err == nil && tree == strings.TrimSpace(baseTree)
+}
+
+// TimedCommit is a commit with its committer time.
+type TimedCommit struct {
+	model.Commit
+	Time time.Time
+}
+
+// LogTimed returns up to max commits of revRange (newest first), with bodies
+// and committer times.
+func (r Repo) LogTimed(revRange string, max int) ([]TimedCommit, error) {
+	out, err := r.git("log", fmt.Sprintf("-n%d", max), "--pretty=format:%ct"+fieldSep+logFormat, revRange)
+	if err != nil {
+		return nil, err
+	}
+	var cs []TimedCommit
+	for _, rec := range strings.Split(out, commitSep) {
+		rec = strings.Trim(rec, "\n")
+		if rec == "" {
+			continue
+		}
+		ts, rest, ok := strings.Cut(rec, fieldSep)
+		if !ok {
+			continue
+		}
+		sec, _ := strconv.ParseInt(ts, 10, 64)
+		for _, c := range parseCommits(rest + commitSep) {
+			cs = append(cs, TimedCommit{Commit: c, Time: time.Unix(sec, 0).UTC()})
+		}
+	}
+	return cs, nil
+}

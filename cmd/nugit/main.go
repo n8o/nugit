@@ -40,6 +40,7 @@ import (
 	"github.com/n8o/nugit/internal/notion"
 	"github.com/n8o/nugit/internal/nudge"
 	"github.com/n8o/nugit/internal/obsidian"
+	"github.com/n8o/nugit/internal/orphans"
 	"github.com/n8o/nugit/internal/promote"
 	"github.com/n8o/nugit/internal/ratify"
 	"github.com/n8o/nugit/internal/reinforce"
@@ -65,6 +66,7 @@ usage:
   nugit stats [flags]         aggregate the local context() usage log (+ edit coverage, per session)
   nugit remember [flags]      jot ephemeral working memory (.nugit-local/, gitignored)
   nugit objective [claim <id>] show, or claim, the objective this branch's session works toward (ADR-0048)
+  nugit orphans [flags]       report work started toward an objective and then left (ADR-0048, read-only)
   nugit distill [flags]       promote commit-trailer decisions/lessons to durable knowledge (as proposed)
   nugit ratify [flags] <id>…  promote proposed knowledge objects to the ratified corpus (ADR-0016)
   nugit reinforce [flags] <id> append-only reinforcement of a recurring lesson/decision (ADR-0019)
@@ -197,6 +199,8 @@ func main() {
 		os.Exit(cmdRemember(os.Args[2:]))
 	case "objective":
 		os.Exit(cmdObjective(os.Args[2:]))
+	case "orphans":
+		os.Exit(cmdOrphans(os.Args[2:]))
 	case "hook":
 		os.Exit(cmdHook(os.Args[2:]))
 	case "distill":
@@ -1356,6 +1360,42 @@ func cmdObjective(args []string) int {
 		fmt.Fprintf(os.Stderr, "nugit objective: unknown subcommand %q (want: claim)\n", sub)
 		return 2
 	}
+}
+
+// cmdOrphans reports stalled objectives, stopped sessions, stray branches
+// and unrecorded notes (ADR-0048 phase 3). Read-only; always exits 0 once the
+// report is built, because it informs a decision rather than gating one.
+func cmdOrphans(args []string) int {
+	fs := flag.NewFlagSet("orphans", flag.ExitOnError)
+	dir := fs.String("C", ".", "repo directory")
+	base := fs.String("base", "", "default branch ref (default: origin's HEAD, e.g. origin/main)")
+	days := fs.Int("days", 7, "quiet for this many days or more counts as orphaned")
+	format := fs.String("format", "markdown", "markdown | json")
+	noSessions := fs.Bool("no-sessions", false, "do not ask agent-deck for session state")
+	_ = fs.Parse(args)
+	in, err := orphans.Gather(*dir, orphans.Options{
+		Base: *base, Stale: time.Duration(*days) * 24 * time.Hour, NoSessions: *noSessions,
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "nugit orphans: %v\n", err)
+		return 1
+	}
+	rep := orphans.Compute(in)
+	switch *format {
+	case "json":
+		b, err := json.MarshalIndent(rep, "", "  ")
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "nugit orphans: %v\n", err)
+			return 1
+		}
+		fmt.Println(string(b))
+	case "markdown":
+		fmt.Print(orphans.Markdown(rep))
+	default:
+		fmt.Fprintf(os.Stderr, "nugit orphans: unknown -format %q (want markdown or json)\n", *format)
+		return 2
+	}
+	return 0
 }
 
 // cmdNotion publishes the knowledge corpus OUTBOUND to a Notion database (ADR-0011).
