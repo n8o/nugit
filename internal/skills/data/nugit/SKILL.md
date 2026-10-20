@@ -9,6 +9,24 @@ This repo carries its architecture, decisions, lessons, references (distilled
 external sources), and glossary as typed files under `.nugit/`, validated on
 every PR. Use them as memory instead of re-deriving context each session.
 
+## Start of a session — claim one objective
+
+A session works toward **one objective**: one bead in the plan store (ADR-0048).
+The PR view opens with it, so the reviewer sees what the change is for. The
+SessionStart hook tells you whether this branch already has one.
+
+- **No objective yet:** find the bead for the task, or create one with
+  acceptance criteria. Then run `nugit objective claim <bead-id>` on the task's
+  branch. The commit-msg hook then adds `objective: <bead-id>` to every commit,
+  so you don't have to write it.
+- **Stay on it.** If the user asks for unrelated work, say so and suggest a
+  separate session on its own branch (with agent-deck:
+  `agent-deck launch -t "<title>" -c claude -worktree <branch> -b <repo>`)
+  instead of adding it to this PR. `objective-focus` warns on a PR that mixes
+  objectives or changes files no objective commit touched.
+- **Finish it in the PR.** Close the bead in the PR that completes it.
+- `nugit objective` shows what this branch works toward.
+
 ## Before editing a file — load context
 
 Call the **`context` MCP tool** (server: `nugit`) with the file path, or run:
@@ -122,6 +140,7 @@ the issue in the bead's id or body.
 | Load memory for a file | `nugit context -path <file> -task "..."` |
 | Architecture as a diagram | `nugit c4 render` |
 | Why did a check fire? | `nugit explain <check>` |
+| Claim / show this session's objective | `nugit objective claim <bead-id>` · `nugit objective` |
 | Save a working note | `nugit remember -text "..."` |
 | Promote trailers → ADRs | `nugit distill -base <base> -head HEAD` |
 | The unified PR view | `nugit pr-render -base <base> -head HEAD` |

@@ -4,6 +4,7 @@ graph LR
   beads["Beads adapter"]
   bootstrap["Bootstrap"]
   c4["C4 parser + diff"]
+  claim["Objective claims"]
   cli["CLI"]
   cmake["CMake analyzer"]
   config["Config"]
@@ -60,10 +61,14 @@ graph LR
   bootstrap --> pyimports
   bootstrap --> tsdeps
   c4 --> model_
+  claim --> beads
+  claim --> gitutil
+  claim --> trailers
   cli --> adopt
   cli --> agentcfg
   cli --> beads
   cli --> c4
+  cli --> claim
   cli --> config
   cli --> consistency
   cli --> deploy

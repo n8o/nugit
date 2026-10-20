@@ -169,6 +169,11 @@ workspace "nugit" "Git-native typed knowledge & unified PR view — self-model (
                     "paths" "internal/objective/**"
                 }
             }
+            claim = component "Objective claims" "Records which objective a branch's session works toward (.nugit-local/claims.ndjson) and builds the SessionStart digest (ADR-0048)" "Go" {
+                properties {
+                    "paths" "internal/claim/**"
+                }
+            }
             eval = component "Eval" "Labeled corpus measuring heuristic accuracy" "Go" {
                 properties {
                     "paths" "internal/eval/**"
@@ -412,7 +417,7 @@ workspace "nugit" "Git-native typed knowledge & unified PR view — self-model (
             editgate -> gitutil "resolves the edited file's worktree + branch"
             editgate -> retrieval "resolves the component exactly as context() does"
             editgate -> usage "reads prior context() calls; records the edit"
-            doctor -> agentcfg "detects the installed pre-edit hook"
+            doctor -> agentcfg "detects the installed pre-edit and session-start hooks"
 
             // --- brownfield adoption: prose vs code, before any store exists (ADR-0036) ---
             adopt -> modelfacts "reuses the detected-unit inventory (ADR-0021); never a second detector"
@@ -434,6 +439,10 @@ workspace "nugit" "Git-native typed knowledge & unified PR view — self-model (
             cli -> adopt "adopt command"
             cli -> beads "plan check / plan normalize commands"
             cli -> gitutil "resolves the repo + prefix for plan check"
+            cli -> claim "objective command; session-start hook; commit-msg objective stamp"
+            claim -> beads "looks up the claimed bead"
+            claim -> gitutil "current branch, common root, default branch"
+            claim -> trailers "reads objective: from the branch's commits"
 
             modelfacts -> deploy "reads the container inventory"
             modelfacts -> cmake "reads the dependency edges"
