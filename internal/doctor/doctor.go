@@ -135,6 +135,11 @@ func Run(repoDir string) Report {
 	hooked, hdetail := preEditHook(repoDir, cfg)
 	r.Checks = append(r.Checks, Check{Name: "pre-edit hook installed", OK: hooked, Advisory: true, Detail: hdetail})
 
+	// SessionStart objective digest (ADR-0048). Advisory, like pre-edit: it
+	// is what tells each session to claim one objective.
+	sok, sdetail := sessionStartHook(repoDir)
+	r.Checks = append(r.Checks, Check{Name: "session-start hook installed", OK: sok, Advisory: true, Detail: sdetail})
+
 	// Peer stores (ADR-0032). Always advisory: an unreachable peer is the normal
 	// CI state (only the repo under review is checked out) and must never gate.
 	pok, pdetail := peerStores(repoDir, cfg)
@@ -486,6 +491,31 @@ func preEditHook(repoDir string, cfg config.Config) (bool, string) {
 	}
 	return false, fmt.Sprintf("not installed — edit-time context() coverage is unmeasured; "+
 		"run `nugit agent -client claude-code -install -hook` (context_gate: %s)", cfg.ContextGate)
+}
+
+// sessionStartHook reports whether the project's Claude Code settings register
+// `nugit hook session-start` as a SessionStart hook (ADR-0048).
+func sessionStartHook(repoDir string) (bool, string) {
+	for _, name := range []string{"settings.json", "settings.local.json"} {
+		rel := filepath.Join(".claude", name)
+		b, err := os.ReadFile(filepath.Join(repoDir, rel))
+		if err != nil {
+			continue
+		}
+		var s struct {
+			Hooks struct {
+				SessionStart []json.RawMessage `json:"SessionStart"`
+			} `json:"hooks"`
+		}
+		if json.Unmarshal(b, &s) != nil {
+			continue
+		}
+		if agentcfg.SessionStartInstalled(s.Hooks.SessionStart) {
+			return true, fmt.Sprintf("%s runs `nugit hook session-start`", rel) + lookPathHint()
+		}
+	}
+	return false, "not installed — sessions are not told to claim an objective; " +
+		"run `nugit agent -client claude-code -install -hook`"
 }
 
 func lookPathHint() string {

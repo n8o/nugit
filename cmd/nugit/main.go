@@ -22,6 +22,7 @@ import (
 	"github.com/n8o/nugit/internal/agentcfg"
 	"github.com/n8o/nugit/internal/beads"
 	"github.com/n8o/nugit/internal/c4"
+	"github.com/n8o/nugit/internal/claim"
 	"github.com/n8o/nugit/internal/config"
 	"github.com/n8o/nugit/internal/consistency"
 	"github.com/n8o/nugit/internal/deploy"
@@ -63,6 +64,7 @@ usage:
   nugit mcp [flags]           run the MCP stdio server (exposes context() to agents)
   nugit stats [flags]         aggregate the local context() usage log (+ edit coverage, per session)
   nugit remember [flags]      jot ephemeral working memory (.nugit-local/, gitignored)
+  nugit objective [claim <id>] show, or claim, the objective this branch's session works toward (ADR-0048)
   nugit distill [flags]       promote commit-trailer decisions/lessons to durable knowledge (as proposed)
   nugit ratify [flags] <id>…  promote proposed knowledge objects to the ratified corpus (ADR-0016)
   nugit reinforce [flags] <id> append-only reinforcement of a recurring lesson/decision (ADR-0019)
@@ -71,6 +73,8 @@ usage:
                               (capture.commit_msg: nudge also prompts on significant commits)
   nugit hook pre-edit         Claude Code PreToolUse entrypoint (hook JSON on stdin): record
                               whether context() preceded the edit; context_gate: warn|block|off
+  nugit hook session-start    Claude Code SessionStart entrypoint: tell the session its objective,
+                              or how to claim one (ADR-0048)
   nugit c4 render [flags]      render the C4 model as Mermaid
   nugit c4 gen-rules [flags]   generate go-arch-lint YAML from the C4 model
   nugit c4 export [flags]      export the C4 model (-format icepanel) as an import payload
@@ -93,8 +97,9 @@ agent flags:
   -client c      claude-code (default) | cursor | codex | opencode | generic
   -install       write the config file (claude-code only; others print the snippet)
   -force         with -install: overwrite an existing .mcp.json
-  -hook          with -install: also merge the pre-edit PreToolUse hook into
-                 .claude/settings.json (ADR-0042; existing settings are kept)
+  -hook          with -install: also merge the pre-edit PreToolUse hook (ADR-0042)
+                 and the SessionStart objective digest (ADR-0048) into
+                 .claude/settings.json (existing settings are kept)
   -bin path      nugit binary to embed (default "nugit", resolved from PATH)
 
 skill flags:
@@ -190,6 +195,8 @@ func main() {
 		os.Exit(cmdNotion(os.Args[2:]))
 	case "remember":
 		os.Exit(cmdRemember(os.Args[2:]))
+	case "objective":
+		os.Exit(cmdObjective(os.Args[2:]))
 	case "hook":
 		os.Exit(cmdHook(os.Args[2:]))
 	case "distill":
@@ -461,15 +468,21 @@ func cmdAgent(args []string) int {
 		fmt.Printf("  created  %s\n", path)
 	}
 	if *hook {
-		changed, hpath, err := agentcfg.InstallClaudeCodeHook(*dir, *bin)
+		added, hpath, err := agentcfg.InstallClaudeCodeHooks(*dir, *bin)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "nugit agent: %v\n", err)
 			return 1
 		}
-		if changed {
-			fmt.Printf("  merged   %s (PreToolUse %s → nugit hook pre-edit)\n", hpath, agentcfg.PreEditMatcher)
-		} else {
-			fmt.Printf("  ok       %s (pre-edit hook already installed)\n", hpath)
+		for _, ev := range added {
+			switch ev {
+			case "PreToolUse":
+				fmt.Printf("  merged   %s (PreToolUse %s → nugit hook pre-edit)\n", hpath, agentcfg.PreEditMatcher)
+			case "SessionStart":
+				fmt.Printf("  merged   %s (SessionStart %s → nugit hook session-start)\n", hpath, agentcfg.SessionStartMatcher)
+			}
+		}
+		if len(added) == 0 {
+			fmt.Printf("  ok       %s (nugit hooks already installed)\n", hpath)
 		}
 	}
 	if created || *hook {
@@ -1161,7 +1174,7 @@ func cmdRemember(args []string) int {
 
 func cmdHook(args []string) int {
 	if len(args) < 1 {
-		fmt.Fprintln(os.Stderr, "nugit hook: usage: nugit hook commit-msg <file> | nugit hook pre-edit")
+		fmt.Fprintln(os.Stderr, "nugit hook: usage: nugit hook commit-msg <file> | nugit hook pre-edit | nugit hook session-start")
 		return 2
 	}
 	switch args[0] {
@@ -1176,6 +1189,10 @@ func cmdHook(args []string) int {
 			fmt.Fprintln(os.Stderr, "nugit hook commit-msg: missing message file")
 			return 2
 		}
+		// ADR-0048: name the branch's claimed objective on the commit. Runs
+		// whatever the capture mode, because it is not capture: it is what
+		// the PR view frames the change with. Any failure leaves the message.
+		stampObjective(*dir, rest[0])
 		cfg, _ := config.Load(*dir)
 		if cfg.Capture.CommitMsg == "off" {
 			return 0
@@ -1220,8 +1237,123 @@ func cmdHook(args []string) int {
 			fmt.Println(string(out))
 		}
 		return 0
+	case "session-start":
+		// ADR-0048: a Claude Code SessionStart hook. Like pre-edit it can never
+		// break a session: any failure prints nothing and exits 0.
+		fs := flag.NewFlagSet("hook session-start", flag.ContinueOnError)
+		fs.SetOutput(io.Discard)
+		dir := fs.String("C", ".", "nugit root")
+		if fs.Parse(args[1:]) != nil {
+			return 0
+		}
+		_, _ = io.Copy(io.Discard, os.Stdin) // the hook JSON; the digest needs only the repo
+		if out := sessionStartOutput(*dir); out != nil {
+			fmt.Println(string(out))
+		}
+		return 0
 	default:
 		fmt.Fprintf(os.Stderr, "nugit hook: unknown hook %q\n", args[0])
+		return 2
+	}
+}
+
+// stampObjective appends `objective: <id>` to the message file when the
+// current branch claims an objective and the message names none (ADR-0048),
+// and warns when the message names a different one.
+func stampObjective(dir, msgFile string) {
+	defer func() { _ = recover() }() // never block a commit
+	cur := claim.Resolve(dir)
+	if cur.Source != claim.FromClaim {
+		return
+	}
+	b, err := os.ReadFile(msgFile)
+	if err != nil {
+		return
+	}
+	out, added, other := claim.Stamp(string(b), cur.Objective)
+	switch {
+	case other != "":
+		fmt.Fprintf(os.Stderr, "nugit: this commit names objective %s, but %s claims %s; one session, one objective (ADR-0048)\n",
+			other, cur.Branch, cur.Objective)
+	case added:
+		if os.WriteFile(msgFile, []byte(out), 0o644) == nil {
+			fmt.Fprintf(os.Stderr, "nugit: added `objective: %s` (claimed for %s)\n", cur.Objective, cur.Branch)
+		}
+	}
+}
+
+// sessionStartOutput is the SessionStart hook's JSON, or nil when there is
+// nothing to say (no .nugit/ store) or anything fails.
+func sessionStartOutput(dir string) (out []byte) {
+	defer func() {
+		if recover() != nil {
+			out = nil
+		}
+	}()
+	text := claim.Digest(dir)
+	if text == "" {
+		return nil
+	}
+	b, err := json.Marshal(map[string]any{"hookSpecificOutput": map[string]string{
+		"hookEventName":     "SessionStart",
+		"additionalContext": text,
+	}})
+	if err != nil {
+		return nil
+	}
+	return b
+}
+
+// cmdObjective shows or claims the objective this branch's session works
+// toward (ADR-0048).
+func cmdObjective(args []string) int {
+	sub := ""
+	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
+		sub, args = args[0], args[1:]
+	}
+	fs := flag.NewFlagSet("objective", flag.ExitOnError)
+	dir := fs.String("C", ".", "repo directory")
+	force := fs.Bool("force", false, "with claim: replace the branch's existing objective")
+	_ = fs.Parse(args)
+	switch sub {
+	case "":
+		cur := claim.Resolve(*dir)
+		if cur.Branch == "" {
+			fmt.Println("HEAD is detached: no objective.")
+			return 0
+		}
+		if cur.Objective == "" {
+			fmt.Printf("%s: no objective. Claim one with `nugit objective claim <bead-id>`.\n", cur.Branch)
+			return 0
+		}
+		st, _ := beads.ReadDir(*dir)
+		bead := claim.Lookup(st, cur.Objective)
+		desc := "not in the plan store"
+		if bead.Found {
+			desc = bead.Title + " (" + bead.Status + ")"
+		}
+		fmt.Printf("%s: %s — %s [from %s]\n", cur.Branch, cur.Objective, desc, cur.Source)
+		return 0
+	case "claim":
+		if fs.NArg() != 1 {
+			fmt.Fprintln(os.Stderr, "nugit objective claim: usage: nugit objective claim [-force] <bead-id>")
+			return 2
+		}
+		c, err := claim.Add(*dir, fs.Arg(0), *force)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "nugit objective claim: %v\n", err)
+			return 1
+		}
+		st, _ := beads.ReadDir(*dir)
+		if bead := claim.Lookup(st, c.Objective); bead.Found {
+			fmt.Printf("%s works toward %s — %s (%s).\n", c.Branch, c.Objective, bead.Title, bead.Status)
+		} else {
+			fmt.Printf("%s works toward %s. It is not in .beads/ yet: create or export it in this PR so the PR view can show it.\n", c.Branch, c.Objective)
+		}
+		fmt.Println("The commit-msg hook now adds `objective: " + c.Objective + "` to each commit on this branch.")
+		return 0
+	default:
+		fmt.Fprintf(os.Stderr, "nugit objective: unknown subcommand %q (want: claim)\n", sub)
 		return 2
 	}
 }

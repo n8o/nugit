@@ -31,78 +31,138 @@ func IsPreEditCommand(cmd string) bool {
 	return strings.Contains(cmd, "nugit") && strings.Contains(cmd, "hook pre-edit")
 }
 
-// InstallClaudeCodeHook merges the pre-edit PreToolUse hook (ADR-0042) into
-// repoDir/.claude/settings.json. Unlike .mcp.json, settings.json is a file a
-// project already owns for permissions, env and other hooks, so this MERGES:
-// every existing key, every other hook entry, and the file's key order are
-// kept; only hooks.PreToolUse gains one entry. Already installed → changed is
-// false and nothing is written. A file that is not a JSON object (or whose
-// `hooks` is not one) is an error and is never rewritten.
+// SessionStartMatcher is the SessionStart matcher of the installed digest:
+// every way a session begins or loses its context (ADR-0048).
+const SessionStartMatcher = "startup|resume|clear|compact"
+
+// sessionStartTimeout bounds the digest in seconds; it reads local files and
+// two git refs, and a timed-out SessionStart hook only drops the digest.
+const sessionStartTimeout = 10
+
+// SessionStartCommand is the digest hook command for bin ("" = "nugit").
+func SessionStartCommand(bin string) string {
+	if bin == "" {
+		bin = "nugit"
+	}
+	return bin + " hook session-start"
+}
+
+// IsSessionStartCommand reports whether a hook command runs nugit's digest.
+func IsSessionStartCommand(cmd string) bool {
+	return strings.Contains(cmd, "nugit") && strings.Contains(cmd, "hook session-start")
+}
+
+// hookSpec is one hook nugit installs.
+type hookSpec struct {
+	event, matcher, command string
+	timeout                 int
+	ours                    func(cmd string) bool
+}
+
+func specs(bin string) []hookSpec {
+	return []hookSpec{
+		{"PreToolUse", PreEditMatcher, PreEditCommand(bin), preEditTimeout, IsPreEditCommand},
+		{"SessionStart", SessionStartMatcher, SessionStartCommand(bin), sessionStartTimeout, IsSessionStartCommand},
+	}
+}
+
+// InstallClaudeCodeHook merges nugit's Claude Code hooks into
+// repoDir/.claude/settings.json: the pre-edit PreToolUse gate (ADR-0042) and
+// the SessionStart objective digest (ADR-0048). Unlike .mcp.json,
+// settings.json is a file a project already owns for permissions, env and
+// other hooks, so this MERGES: every existing key, every other hook entry, and
+// the file's key order are kept; each event gains nugit's entry only when it
+// has none. Nothing missing → changed is false and nothing is written; added
+// names the events that gained an entry. A file that is not a JSON object (or
+// whose `hooks`, or an event under it, has the wrong shape) is an error and is
+// never rewritten.
 func InstallClaudeCodeHook(repoDir, bin string) (changed bool, path string, err error) {
+	added, path, err := InstallClaudeCodeHooks(repoDir, bin)
+	return len(added) > 0, path, err
+}
+
+// InstallClaudeCodeHooks is InstallClaudeCodeHook, reporting which events
+// gained an entry.
+func InstallClaudeCodeHooks(repoDir, bin string) (added []string, path string, err error) {
 	path = filepath.Join(repoDir, ".claude", "settings.json")
 	raw, err := os.ReadFile(path)
 	if err != nil && !os.IsNotExist(err) {
-		return false, path, err
+		return nil, path, err
 	}
 	if len(bytes.TrimSpace(raw)) == 0 {
 		raw = []byte("{}")
 	}
 	top, err := decodeObject(raw)
 	if err != nil {
-		return false, path, fmt.Errorf("%s: %w (left untouched)", path, err)
+		return nil, path, fmt.Errorf("%s: %w (left untouched)", path, err)
 	}
 	hooks := &object{vals: map[string]json.RawMessage{}}
 	if h, ok := top.vals["hooks"]; ok {
 		if hooks, err = decodeObject(h); err != nil {
-			return false, path, fmt.Errorf("%s: hooks: %w (left untouched)", path, err)
+			return nil, path, fmt.Errorf("%s: hooks: %w (left untouched)", path, err)
 		}
-	}
-	var pre []json.RawMessage
-	if p, ok := hooks.vals["PreToolUse"]; ok {
-		if err := json.Unmarshal(p, &pre); err != nil {
-			return false, path, fmt.Errorf("%s: hooks.PreToolUse is not an array (left untouched)", path)
-		}
-	}
-	if HookInstalled(pre) {
-		return false, path, nil
 	}
 	type command struct {
 		Type    string `json:"type"`
 		Command string `json:"command"`
 		Timeout int    `json:"timeout"`
 	}
-	entry, err := json.Marshal(struct {
-		Matcher string    `json:"matcher"`
-		Hooks   []command `json:"hooks"`
-	}{PreEditMatcher, []command{{"command", PreEditCommand(bin), preEditTimeout}}})
-	if err != nil {
-		return false, path, err
+	for _, sp := range specs(bin) {
+		var entries []json.RawMessage
+		if p, ok := hooks.vals[sp.event]; ok {
+			if err := json.Unmarshal(p, &entries); err != nil {
+				return nil, path, fmt.Errorf("%s: hooks.%s is not an array (left untouched)", path, sp.event)
+			}
+		}
+		if installed(entries, sp.ours) {
+			continue
+		}
+		entry, err := json.Marshal(struct {
+			Matcher string    `json:"matcher"`
+			Hooks   []command `json:"hooks"`
+		}{sp.matcher, []command{{"command", sp.command, sp.timeout}}})
+		if err != nil {
+			return nil, path, err
+		}
+		b, err := json.Marshal(append(entries, entry))
+		if err != nil {
+			return nil, path, err
+		}
+		hooks.set(sp.event, b)
+		added = append(added, sp.event)
 	}
-	pre = append(pre, entry)
-	preRaw, err := json.Marshal(pre)
-	if err != nil {
-		return false, path, err
+	if len(added) == 0 {
+		return nil, path, nil
 	}
-	hooks.set("PreToolUse", preRaw)
 	top.set("hooks", hooks.encode())
 
 	var out bytes.Buffer
 	if err := json.Indent(&out, top.encode(), "", "  "); err != nil {
-		return false, path, err
+		return nil, path, err
 	}
 	out.WriteByte('\n')
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return false, path, err
+		return nil, path, err
 	}
 	if err := os.WriteFile(path, out.Bytes(), 0o644); err != nil {
-		return false, path, fmt.Errorf("writing %s: %w", path, err)
+		return nil, path, fmt.Errorf("writing %s: %w", path, err)
 	}
-	return true, path, nil
+	return added, path, nil
 }
 
 // HookInstalled reports whether any PreToolUse entry runs `nugit hook pre-edit`.
 func HookInstalled(preToolUse []json.RawMessage) bool {
-	for _, e := range preToolUse {
+	return installed(preToolUse, IsPreEditCommand)
+}
+
+// SessionStartInstalled reports whether any SessionStart entry runs
+// `nugit hook session-start`.
+func SessionStartInstalled(sessionStart []json.RawMessage) bool {
+	return installed(sessionStart, IsSessionStartCommand)
+}
+
+func installed(entries []json.RawMessage, ours func(string) bool) bool {
+	for _, e := range entries {
 		var entry struct {
 			Hooks []struct {
 				Command string `json:"command"`
@@ -112,7 +172,7 @@ func HookInstalled(preToolUse []json.RawMessage) bool {
 			continue
 		}
 		for _, h := range entry.Hooks {
-			if IsPreEditCommand(h.Command) {
+			if ours(h.Command) {
 				return true
 			}
 		}

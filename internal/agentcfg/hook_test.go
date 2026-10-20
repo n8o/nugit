@@ -139,3 +139,43 @@ func TestIsPreEditCommand(t *testing.T) {
 		}
 	}
 }
+
+// ADR-0048: the SessionStart digest installs alongside the pre-edit gate, and
+// a repo that already has the gate gains only the digest.
+func TestInstallHooksAddsSessionStart(t *testing.T) {
+	dir := t.TempDir()
+	write := func(s string) {
+		if err := os.MkdirAll(filepath.Join(dir, ".claude"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, ".claude", "settings.json"), []byte(s), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(`{"hooks": {
+  "PreToolUse": [{"matcher": "Edit", "hooks": [{"type": "command", "command": "nugit hook pre-edit"}]}],
+  "SessionStart": [{"matcher": "startup", "hooks": [{"type": "command", "command": "other.sh"}]}]
+}}`)
+	added, _, err := InstallClaudeCodeHooks(dir, "")
+	if err != nil || strings.Join(added, ",") != "SessionStart" {
+		t.Fatalf("added = %v, err = %v; want only SessionStart", added, err)
+	}
+	_, m := readSettings(t, dir)
+	hooks := m["hooks"].(map[string]any)
+	ss := hooks["SessionStart"].([]any)
+	if len(ss) != 2 || len(preToolUse(t, m)) != 1 {
+		t.Fatalf("hooks = %v", hooks)
+	}
+	e := ss[1].(map[string]any)
+	h := e["hooks"].([]any)[0].(map[string]any)
+	if e["matcher"] != SessionStartMatcher || h["command"] != "nugit hook session-start" {
+		t.Errorf("entry: %v", e)
+	}
+	if added, _, _ := InstallClaudeCodeHooks(dir, ""); len(added) != 0 {
+		t.Errorf("second install added %v", added)
+	}
+	write(`{"hooks": {"SessionStart": {}}}`)
+	if _, _, err := InstallClaudeCodeHooks(dir, ""); err == nil {
+		t.Error("a non-array SessionStart was rewritten")
+	}
+}

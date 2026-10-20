@@ -90,6 +90,18 @@ func (r Repo) CurrentBranch() string {
 	return strings.TrimSpace(out)
 }
 
+// DefaultRemoteBranch returns origin's default branch as a ref ("origin/main"),
+// read from refs/remotes/origin/HEAD, or "" when the clone does not record
+// one. It never guesses a name: a wrong guess silently compares against the
+// wrong history.
+func (r Repo) DefaultRemoteBranch() string {
+	out, err := r.git("symbolic-ref", "--short", "refs/remotes/origin/HEAD")
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(out)
+}
+
 // HooksDir returns the absolute path of the hooks directory git will actually
 // run for this repo (`rev-parse --git-path hooks`, which honours
 // core.hooksPath), or "" when Dir is not in a git repo.
