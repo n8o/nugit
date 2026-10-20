@@ -26,6 +26,9 @@ SessionStart hook tells you whether this branch already has one.
   objectives or changes files no objective commit touched.
 - **Finish it in the PR.** Close the bead in the PR that completes it.
 - `nugit objective` shows what this branch works toward.
+- **When the user asks what was left unfinished**, run `nugit orphans` and
+  present each item with its finish-or-drop choice. Carry out what they pick;
+  never delete a branch or close a bead on your own.
 
 ## Before editing a file — load context
 
@@ -141,6 +144,7 @@ the issue in the bead's id or body.
 | Architecture as a diagram | `nugit c4 render` |
 | Why did a check fire? | `nugit explain <check>` |
 | Claim / show this session's objective | `nugit objective claim <bead-id>` · `nugit objective` |
+| What was started and left? | `nugit orphans` |
 | Save a working note | `nugit remember -text "..."` |
 | Promote trailers → ADRs | `nugit distill -base <base> -head HEAD` |
 | The unified PR view | `nugit pr-render -base <base> -head HEAD` |

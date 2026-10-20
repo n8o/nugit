@@ -31,6 +31,7 @@ graph LR
   nudge["Capture nudge"]
   objective["Objective"]
   obsidian["Obsidian vault"]
+  orphans["Orphan report"]
   promote["Promoter"]
   pyimports["Python analyzer"]
   ratify["Ratifier"]
@@ -86,6 +87,7 @@ graph LR
   cli --> notion
   cli --> nudge
   cli --> obsidian
+  cli --> orphans
   cli --> promote
   cli --> ratify
   cli --> reinforce
@@ -185,6 +187,11 @@ graph LR
   objective --> model_
   obsidian --> knowledge
   obsidian --> model_
+  orphans --> beads
+  orphans --> claim
+  orphans --> gitutil
+  orphans --> localmem
+  orphans --> trailers
   promote --> config
   promote --> distill
   promote --> gitutil

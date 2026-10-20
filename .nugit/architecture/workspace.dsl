@@ -174,6 +174,11 @@ workspace "nugit" "Git-native typed knowledge & unified PR view — self-model (
                     "paths" "internal/claim/**"
                 }
             }
+            orphans = component "Orphan report" "Finds work started toward an objective and left: stalled objectives, stopped sessions, stray branches, unrecorded notes (ADR-0050)" "Go" {
+                properties {
+                    "paths" "internal/orphans/**"
+                }
+            }
             eval = component "Eval" "Labeled corpus measuring heuristic accuracy" "Go" {
                 properties {
                     "paths" "internal/eval/**"
@@ -440,6 +445,12 @@ workspace "nugit" "Git-native typed knowledge & unified PR view — self-model (
             cli -> beads "plan check / plan normalize commands"
             cli -> gitutil "resolves the repo + prefix for plan check"
             cli -> claim "objective command; session-start hook; commit-msg objective stamp"
+            cli -> orphans "orphans command"
+            orphans -> beads "reads the plan store at the default branch"
+            orphans -> claim "reads the claim log"
+            orphans -> gitutil "branches, worktrees, squash-merge detection"
+            orphans -> localmem "reads unrecorded working notes"
+            orphans -> trailers "reads objective: from commits"
             claim -> beads "looks up the claimed bead"
             claim -> gitutil "current branch, common root, default branch"
             claim -> trailers "reads objective: from the branch's commits"

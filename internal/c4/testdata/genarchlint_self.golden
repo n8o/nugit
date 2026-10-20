@@ -69,6 +69,8 @@ components:
     in: "internal/objective/**"
   "obsidian":
     in: "internal/obsidian/**"
+  "orphans":
+    in: "internal/orphans/**"
   "promote":
     in: "internal/promote/**"
   "pyimports":
@@ -155,6 +157,7 @@ deps:
       - "notion"
       - "nudge"
       - "obsidian"
+      - "orphans"
       - "promote"
       - "ratify"
       - "reinforce"
@@ -304,6 +307,13 @@ deps:
     mayDependOn:
       - "knowledge"
       - "model_"
+  "orphans":
+    mayDependOn:
+      - "beads"
+      - "claim"
+      - "gitutil"
+      - "localmem"
+      - "trailers"
   "promote":
     mayDependOn:
       - "config"
