@@ -11,10 +11,13 @@
 //	affects: payments.charge
 //	spec: SPEC-014
 //	keywords: payments, timeout, retry, billing
+//	objective: acme-142
 //
 // `learned:` and `keywords:` are the only mandatory fields; `symptom:` is
 // optional but is the sole reliable seed for a distilled lesson's Trigger
 // (ADR-0028) — nothing else in a commit records what was OBSERVED.
+// `objective:` names the bead the commit works toward (ADR-0048); it is not a
+// capture field, so a commit carrying only it needs no `learned:`.
 package trailers
 
 import (
@@ -35,7 +38,7 @@ var trailerLine = regexp.MustCompile(`^([a-z][a-z0-9_-]*):[ \t]+(.*)$`)
 // carrying several commits' blocks. Nothing is dropped (ADR-0046): every
 // `decision:` lands in Decisions (and Decision joins them), the other prose
 // fields join their values with "; ", and affects/keywords take the ordered
-// union. spec: is an id, not prose, so the first one wins.
+// union. spec: and objective: are ids, not prose, so the first one wins.
 func Parse(body string) model.Trailer {
 	t := model.Trailer{Extra: map[string]string{}}
 	for _, raw := range strings.Split(body, "\n") {
@@ -59,6 +62,10 @@ func Parse(body string) model.Trailer {
 		case "spec":
 			if t.Spec == "" {
 				t.Spec = val
+			}
+		case "objective":
+			if t.Objective == "" {
+				t.Objective = val
 			}
 		case "affects":
 			t.Affects = union(t.Affects, splitList(val))

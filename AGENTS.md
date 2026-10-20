@@ -49,6 +49,11 @@ distill` scavenges the commit body for an observation and, failing that, writes
 a `TODO` you will have to fill in at review time — it never falls back to the
 commit subject (ADR-0028).
 
+Name the bead a commit works toward with `objective: <bead-id>` on every
+commit of that task (ADR-0048). It is not a capture field, so it needs no
+`learned:`. The PR view then opens with the objective, and `objective-focus`
+warns when a PR mixes objectives or changes files no objective commit touched.
+
 Durable decisions become files under `.nugit/decisions/` (they survive
 squash-merge; trailers do not — ADR-0005). Cross-reference other objects by their
 stable **key** (`ADR-0002`), never by content hash (ADR-0001).

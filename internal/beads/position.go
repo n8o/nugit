@@ -122,3 +122,36 @@ func note(pos model.PlanPosition, st Store, scope []Issue, epicsOnly, scoped boo
 	}
 	return b.String()
 }
+
+// Find returns the bead with id, if the store has one.
+func (s Store) Find(id string) (Issue, bool) {
+	for _, it := range s.Issues {
+		if it.ID == id {
+			return it, true
+		}
+	}
+	return Issue{}, false
+}
+
+// PlanProgress counts the done and total steps of one plan, by the same
+// store-wide rule Position uses: when any bead is an epic, only epics are
+// plan steps.
+func PlanProgress(st Store, plan string) (done, total int) {
+	epicsOnly := false
+	for _, it := range st.Issues {
+		if it.Type == "epic" {
+			epicsOnly = true
+			break
+		}
+	}
+	for _, it := range st.Issues {
+		if it.Plan != plan || (epicsOnly && it.Type != "epic") {
+			continue
+		}
+		total++
+		if isDone(it.Status) {
+			done++
+		}
+	}
+	return done, total
+}

@@ -63,6 +63,8 @@ components:
     in: "internal/notion/**"
   "nudge":
     in: "internal/nudge/**"
+  "objective":
+    in: "internal/objective/**"
   "obsidian":
     in: "internal/obsidian/**"
   "promote":
@@ -212,6 +214,7 @@ deps:
       - "usage"
   "engine":
     mayDependOn:
+      - "beads"
       - "config"
       - "consistency"
       - "delta"
@@ -223,6 +226,7 @@ deps:
       - "mapping"
       - "model_"
       - "narrative"
+      - "objective"
       - "significance"
       - "trailers"
       - "wiring"
@@ -282,6 +286,12 @@ deps:
       - "model_"
       - "significance"
       - "trailers"
+  "objective":
+    mayDependOn:
+      - "beads"
+      - "evidence"
+      - "knowledge"
+      - "model_"
   "obsidian":
     mayDependOn:
       - "knowledge"
