@@ -31,6 +31,12 @@ type Result struct {
 // spaces and CRLF; the capture preserves the original line ending).
 var statusLineRE = regexp.MustCompile(`(?m)^status:[ \t]*proposed[ \t]*(\r?)$`)
 
+// GrantedStatus reports the status ratification would grant a kind, without
+// performing it — so a caller that has to SAY what accepting does (the review
+// UI's buttons) reads the same table the action uses instead of carrying a
+// second copy of it.
+func GrantedStatus(k model.Kind) (model.Status, error) { return ratifiedStatus(k) }
+
 // ratifiedStatus maps a kind to the status ratification grants it.
 func ratifiedStatus(k model.Kind) (model.Status, error) {
 	switch k {

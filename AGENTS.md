@@ -84,6 +84,15 @@ semantic one when you mean the graph to change.
 field, and ADR-0003 derives effective status from it. Written as an edge it
 parses, resolves, and declares no supersession.
 
+## Reviewing the candidate lane
+
+`nugit review` serves the proposed records on loopback and writes the store on
+a click — accept calls `ratify.Ratify`, withdraw deletes the file. It is the
+only command that listens on a socket; keep it that way, keep it off the delta
+path, and keep its page self-contained (it embeds `ui.html` and loads nothing
+external). If you add an action, make it a real git working-tree change and
+leave committing to the human (ADR-0051).
+
 ## Before opening a PR
 
 Run `nugit pr-render` against your base. Resolve any `fail` finding (an undeclared

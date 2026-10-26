@@ -1,0 +1,292 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>nugit review</title>
+<style>
+  /* One column queue under a sticky tally. Each candidate is a card that opens
+     to Context / Decision / Rejected. Rejected is given the same weight as
+     Decision on purpose: it is the field that stops an alternative being
+     re-proposed, and the reason the store is worth reading at all.
+     No webfonts, no CDN — the server loads nothing off the machine. */
+  :root {
+    --bg: #eef1f5; --surface: #fff; --surface-2: #f6f8fa;
+    --ink: #141d27; --muted: #5d6c7c; --faint: #8a98a6; --line: #d8e0e8;
+    --accent: #2a5d8c; --accent-soft: #e4edf6;
+    --ok: #1d7048; --ok-soft: #e2f1e8;
+    --no: #a93328; --no-soft: #fae9e6;
+    --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --serif: Georgia, "Iowan Old Style", "Times New Roman", serif;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f151b; --surface: #171f28; --surface-2: #1d2731;
+      --ink: #e4ebf2; --muted: #94a3b2; --faint: #6c7b8a; --line: #27323d;
+      --accent: #7cb0dc; --accent-soft: #1b2b3a;
+      --ok: #52c08b; --ok-soft: #14301f;
+      --no: #e8827a; --no-soft: #341a19;
+      color-scheme: dark;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: var(--sans); font-size: 15px; line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 54rem; margin: 0 auto; padding: 0 16px 4rem; }
+  .tally {
+    position: sticky; top: 0; z-index: 9;
+    background: var(--surface); border-bottom: 1px solid var(--line);
+    padding: .85rem 16px;
+  }
+  .tally-in {
+    max-width: 54rem; margin: 0 auto;
+    display: flex; flex-wrap: wrap; align-items: baseline; gap: .5rem 1.25rem;
+  }
+  h1 { font-family: var(--serif); font-size: 1.25rem; font-weight: 600; margin: 0; }
+  h1 small { font-family: var(--mono); font-size: .68rem; color: var(--faint); font-weight: 400; margin-left: .5rem; }
+  .counts { display: flex; gap: 1rem; margin-left: auto; flex-wrap: wrap; }
+  .count { display: flex; align-items: baseline; gap: .35rem; }
+  .count b { font-family: var(--mono); font-variant-numeric: tabular-nums; font-size: 1rem; font-weight: 500; }
+  .count span { font-size: .7rem; text-transform: uppercase; letter-spacing: .09em; color: var(--muted); }
+  .count.ok b { color: var(--ok); } .count.no b { color: var(--no); }
+
+  .lede { color: var(--muted); font-size: .875rem; margin: 1.3rem 0 1rem; max-width: 64ch; }
+  .lede code, .foot code { font-family: var(--mono); font-size: .9em; color: var(--ink); }
+
+  .queue { display: flex; flex-direction: column; gap: .7rem; }
+  .card {
+    background: var(--surface); border: 1px solid var(--line); border-radius: 8px;
+    box-shadow: 0 1px 2px rgba(20,29,39,.05); overflow: hidden;
+  }
+  .card.at { border-color: var(--accent); }
+  .head {
+    display: grid; grid-template-columns: 1fr auto; gap: .4rem 1rem; align-items: start;
+    width: 100%; background: none; border: 0; text-align: left; color: inherit;
+    font: inherit; padding: .85rem 1rem; cursor: pointer;
+  }
+  .head:hover { background: var(--surface-2); }
+  .head:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .meta { display: flex; flex-wrap: wrap; align-items: center; gap: .45rem; font-size: .72rem; margin-bottom: .3rem; }
+  .chip {
+    font-family: var(--mono); font-size: .68rem; padding: .1rem .4rem; border-radius: 3px;
+    background: var(--accent-soft); color: var(--accent); font-weight: 500;
+  }
+  .rid { font-family: var(--mono); color: var(--muted); font-weight: 500; }
+  .age { font-family: var(--mono); font-variant-numeric: tabular-nums; color: var(--muted); }
+  .age.old { color: var(--no); font-weight: 600; }
+  .scope { color: var(--faint); }
+  .title { font-family: var(--serif); font-size: 1.05rem; font-weight: 500; line-height: 1.32; min-width: 0; }
+  .caret { color: var(--faint); font-size: .8rem; }
+
+  .body { border-top: 1px solid var(--line); padding: 0 1rem 1rem; }
+  .field { margin-top: 1rem; min-width: 0; }
+  .field h3 {
+    font-size: .68rem; text-transform: uppercase; letter-spacing: .1em;
+    color: var(--muted); font-weight: 600; margin: 0 0 .3rem;
+  }
+  .field.rej h3 { color: var(--no); }
+  .field p { font-family: var(--serif); font-size: .97rem; line-height: 1.6; margin: 0; max-width: 68ch; }
+  .field.rej p { color: var(--muted); }
+  .path { font-family: var(--mono); font-size: .72rem; color: var(--faint); margin-top: 1rem; overflow-x: auto; white-space: nowrap; }
+
+  .acts { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; margin-top: 1.1rem; padding-top: .9rem; border-top: 1px solid var(--line); }
+  button.act {
+    font: inherit; font-size: .85rem; font-weight: 500; padding: .4rem .85rem;
+    border-radius: 5px; border: 1px solid var(--line); background: var(--surface-2);
+    color: var(--ink); cursor: pointer;
+  }
+  button.act:hover:not(:disabled) { border-color: var(--accent); }
+  button.act:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  button.act:disabled { opacity: .5; cursor: default; }
+  button.act.accept:hover:not(:disabled) { border-color: var(--ok); color: var(--ok); background: var(--ok-soft); }
+  button.act.decline:hover:not(:disabled) { border-color: var(--no); color: var(--no); background: var(--no-soft); }
+  button.act kbd { font-family: var(--mono); font-size: .72em; color: var(--faint); margin-left: .35rem; }
+  .grant { font-size: .76rem; color: var(--faint); }
+  .msg { font-size: .8rem; margin-left: auto; }
+  .msg.ok { color: var(--ok); } .msg.err { color: var(--no); }
+
+  .state { border: 1px dashed var(--line); border-radius: 8px; padding: 2rem 1.25rem; text-align: center; color: var(--muted); font-size: .9rem; }
+  .state b { display: block; color: var(--ink); font-size: 1rem; margin-bottom: .35rem; font-family: var(--serif); }
+  .foot { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--line); color: var(--faint); font-size: .78rem; }
+  .foot ul { margin: .5rem 0 0; padding-left: 1.1rem; }
+  .foot li { font-family: var(--mono); font-size: .74rem; }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+  @media (max-width: 560px) { .counts { margin-left: 0; width: 100%; } .head { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<div class="tally">
+  <div class="tally-in">
+    <h1>Candidate lane<small id="where"></small></h1>
+    <div class="counts">
+      <div class="count"><b id="c-total">—</b><span>waiting</span></div>
+      <div class="count ok"><b id="c-ok">0</b><span>ratified</span></div>
+      <div class="count no"><b id="c-no">0</b><span>withdrawn</span></div>
+    </div>
+  </div>
+</div>
+
+<div class="wrap">
+  <p class="lede">
+    Records at <code>status: proposed</code> in this repo. <strong>Ratify</strong> grants the
+    status the record's type earns and <strong>Withdraw</strong> deletes the file — both write
+    the working tree only. Nothing is committed: review, then commit the result yourself.
+  </p>
+  <div id="queue" class="queue"></div>
+  <div class="foot">
+    <div><code>j</code>/<code>k</code> move · <code>Enter</code> open · <code>a</code> ratify · <code>x</code> withdraw</div>
+    <div id="changed"></div>
+  </div>
+</div>
+
+<script>
+(function () {
+  "use strict";
+  var TOKEN = new URLSearchParams(location.search).get("t") || "";
+  var queueEl = document.getElementById("queue");
+  var items = [], open = {}, cursor = 0, msg = {}, busy = {}, done = { ok: 0, no: 0 };
+
+  function esc(s) {
+    return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+    });
+  }
+  function api(path, opts) {
+    var o = opts || {};
+    o.headers = Object.assign({ "X-Nugit-Token": TOKEN, "Content-Type": "application/json" }, o.headers || {});
+    return fetch(path, o).then(function (r) {
+      if (!r.ok) return r.text().then(function (t) { throw new Error(t || ("HTTP " + r.status)); });
+      return r.json();
+    });
+  }
+  function state(title, detail) {
+    queueEl.innerHTML = '<div class="state"><b>' + esc(title) + "</b>" + esc(detail) + "</div>";
+  }
+  function field(name, text, cls) {
+    if (!text) return "";
+    return '<div class="field ' + (cls || "") + '"><h3>' + esc(name) + "</h3><p>" + esc(text) + "</p></div>";
+  }
+
+  function render() {
+    document.getElementById("c-total").textContent = String(items.length);
+    document.getElementById("c-ok").textContent = String(done.ok);
+    document.getElementById("c-no").textContent = String(done.no);
+    if (!items.length) {
+      state("The lane is empty", "Nothing in this repo is waiting on a decision.");
+      return;
+    }
+    if (cursor >= items.length) cursor = items.length - 1;
+    queueEl.innerHTML = items.map(function (it, i) {
+      var isOpen = open[it.id] === undefined ? i === cursor : open[it.id];
+      var old = (it.ageDays || 0) >= 60;
+      var m = msg[it.id];
+      return '<article class="card' + (i === cursor ? " at" : "") + '" id="card-' + esc(it.id) + '">' +
+        '<button class="head" data-toggle="' + esc(it.id) + '" aria-expanded="' + isOpen + '">' +
+          "<div><div class=\"meta\">" +
+            '<span class="chip">' + esc(it.type) + "</span>" +
+            '<span class="rid">' + esc(it.id) + "</span>" +
+            '<span class="age' + (old ? " old" : "") + '">' + esc(it.ageDays) + "d</span>" +
+            (it.scope ? '<span class="scope">scope: ' + esc(it.scope) + "</span>" : "") +
+            (it.confidence ? '<span class="scope">· ' + esc(it.confidence) + " confidence</span>" : "") +
+          "</div><div class=\"title\">" + esc(it.title) + "</div></div>" +
+          '<div><span class="caret">' + (isOpen ? "▾" : "▸") + "</span></div>" +
+        "</button>" +
+        (isOpen ?
+          '<div class="body">' +
+            field("Context", it.context) +
+            field("Decision", it.decision) +
+            field("Rejected", it.rejected, "rej") +
+            '<div class="path">' + esc(it.path) + "</div>" +
+            '<div class="acts">' +
+              '<button class="act accept" data-act="accept" data-id="' + esc(it.id) + '"' + (busy[it.id] ? " disabled" : "") + ">Ratify<kbd>a</kbd></button>" +
+              '<button class="act decline" data-act="decline" data-id="' + esc(it.id) + '"' + (busy[it.id] ? " disabled" : "") + ">Withdraw<kbd>x</kbd></button>" +
+              (it.ratifies ? '<span class="grant">ratifying makes it <code>' + esc(it.ratifies) + "</code></span>" : "") +
+              (m ? '<span class="msg ' + (m.err ? "err" : "ok") + '">' + esc(m.text) + "</span>" : "") +
+            "</div>" +
+          "</div>" : "") +
+        "</article>";
+    }).join("");
+  }
+
+  function refresh() {
+    return api("/api/queue?t=" + encodeURIComponent(TOKEN)).then(function (q) {
+      document.getElementById("where").textContent = q.repo + (q.branch ? " @ " + q.branch : "");
+      items = q.items || [];
+      var ch = document.getElementById("changed");
+      ch.innerHTML = (q.changed && q.changed.length)
+        ? "<div>this review changed " + q.changed.length + " file(s) — commit when you are done:</div><ul>" +
+          q.changed.map(function (c) { return "<li>" + esc(c) + "</li>"; }).join("") + "</ul>"
+        : "";
+      render();
+    }, function (e) {
+      state("Cannot reach nugit", e.message + " — is the server still running? Reopen the URL it printed.");
+    });
+  }
+
+  function decide(id, action) {
+    if (busy[id]) return;
+    busy[id] = true;
+    render();
+    api("/api/decide?t=" + encodeURIComponent(TOKEN), {
+      method: "POST",
+      body: JSON.stringify({ id: id, action: action })
+    }).then(function (r) {
+      busy[id] = false;
+      if (r.error) { msg[id] = { err: true, text: r.error }; render(); return; }
+      if (action === "accept") done.ok++; else done.no++;
+      delete msg[id];
+      if (cursor >= items.length - 1 && cursor > 0) cursor--;
+      return refresh();
+    }, function (e) {
+      busy[id] = false;
+      msg[id] = { err: true, text: e.message };
+      render();
+    });
+  }
+
+  queueEl.addEventListener("click", function (ev) {
+    var b = ev.target.closest("button[data-act]");
+    if (b) { decide(b.getAttribute("data-id"), b.getAttribute("data-act")); return; }
+    var t = ev.target.closest("button[data-toggle]");
+    if (t) {
+      var id = t.getAttribute("data-toggle");
+      var cur = open[id] === undefined ? items[cursor] && items[cursor].id === id : open[id];
+      open[id] = !cur;
+      items.forEach(function (it, i) { if (it.id === id) cursor = i; });
+      render();
+    }
+  });
+
+  document.addEventListener("keydown", function (ev) {
+    if (ev.metaKey || ev.ctrlKey || ev.altKey) return;
+    var tag = ev.target && ev.target.tagName;
+    if (tag === "INPUT" || tag === "TEXTAREA") return;
+    if (!items.length) return;
+    var it = items[cursor], k = ev.key.toLowerCase();
+    if (k === "j" || k === "k") {
+      cursor = Math.min(items.length - 1, Math.max(0, cursor + (k === "j" ? 1 : -1)));
+      render();
+      var el = document.getElementById("card-" + items[cursor].id);
+      if (el) el.scrollIntoView({ block: "nearest" });
+      ev.preventDefault();
+    } else if (k === "enter") {
+      var cur = open[it.id] === undefined ? true : open[it.id];
+      open[it.id] = !cur; render(); ev.preventDefault();
+    } else if (k === "a") {
+      decide(it.id, "accept"); ev.preventDefault();
+    } else if (k === "x") {
+      decide(it.id, "decline"); ev.preventDefault();
+    }
+  });
+
+  state("Loading…", "Reading the candidate lane from this repo's store.");
+  refresh();
+})();
+</script>
+</body>
+</html>
