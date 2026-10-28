@@ -10,9 +10,11 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"runtime/debug"
 	"sort"
 	"strings"
@@ -47,6 +49,7 @@ import (
 	"github.com/n8o/nugit/internal/render"
 	"github.com/n8o/nugit/internal/replay"
 	"github.com/n8o/nugit/internal/retrieval"
+	"github.com/n8o/nugit/internal/review"
 	"github.com/n8o/nugit/internal/scaffold"
 	"github.com/n8o/nugit/internal/skillopt"
 	"github.com/n8o/nugit/internal/skills"
@@ -85,6 +88,7 @@ usage:
   nugit deploy [flags]        deterministic deployable-container inventory (Dockerfiles + CMake)
   nugit model facts [flags]   deterministic grounding bundle for the bootstrap agent
   nugit doctor [flags]        setup pre-flight health checks
+  nugit review [flags]        browser queue for the candidate lane (local server)
   nugit plan check [flags]    lint the Beads plan store the way pr-render reads it
   nugit plan normalize [flags] canonicalize the store so concurrent agents stop conflicting
   nugit obsidian [flags]      (re)generate .nugit/INDEX.md for the Obsidian vault
@@ -157,6 +161,11 @@ promote flags:
   -force         overwrite an occupied path / override the near-duplicate refusal
   -dry-run       print what would be written, and where, without writing it
 
+review flags:
+  -C dir         repo directory (default ".")
+  -port n        loopback port (default 0 — pick a free one)
+  -no-open       print the URL instead of opening a browser
+
 plan flags:
   check      -C dir  -ref r    lint the store at a ref ("" reads the working tree)
              -fail-on f        exit non-zero on: fail (default) | warn | none
@@ -219,6 +228,8 @@ func main() {
 		os.Exit(cmdExport(os.Args[2:]))
 	case "explain":
 		os.Exit(cmdExplain(os.Args[2:]))
+	case "review":
+		os.Exit(cmdReview(os.Args[2:]))
 	case "plan":
 		os.Exit(cmdPlan(os.Args[2:]))
 	case "doctor":
@@ -1850,4 +1861,66 @@ func cmdPlanNormalize(args []string) int {
 	}
 	fmt.Printf("\nwrote %d file(s).\n", len(dests))
 	return 0
+}
+
+// cmdReview serves the candidate lane in a browser (`nugit review`).
+//
+// It is the only nugit command that listens on a socket, and the only one that
+// writes the store from a click. Both are deliberate: approving is a loop, and
+// a loop needs a surface. Everything else holds — the server binds loopback,
+// is started by hand, mutates only files already in the store, and commits
+// nothing.
+func cmdReview(args []string) int {
+	fs := flag.NewFlagSet("review", flag.ExitOnError)
+	dir := fs.String("C", ".", "repo directory")
+	port := fs.Int("port", 0, "loopback port (0 = pick a free one)")
+	noOpen := fs.Bool("no-open", false, "print the URL instead of opening a browser")
+	_ = fs.Parse(args)
+
+	srv, err := review.New(*dir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "nugit review: %v\n", err)
+		return 1
+	}
+	ln, url, err := srv.Listen(*port)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "nugit review: %v\n", err)
+		return 1
+	}
+	n, perr := srv.PendingCount()
+	switch {
+	case perr != nil:
+		fmt.Printf("  the store did not load cleanly: %v\n", perr)
+	case n == 0:
+		fmt.Println("  nothing is waiting on a decision — the candidate lane is empty.")
+	default:
+		fmt.Printf("  %d record(s) waiting on a decision\n", n)
+	}
+	fmt.Printf("\n  %s\n\n  Ctrl-C when you are done. Nothing is committed; review the diff and commit it yourself.\n\n", url)
+	if !*noOpen {
+		openBrowser(url)
+	}
+	if err := http.Serve(ln, srv.Handler()); err != nil {
+		fmt.Fprintf(os.Stderr, "nugit review: %v\n", err)
+		return 1
+	}
+	return 0
+}
+
+// openBrowser is best-effort: a failure prints nothing, because the URL is
+// already on stdout and a headless machine is a normal place to run this.
+func openBrowser(url string) {
+	var cmd string
+	var args []string
+	switch runtime.GOOS {
+	case "darwin":
+		cmd = "open"
+	case "windows":
+		cmd, args = "rundll32", []string{"url.dll,FileProtocolHandler"}
+	default:
+		cmd = "xdg-open"
+	}
+	if path, err := exec.LookPath(cmd); err == nil {
+		_ = exec.Command(path, append(args, url)...).Start()
+	}
 }

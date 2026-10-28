@@ -85,6 +85,8 @@ components:
     in: "internal/replay/**"
   "retrieval":
     in: "internal/retrieval/**"
+  "review":
+    in: "internal/review/**"
   "scaffold":
     in: "internal/scaffold/**"
   "significance":
@@ -164,6 +166,7 @@ deps:
       - "render"
       - "replay"
       - "retrieval"
+      - "review"
       - "scaffold"
       - "skillopt"
       - "skills"
@@ -355,6 +358,12 @@ deps:
       - "mapping"
       - "model_"
       - "trailers"
+  "review":
+    mayDependOn:
+      - "gitutil"
+      - "knowledge"
+      - "model_"
+      - "ratify"
   "scaffold":
     mayDependOn:
       - "bootstrap"

@@ -146,6 +146,34 @@ serialization. Close a step when it is *done*, not when the enabling groundwork
 lands, and move the bead **in the same PR that does the work**: a step closed in
 a later PR is a step nobody can tell was ever finished.
 
+### Approving what the store proposed
+
+Distilled and drafted records land `status: proposed` — a candidate lane
+(ADR-0016) a human promotes. `nugit review` is where that happens:
+
+```bash
+nugit review              # serves the lane on loopback, opens a browser
+nugit review -no-open     # over SSH: print the URL instead
+```
+
+One card per candidate, oldest first, opened to its Context, Decision and
+**Rejected** — Rejected at the same weight, because it is the field that stops
+an alternative being re-proposed and the reason the record is worth reading.
+**Ratify** grants the status that record's type earns (`accepted` for a
+decision, `active` for a lesson) by calling the same code `nugit ratify` does;
+**Withdraw** deletes the candidate, and git history keeps it. `j`/`k`/`a`/`x`
+if you'd rather not reach for the mouse.
+
+It writes the working tree and **commits nothing** — it names the files it
+touched so you can read the diff and commit it yourself. It is not a service:
+loopback only, started by hand, no state of its own, nothing in the delta path,
+and every mutating route needs the token in the URL the command prints. A queue
+covers the repo it was launched in, since a peer's records are read-only by
+design (ADR-0032).
+
+The lane is worth a surface because it rots without one: 24 records sat proposed
+across two stores when this shipped, the oldest 100 days (ADR-0051).
+
 **The store fills itself** — `nugit init` installs a commit-msg hook that validates
 trailer blocks; `nugit remember` jots ephemeral working memory; `nugit distill`
 promotes deliberate `decision:`/recurring `learned:` trailers into durable ADRs/lessons.

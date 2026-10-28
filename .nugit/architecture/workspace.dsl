@@ -69,6 +69,11 @@ workspace "nugit" "Git-native typed knowledge & unified PR view — self-model (
                     "paths" "internal/delta/**"
                 }
             }
+            review = component "Review server" "Loopback browser queue over the candidate lane; writes the store on a click (ADR-0051)" "Go" {
+                properties {
+                    "paths" "internal/review/**"
+                }
+            }
             wiring = component "Wiring scan" "Scans CLAUDE.md, skill files and workflows for drift against config.yml (ADR-0026)" "Go" {
                 properties {
                     "paths" "internal/wiring/**"
@@ -442,6 +447,11 @@ workspace "nugit" "Git-native typed knowledge & unified PR view — self-model (
             objective -> evidence "governed-components resolver"
             objective -> knowledge "applies_to_paths matching"
             cli -> adopt "adopt command"
+            review -> ratify "promotes a candidate on accept"
+            review -> knowledge "loads the store to resolve a candidate"
+            review -> model_ "uses types"
+            review -> gitutil "names the branch under review"
+            cli -> review "review command"
             cli -> beads "plan check / plan normalize commands"
             cli -> gitutil "resolves the repo + prefix for plan check"
             cli -> claim "objective command; session-start hook; commit-msg objective stamp"
