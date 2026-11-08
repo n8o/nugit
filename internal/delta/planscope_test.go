@@ -116,7 +116,7 @@ func TestDiffPlanNoMovementShowsNoTracks(t *testing.T) {
 
 	// ...and that is exactly when the code-without-a-plan-step check fires.
 	code := model.CodeDelta{Files: []model.FileChange{{Path: "code.go", Status: "A"}}}
-	fs := PlanFindings(repo, "pr", "", got, code, false)
+	fs := PlanFindings(repo, "main", "pr", "", got, code, false, false)
 	found := false
 	for _, f := range fs {
 		if strings.Contains(f.Title, "moves no plan step") {
@@ -127,9 +127,16 @@ func TestDiffPlanNoMovementShowsNoTracks(t *testing.T) {
 		t.Errorf("expected the plan-movement finding, got %+v", fs)
 	}
 
+	// A PR that names its objective has already said which step it serves.
+	for _, f := range PlanFindings(repo, "main", "pr", "", got, code, false, true) {
+		if strings.Contains(f.Title, "moves no plan step") {
+			t.Error("a PR naming an objective must not be asked which plan step it moves")
+		}
+	}
+
 	// A store-only / docs-only PR is not work a plan step was tracking.
 	docs := model.CodeDelta{Files: []model.FileChange{{Path: "README.md", Status: "M"}}}
-	for _, f := range PlanFindings(repo, "pr", "", got, docs, false) {
+	for _, f := range PlanFindings(repo, "main", "pr", "", got, docs, false, false) {
 		if strings.Contains(f.Title, "moves no plan step") {
 			t.Error("a docs-only PR must not be nagged for not moving the plan")
 		}
@@ -147,7 +154,7 @@ func TestPlanFindingsSilentWithoutAStore(t *testing.T) {
 	gitP(t, dir, "commit", "-q", "-m", "x")
 	repo := gitutil.Repo{Dir: dir}
 	code := model.CodeDelta{Files: []model.FileChange{{Path: "f.go", Status: "A"}}}
-	if fs := PlanFindings(repo, "HEAD", "", model.PlanPosition{}, code, false); len(fs) != 0 {
+	if fs := PlanFindings(repo, "HEAD", "HEAD", "", model.PlanPosition{}, code, false, false); len(fs) != 0 {
 		t.Errorf("no store must mean no findings, got %+v", fs)
 	}
 }
@@ -158,13 +165,14 @@ func TestPlanFindingsSilentWithoutAStore(t *testing.T) {
 func TestPlanFindingsRampInAtWarn(t *testing.T) {
 	dir := t.TempDir()
 	gitP(t, dir, "init", "-q")
+	gitP(t, dir, "commit", "-q", "--allow-empty", "-m", "before the store")
 	storeCommit(t, dir, "dup",
 		`{"id":"p-a-1","title":"a","issue_type":"epic","status":"open"}`,
 		`{"id":"p-a-1","title":"a again","issue_type":"epic","status":"closed"}`)
 	repo := gitutil.Repo{Dir: dir}
 	pos := DiffPlan(repo, "HEAD", "HEAD", "", ScopeTouched)
 
-	warned := PlanFindings(repo, "HEAD", "", pos, model.CodeDelta{}, false)
+	warned := PlanFindings(repo, "HEAD~1", "HEAD", "", pos, model.CodeDelta{}, false, false)
 	if len(warned) == 0 {
 		t.Fatal("the duplicate must still be reported")
 	}
@@ -173,7 +181,7 @@ func TestPlanFindingsRampInAtWarn(t *testing.T) {
 			t.Errorf("default mode must not gate: %+v", f)
 		}
 	}
-	failed := PlanFindings(repo, "HEAD", "", pos, model.CodeDelta{}, true)
+	failed := PlanFindings(repo, "HEAD~1", "HEAD", "", pos, model.CodeDelta{}, true, false)
 	sawFail := false
 	for _, f := range failed {
 		if f.Severity == model.SevFail {

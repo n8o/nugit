@@ -10,6 +10,7 @@ package render
 import (
 	"encoding/json"
 	"fmt"
+	"path"
 	"sort"
 	"strings"
 
@@ -178,11 +179,59 @@ func codeSection(d model.CodeDelta) string {
 			del += f.Deleted
 		}
 		fmt.Fprintf(&b, "\n**%s** — %s, +%d/-%d\n", label, plural(len(files), "file"), add, del)
-		for _, f := range files {
+		shown := files
+		if len(shown) > maxFilesPerComponent {
+			shown = shown[:maxFilesPerComponent]
+		}
+		for _, f := range shown {
 			fmt.Fprintf(&b, "- `%s` %s (+%d/-%d)\n", f.Path, statusWord(f.Status), f.Added, f.Deleted)
+		}
+		if rest := files[len(shown):]; len(rest) > 0 {
+			b.WriteString(overflowLine(rest))
 		}
 	}
 	return b.String()
+}
+
+// maxFilesPerComponent caps the per-component file list. The pilot's largest
+// PR view listed 1,421 files and ran to 133k characters, past what a PR body
+// holds; the reviewer needs the shape of a big change, not its manifest.
+const maxFilesPerComponent = 30
+
+// overflowLine summarizes the files a capped list leaves out, by directory,
+// largest first, so the shape of the rest is still visible.
+func overflowLine(rest []model.FileChange) string {
+	type dir struct {
+		name     string
+		n        int
+		add, del int
+	}
+	by := map[string]*dir{}
+	var order []*dir
+	add, del := 0, 0
+	for _, f := range rest {
+		d := path.Dir(f.Path)
+		if by[d] == nil {
+			by[d] = &dir{name: d}
+			order = append(order, by[d])
+		}
+		by[d].n++
+		by[d].add += f.Added
+		by[d].del += f.Deleted
+		add += f.Added
+		del += f.Deleted
+	}
+	sort.SliceStable(order, func(i, j int) bool { return order[i].n > order[j].n })
+	const maxDirs = 5
+	var parts []string
+	for i, d := range order {
+		if i == maxDirs {
+			parts = append(parts, fmt.Sprintf("%d more director%s", len(order)-maxDirs, map[bool]string{true: "y", false: "ies"}[len(order)-maxDirs == 1]))
+			break
+		}
+		parts = append(parts, fmt.Sprintf("`%s/` (%d)", d.name, d.n))
+	}
+	return fmt.Sprintf("- _…and %s not listed (+%d/-%d): %s_\n", plural(len(rest), "more file"), add, del, strings.Join(parts, ", "))
 }
 
 // plural renders "1 file" / "3 files".
@@ -573,7 +622,7 @@ func idOr(o *model.KnowledgeObject) string {
 func oneLine(s string) string {
 	s = strings.ReplaceAll(s, "\n", " ")
 	if len(s) > 200 {
-		return s[:200] + "…"
+		return strings.ToValidUTF8(s[:200], "") + "…"
 	}
 	return s
 }

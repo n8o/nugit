@@ -106,7 +106,7 @@ func summary(o *model.KnowledgeObject) string {
 		}
 		t = strings.TrimLeft(t, "# ")
 		if len(t) > 160 {
-			t = t[:160] + "…"
+			t = strings.ToValidUTF8(t[:160], "") + "…"
 		}
 		return t
 	}
