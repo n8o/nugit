@@ -79,6 +79,15 @@ for the decision it grounds) and land it as a PR — never paste the full docume
   edge it declares no supersession and both records stay live. `nugit doctor`
   reports which of your edges are load-bearing.
 
+- **Accepted or proposed — say which you mean.** A record you write to
+  capture a decision the user made, or one the change you are shipping
+  implements, is `status: accepted` (a lesson: `active`). Use `status:
+  proposed` only for an option that is still open: the PR view marks it
+  "stays proposed after merge", and it governs nothing until someone ratifies
+  it, so merging it records the option without deciding it. Never write
+  `proposed` just to be modest; a decision that ships as proposed reads as
+  undecided forever.
+
 - Jot ephemeral findings mid-task: `nugit remember -text "..." -scope <component> -keywords a,b`
   (gitignored; surfaces in future `context` calls).
 - For a deliberate decision, put a **trailer block** in the commit message so

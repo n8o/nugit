@@ -193,6 +193,10 @@ type KnowledgeObject struct {
 	// anti-hallucination field. Computed once at parse time so the renderer never
 	// re-implements the extraction.
 	Rejected string
+	// Gist is the first paragraph of what the record decides or teaches (its
+	// Decision section, or a lesson's Insight/Rule), extracted at parse time
+	// like Rejected so the PR view can show it without re-parsing.
+	Gist string
 	// Evidence is the derived trust tier (see the Evidence type). Populated by
 	// evidence.Annotate; empty when no derivation ran (e.g. untyped objects).
 	Evidence Evidence

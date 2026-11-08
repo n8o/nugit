@@ -258,11 +258,31 @@ func knowledgeSection(d model.KnowledgeDelta) string {
 		} else {
 			fmt.Fprintf(&b, "- %s **%s** `%s` (%s, %s)\n", statusWord(kc.Status), o.Type, idOr(o), o.Scope, effectiveStatus(o))
 		}
+		live := kc.Status == "A" || kc.Status == "M" || kc.Status == "R"
+		if live && o.Gist != "" {
+			fmt.Fprintf(&b, "  - 📌 %s: %s\n", gistLabel(o.Type), esc(oneLine(o.Gist)))
+		}
 		if o.Rejected != "" {
 			fmt.Fprintf(&b, "  - 🚫 rejected: %s\n", esc(oneLine(o.Rejected)))
 		}
+		if live && effectiveStatus(o) == string(model.StatusProposed) {
+			fmt.Fprintf(&b, "  - ⏸ stays **proposed** after merge: it records the option and governs nothing until ratified (`nugit ratify %s`)\n", idOr(o))
+		}
 	}
 	return b.String()
+}
+
+// gistLabel names what a record's gist is: what a decision decides, what a
+// lesson teaches.
+func gistLabel(k model.Kind) string {
+	switch k {
+	case model.KindLesson:
+		return "teaches"
+	case model.KindReference:
+		return "says"
+	default:
+		return "decides"
+	}
 }
 
 // maxProposals caps the rendered proposal list (ADR-0006 budget discipline);

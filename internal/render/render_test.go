@@ -243,3 +243,24 @@ func TestOneLineNeverSplitsARune(t *testing.T) {
 		t.Errorf("invalid UTF-8: %q", got)
 	}
 }
+
+// A record added in the PR shows what it decides, and a proposed one says the
+// merge leaves it undecided, so approving the PR is an informed act.
+func TestKnowledgeSectionShowsGistAndProposedState(t *testing.T) {
+	mk := func(id string, st model.Status) *model.KnowledgeObject {
+		o := &model.KnowledgeObject{Gist: "use the queue", Rejected: "polling"}
+		o.ID, o.Type, o.Scope, o.Status, o.EffectiveStatus = id, model.KindDecision, "x", st, st
+		return o
+	}
+	out := knowledgeSection(model.KnowledgeDelta{Changes: []model.KnowledgeChange{
+		{Path: "a.md", Status: "A", Object: mk("ADR-1", model.StatusProposed)},
+		{Path: "b.md", Status: "A", Object: mk("ADR-2", model.StatusAccepted)},
+		{Path: "c.md", Status: "D", Object: mk("ADR-3", model.StatusProposed)},
+	}})
+	if strings.Count(out, "📌 decides: use the queue") != 2 {
+		t.Errorf("added records must show their gist, removed ones not:\n%s", out)
+	}
+	if strings.Count(out, "stays **proposed** after merge") != 1 || !strings.Contains(out, "`nugit ratify ADR-1`") {
+		t.Errorf("only the added proposed record gets the note:\n%s", out)
+	}
+}
