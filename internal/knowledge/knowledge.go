@@ -138,6 +138,7 @@ func ParseObject(relPath, content string) (*model.KnowledgeObject, bool) {
 	obj := &model.KnowledgeObject{FrontMatter: front, Path: relPath, Body: body}
 	obj.EffectiveStatus = front.Status
 	obj.Rejected = RejectedSection(body)
+	obj.Gist = GistSection(body)
 	return obj, true
 }
 
@@ -566,6 +567,64 @@ func RejectedSection(body string) string {
 			sb.WriteString("\n")
 		}
 		return strings.TrimSpace(sb.String())
+	}
+	return ""
+}
+
+// gistLeads are the sections that say what a record decides or teaches: a
+// decision's "## Decision", a lesson's "**Insight:**" or "**Rule:**".
+var gistLeads = []string{"decision", "insight", "rule", "lesson"}
+
+// GistSection returns the first paragraph of the section that says what the
+// record decides or teaches, or "". It is what the PR view shows beside
+// Rejected, so a reviewer approving a merge sees what the record commits the
+// repo to without opening the file.
+func GistSection(body string) string {
+	lines := strings.Split(body, "\n")
+	lead := func(low string) bool {
+		for _, g := range gistLeads {
+			if strings.HasPrefix(low, g) {
+				return true
+			}
+		}
+		return false
+	}
+	for i, line := range lines {
+		t := strings.TrimSpace(line)
+		low := strings.ToLower(t)
+		switch {
+		case strings.HasPrefix(low, "#") && !strings.HasPrefix(low, "# ") &&
+			lead(strings.TrimSpace(strings.TrimLeft(low, "#"))):
+			// "## Decision" — the first paragraph under it
+			var parts []string
+			for _, l := range lines[i+1:] {
+				lt := strings.TrimSpace(l)
+				if strings.HasPrefix(lt, "#") {
+					break
+				}
+				if lt == "" {
+					if len(parts) > 0 {
+						break
+					}
+					continue
+				}
+				parts = append(parts, lt)
+			}
+			return strings.Join(parts, " ")
+		case strings.HasPrefix(low, "**") && lead(strings.TrimLeft(low, "*")):
+			parts := []string{}
+			if inline := boldInline(t); inline != "" {
+				parts = append(parts, inline)
+			}
+			for _, l := range lines[i+1:] {
+				lt := strings.TrimSpace(l)
+				if lt == "" || strings.HasPrefix(lt, "#") || strings.HasPrefix(lt, "**") {
+					break
+				}
+				parts = append(parts, lt)
+			}
+			return strings.Join(parts, " ")
+		}
 	}
 	return ""
 }

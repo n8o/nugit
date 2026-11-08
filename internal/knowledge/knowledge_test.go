@@ -162,3 +162,17 @@ func TestResolveAmendedBy(t *testing.T) {
 		t.Errorf("amender itself must not be marked amended: %v", objs[1].AmendedBy)
 	}
 }
+
+func TestGistSection(t *testing.T) {
+	for name, tc := range map[string]struct{ body, want string }{
+		"decision heading": {"# ADR — x\n\n## Context\n\nwhy\n\n## Decision\n\nWe pick A.\nBecause B.\n\nMore detail.\n\n## Rejected\n\nC", "We pick A. Because B."},
+		"lesson insight":   {"# Lesson\n\n**Trigger:** saw X\n\n**Insight:** the cache\nexpires early.\n\n**Rejected:** retry", "the cache expires early."},
+		"bold decision":    {"**Decision:** use the queue", "use the queue"},
+		"none":             {"# Title\n\nJust prose.", ""},
+		"title only":       {"# Decision log for X\n\ntext", ""},
+	} {
+		if got := GistSection(tc.body); got != tc.want {
+			t.Errorf("%s: got %q, want %q", name, got, tc.want)
+		}
+	}
+}
