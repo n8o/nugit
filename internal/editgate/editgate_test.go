@@ -277,3 +277,33 @@ func TestNeverBreaksTheEdit(t *testing.T) {
 		t.Errorf("malformed config: want silent allow, got %s", out)
 	}
 }
+
+// A branch with no objective gets one reminder per session, on its first edit,
+// even when the edit itself is covered; a claimed branch gets none.
+func TestUnclaimedBranchRemindedOncePerSession(t *testing.T) {
+	dir := repo(t, "warn")
+	write(t, dir, ".beads/issues.jsonl", `{"id":"acme-1","title":"t","status":"open"}`+"\n")
+	file := filepath.Join(dir, "internal/foo/foo.go")
+	logCall(t, dir, usage.Record{Session: "s1", Branch: "feat/x", Component: "foo"})
+
+	o := run(t, dir, input(t, dir, "Edit", file, "s1"), nil)
+	if o == nil || !strings.Contains(o.HookSpecificOutput.AdditionalContext, "branch feat/x has no objective") {
+		t.Fatalf("first edit on an unclaimed branch must be reminded: %+v", o)
+	}
+	if strings.Contains(o.HookSpecificOutput.AdditionalContext, "no context() call") {
+		t.Errorf("a covered edit must carry only the reminder: %q", o.HookSpecificOutput.AdditionalContext)
+	}
+	if o := run(t, dir, input(t, dir, "Edit", file, "s1"), nil); o != nil {
+		t.Errorf("second edit in the same session must be silent: %+v", o)
+	}
+	logCall(t, dir, usage.Record{Session: "s2", Branch: "feat/x", Component: "foo"})
+	if o := run(t, dir, input(t, dir, "Edit", file, "s2"), nil); o == nil {
+		t.Error("a new session on the same branch is reminded again")
+	}
+
+	gitDo(t, dir, "checkout", "-q", "-b", "feat/acme-1-fast")
+	logCall(t, dir, usage.Record{Session: "s3", Branch: "feat/acme-1-fast", Component: "foo"})
+	if o := run(t, dir, input(t, dir, "Edit", file, "s3"), nil); o != nil {
+		t.Errorf("a branch named after its bead has an objective: %+v", o)
+	}
+}

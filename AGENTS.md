@@ -52,7 +52,8 @@ commit subject (ADR-0028).
 Name the bead a commit works toward with `objective: <bead-id>` on every
 commit of that task (ADR-0048). It is not a capture field, so it needs no
 `learned:`. `nugit objective claim <bead-id>` records the branch's objective,
-and the commit-msg hook then adds the line for you (ADR-0049). `nugit orphans`
+and the commit-msg hook then adds the line for you (ADR-0049); a branch
+named after its bead (`feat/<bead-id>-…`) is claimed by its name. `nugit orphans`
 reports objectives, sessions and branches that were started and left
 (ADR-0050). The PR view then opens with the objective, and `objective-focus`
 warns when a PR mixes objectives or changes files no objective commit touched.

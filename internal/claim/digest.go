@@ -57,7 +57,9 @@ func digest(cur Current, st beads.Store, defaultBranch string) string {
 		} else {
 			fmt.Fprintf(&b, "This session's objective: %s. It is not in the plan store (.beads/) yet: create or export it in this PR so the PR view can show it.\n", bead.ID)
 		}
-		if cur.Source == FromCommits {
+		if cur.Source == FromBranchName {
+			fmt.Fprintf(&b, "Branch %s is named after it, so the commit-msg hook adds `objective: %s` to each commit. If that is wrong, run `nugit objective claim <bead-id>`.\n", cur.Branch, bead.ID)
+		} else if cur.Source == FromCommits {
 			fmt.Fprintf(&b, "It is named by this branch's commits but not claimed: run `nugit objective claim %s` so the commit-msg hook names it on every commit.\n", bead.ID)
 		} else {
 			fmt.Fprintf(&b, "The commit-msg hook adds `objective: %s` to each commit on %s.\n", bead.ID, cur.Branch)
@@ -97,4 +99,28 @@ func digest(cur Current, st beads.Store, defaultBranch string) string {
 		fmt.Fprintf(&b, "%d other bead(s) are open in .beads/.\n", open)
 	}
 	return b.String()
+}
+
+// Reminder is the one-line nudge the pre-edit hook gives a session about to
+// change code on a branch with no objective, or "" when none is due: the
+// branch has an objective, it is the default branch (the digest covers that),
+// HEAD is detached, or the repo keeps no plan store to name a bead from.
+//
+// The SessionStart digest only reaches the branch a session starts on. Pilot
+// sessions are long-lived and open branch after branch, so most unnamed PRs
+// came from branches created mid-session that nothing asked about.
+func Reminder(repoDir string) string {
+	cur := Resolve(repoDir)
+	if cur.Branch == "" || cur.Objective != "" {
+		return ""
+	}
+	d := defaultShort(repoDir)
+	if cur.Branch == d || (d == "" && (cur.Branch == "main" || cur.Branch == "master")) {
+		return ""
+	}
+	if fi, err := os.Stat(filepath.Join(repoDir, ".beads")); err != nil || !fi.IsDir() {
+		return ""
+	}
+	return fmt.Sprintf("nugit: branch %s has no objective. Run `nugit objective claim <bead-id>` for the bead this work serves "+
+		"(create one if none fits); the commit-msg hook then names it on every commit, and the PR view opens with it (ADR-0048).", cur.Branch)
 }
