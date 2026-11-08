@@ -457,15 +457,19 @@ func checkDuplicateID(in Input) []model.Finding {
 // blocks (ADR-0005: trailers are a signal, not the durable store).
 func checkCaptureHygiene(in Input) []model.Finding {
 	var fs []model.Finding
+	// One finding per commit, not per missing field: a block missing both
+	// mandatory fields is one thing to fix, and was two lines in every view.
 	for _, c := range in.Commits {
-		for _, w := range trailers.Validate(c.Trailer) {
-			fs = append(fs, model.Finding{
-				Check:    "capture-hygiene",
-				Severity: model.SevInfo,
-				Title:    fmt.Sprintf("commit %s: %s", short(c.SHA), w),
-				Detail:   "a trailer block is present but missing a mandatory field; add it or drop the block",
-			})
+		ws := trailers.Validate(c.Trailer)
+		if len(ws) == 0 {
+			continue
 		}
+		fs = append(fs, model.Finding{
+			Check:    "capture-hygiene",
+			Severity: model.SevInfo,
+			Title:    fmt.Sprintf("commit %s: %s", short(c.SHA), strings.Join(ws, "; ")),
+			Detail:   "a trailer block is present but missing a mandatory field; add it or drop the block",
+		})
 	}
 	return fs
 }

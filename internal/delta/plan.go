@@ -258,12 +258,20 @@ func parsePlan(b []byte) (model.PlanPosition, bool) {
 // Absent store ⇒ no findings at all. A repo that does not keep a plan store is
 // not doing anything wrong, and nugit must never nag a repo into adopting a
 // tool it has not chosen (the same rule the peer/contract paths follow).
-func PlanFindings(repo gitutil.Repo, head, prefix string, plan model.PlanPosition, code model.CodeDelta, fail bool) []model.Finding {
+//
+// The lint is base-relative (beads.LintChanges): a PR is shown only the store
+// defects it adds to, not the store's standing state.
+//
+// namesObjective is true when the PR's commits name an objective (ADR-0048).
+// Such a PR has said which plan step it serves and the Objective section shows
+// it, so "moves no plan step" would only repeat a question already answered.
+func PlanFindings(repo gitutil.Repo, base, head, prefix string, plan model.PlanPosition, code model.CodeDelta, fail, namesObjective bool) []model.Finding {
 	st, ok := beads.Read(repo, head, prefix)
 	if !ok {
 		return nil
 	}
-	fs := beads.Lint(st)
+	bst, bok := beads.Read(repo, base, prefix)
+	fs := beads.LintChanges(bst, bok, st)
 	if !fail {
 		// Ramp in at warn (plan.mode). The store predates the check on every
 		// repo that upgrades into it, so the first render after an upgrade must
@@ -274,7 +282,7 @@ func PlanFindings(repo gitutil.Repo, head, prefix string, plan model.PlanPositio
 			}
 		}
 	}
-	if plan.Changed() {
+	if plan.Changed() || namesObjective {
 		return fs
 	}
 	// Only code counts. A PR that is only docs, only knowledge, or only the

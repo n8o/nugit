@@ -348,7 +348,7 @@ func truncate(s string, n int) string {
 	if cut < n/2 {
 		cut = n
 	}
-	return s[:cut] + "…"
+	return strings.ToValidUTF8(s[:cut], "") + "…"
 }
 
 var titleRE = regexp.MustCompile(`(?m)^#\s+(.+)$`)

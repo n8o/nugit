@@ -668,7 +668,7 @@ func staleness(repoDir string, docs []docText, perDoc map[string]int, rep *Repor
 func trimRow(s string) string {
 	s = strings.TrimSpace(s)
 	if len(s) > 160 {
-		s = strings.TrimSpace(s[:160]) + "…"
+		s = strings.TrimSpace(strings.ToValidUTF8(s[:160], "")) + "…"
 	}
 	return s
 }

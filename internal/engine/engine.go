@@ -162,10 +162,11 @@ func BuildReport(opt Options) (model.Report, error) {
 	})
 	in.Architectural = sig.Tier == model.TierArchitectural
 	other := consistency.OtherFindings(in)
-	if cfg.PlanOn() {
-		other = append(other, delta.PlanFindings(repo, opt.Head, prefix, plan, codeDelta, cfg.PlanFail())...)
-	}
 	obj := objectiveView(repo, base, opt.Head, prefix, commits, codeDelta, knowDelta, allObjs)
+	if cfg.PlanOn() {
+		namesObjective := obj.view != nil && len(obj.view.Objectives) > 0
+		other = append(other, delta.PlanFindings(repo, base, opt.Head, prefix, plan, codeDelta, cfg.PlanFail(), namesObjective)...)
+	}
 	other = append(other, objective.Findings(obj.view, obj.hasStore)...)
 	findings := consistency.Sort(append(c4Findings, other...))
 

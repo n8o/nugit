@@ -23,21 +23,72 @@ const CheckName = "plan-store"
 // behaviour would surprise someone reading the rendered plan.
 func Lint(st Store) []model.Finding {
 	var fs []model.Finding
-	fs = append(fs, checkPhantomFiles(st)...)
-	fs = append(fs, checkDuplicates(st)...)
-	fs = append(fs, checkFields(st)...)
-	fs = append(fs, checkConcurrentSteps(st)...)
-	fs = append(fs, checkPlanSpread(st)...)
+	for _, it := range lint(st) {
+		fs = append(fs, it.f)
+	}
+	return sorted(fs)
+}
+
+// LintChanges is the PR-view half of Lint: only the defects this PR makes
+// worse. A store-wide condition that was already true at base — six steps in
+// flight in someone else's plan, a backlog of non-epics — is the store's state,
+// not this change's, and repeating it on every PR is how the pilot's PR views
+// came to carry the same plan-store warnings on 416 of 534 PRs. `nugit plan
+// check` and `doctor` still report the whole store.
+//
+// A rule fires when its measure at head exceeds its measure at base for the
+// same subject (the same plan, file, or id), so closing one of six in-flight
+// steps is silent while starting a seventh is not. Backlog-shaped rules (the
+// non-epic footnote) never fire here at all. hasBase=false means the store is
+// new in this PR, so everything in it is this PR's.
+func LintChanges(base Store, hasBase bool, head Store) []model.Finding {
+	before := map[string]int{}
+	if hasBase {
+		for _, it := range lint(base) {
+			before[it.key] = it.n
+		}
+	}
+	var fs []model.Finding
+	for _, it := range lint(head) {
+		if it.backlog || it.n <= before[it.key] {
+			continue
+		}
+		fs = append(fs, it.f)
+	}
+	return sorted(fs)
+}
+
+func sorted(fs []model.Finding) []model.Finding {
 	sort.SliceStable(fs, func(i, j int) bool { return fs[i].Title < fs[j].Title })
 	return fs
+}
+
+// item is one lint result with what LintChanges compares: a subject key and a
+// measure of how bad it is. backlog marks a rule that describes the store's
+// shape rather than a defect a PR introduces.
+type item struct {
+	key     string
+	n       int
+	backlog bool
+	f       model.Finding
+}
+
+func lint(st Store) []item {
+	var out []item
+	out = append(out, checkPhantomFiles(st)...)
+	out = append(out, checkDuplicates(st)...)
+	out = append(out, checkFields(st)...)
+	out = append(out, checkConcurrentSteps(st)...)
+	out = append(out, checkPlanSpread(st)...)
+	return out
 }
 
 // checkPhantomFiles catches the sidecar-log-committed-into-the-store failure.
 // nugit globs .beads/**/*.jsonl RECURSIVELY and parses every line as a plan
 // step, so `bd`'s own interactions.jsonl / events.jsonl — or an archive/
 // subdirectory someone assumed was inert — render as plan steps nobody wrote.
-func checkPhantomFiles(st Store) []model.Finding {
-	var fs []model.Finding
+func checkPhantomFiles(st Store) []item {
+	var fs []item
 	for _, f := range st.Files {
 		s := st.Stats[f]
 		if s.Lines == 0 || s.Skipped == 0 {
@@ -47,19 +98,19 @@ func checkPhantomFiles(st Store) []model.Finding {
 		// store. One skipped line among many is a broken step (checkFields
 		// covers that); a majority is a file that does not belong here.
 		if s.Parsed == 0 {
-			fs = append(fs, model.Finding{
+			fs = append(fs, item{key: "phantom:" + f, n: s.Lines, f: model.Finding{
 				Check: CheckName, Severity: model.SevWarn,
 				Title:  fmt.Sprintf("%s is committed under .beads/ but is not a plan store", f),
 				Detail: fmt.Sprintf("%d line(s), none of which carry an id or title. nugit globs .beads/**/*.jsonl recursively and parses every line as a plan step, so a `bd` sidecar log (interactions.jsonl, events.jsonl) committed here renders as steps nobody planned. Add it to .beads/.gitignore.", s.Lines),
-			})
+			}})
 			continue
 		}
 		if s.Skipped*2 >= s.Lines {
-			fs = append(fs, model.Finding{
+			fs = append(fs, item{key: "skipped:" + f, n: s.Skipped, f: model.Finding{
 				Check: CheckName, Severity: model.SevWarn,
 				Title:  fmt.Sprintf("%s: %d of %d line(s) are not plan steps", f, s.Skipped, s.Lines),
 				Detail: "Lines nugit cannot read as an issue are skipped silently — an unparseable or key-less line looks exactly like a step that was never written. Either fix the lines or gitignore the file.",
-			})
+			}})
 		}
 	}
 	return fs
@@ -67,20 +118,20 @@ func checkPhantomFiles(st Store) []model.Finding {
 
 // checkDuplicates catches the id collision the reader resolves last-write-wins
 // and never mentions. Two steps sharing an id means one of them is invisible.
-func checkDuplicates(st Store) []model.Finding {
-	var fs []model.Finding
+func checkDuplicates(st Store) []item {
+	var fs []item
 	for _, id := range st.DuplicateIDs {
-		fs = append(fs, model.Finding{
+		fs = append(fs, item{key: "dup:" + id, n: 1, f: model.Finding{
 			Check: CheckName, Severity: model.SevFail,
 			Title:  "duplicate plan step id: " + id,
 			Detail: "The store carries this id more than once. nugit keeps the LAST occurrence and drops the earlier ones without saying so, so one of these steps — and its status — never renders. Give each step its own id.",
-		})
+		}})
 	}
 	return fs
 }
 
 // checkFields catches steps that render as something other than what they say.
-func checkFields(st Store) []model.Finding {
+func checkFields(st Store) []item {
 	epics := false
 	for _, it := range st.Issues {
 		if it.Type == "epic" {
@@ -103,27 +154,27 @@ func checkFields(st Store) []model.Finding {
 			notEpic = append(notEpic, it.ID)
 		}
 	}
-	var fs []model.Finding
+	var fs []item
 	if len(noTitle) > 0 {
-		fs = append(fs, model.Finding{
+		fs = append(fs, item{key: "untitled", n: len(noTitle), f: model.Finding{
 			Check: CheckName, Severity: model.SevWarn,
 			Title:  fmt.Sprintf("%d plan step(s) missing an id or a title", len(noTitle)),
 			Detail: "Renders as a bare id (or is dropped entirely when both are absent): " + strings.Join(trunc(noTitle, 8), ", "),
-		})
+		}})
 	}
 	if len(badStatus) > 0 {
-		fs = append(fs, model.Finding{
+		fs = append(fs, item{key: "status", n: len(badStatus), f: model.Finding{
 			Check: CheckName, Severity: model.SevWarn,
 			Title:  fmt.Sprintf("%d plan step(s) carry a status nugit does not classify", len(badStatus)),
 			Detail: "These render as `remaining` regardless of what they mean — `bd` can emit statuses (deferred, pinned, hooked) that are neither done nor in-flight to this reader: " + strings.Join(trunc(badStatus, 8), ", "),
-		})
+		}})
 	}
 	if len(notEpic) > 0 {
-		fs = append(fs, model.Finding{
+		fs = append(fs, item{key: "non-epic", n: len(notEpic), backlog: true, f: model.Finding{
 			Check: CheckName, Severity: model.SevInfo,
 			Title:  fmt.Sprintf("%d issue(s) are not epics and do not render as plan steps", len(notEpic)),
 			Detail: "This store uses `epic` as its plan-step type, so everything else collapses into a footnote. That is the right shape for backlog items parked in the store, and the wrong one for a step that was meant to be tracked: " + strings.Join(trunc(notEpic, 8), ", "),
-		})
+		}})
 	}
 	return fs
 }
@@ -131,7 +182,7 @@ func checkFields(st Store) []model.Finding {
 // checkConcurrentSteps catches a plan with two steps in flight at once. Across
 // plans that is normal — it is what concurrent agents look like. WITHIN one
 // plan it almost always means an earlier step was started and never closed.
-func checkConcurrentSteps(st Store) []model.Finding {
+func checkConcurrentSteps(st Store) []item {
 	byPlan := map[string][]string{}
 	var order []string
 	for _, it := range st.Issues {
@@ -143,16 +194,16 @@ func checkConcurrentSteps(st Store) []model.Finding {
 		}
 		byPlan[it.Plan] = append(byPlan[it.Plan], it.ID)
 	}
-	var fs []model.Finding
+	var fs []item
 	for _, p := range order {
 		if len(byPlan[p]) < 2 {
 			continue
 		}
-		fs = append(fs, model.Finding{
+		fs = append(fs, item{key: "concurrent:" + p, n: len(byPlan[p]), f: model.Finding{
 			Check: CheckName, Severity: model.SevWarn,
 			Title:  fmt.Sprintf("plan %s has %d steps in flight at once", p, len(byPlan[p])),
 			Detail: "A plan is a sequence; two live steps in one usually means an earlier step was started and never closed out. " + strings.Join(byPlan[p], ", "),
-		})
+		}})
 	}
 	return fs
 }
@@ -161,7 +212,7 @@ func checkConcurrentSteps(st Store) []model.Finding {
 // disagree. In a sharded store the FILE decides the plan, so a step whose id
 // family says otherwise lands in a plan its author did not name — and, worse,
 // a plan split across files is one that two agents will still collide on.
-func checkPlanSpread(st Store) []model.Finding {
+func checkPlanSpread(st Store) []item {
 	if !st.Sharded {
 		return nil
 	}
@@ -178,7 +229,7 @@ func checkPlanSpread(st Store) []model.Finding {
 		}
 		files[fam][it.File] = true
 	}
-	var fs []model.Finding
+	var fs []item
 	for _, fam := range order {
 		if len(files[fam]) < 2 {
 			continue
@@ -188,11 +239,11 @@ func checkPlanSpread(st Store) []model.Finding {
 			names = append(names, path.Base(f))
 		}
 		sort.Strings(names)
-		fs = append(fs, model.Finding{
+		fs = append(fs, item{key: "spread:" + fam, n: len(names), f: model.Finding{
 			Check: CheckName, Severity: model.SevWarn,
 			Title:  fmt.Sprintf("plan %s is split across %d store files", fam, len(names)),
 			Detail: "In a sharded store the file names the plan, so these steps render as separate plans — and two agents advancing the same plan still write the same two files. Keep one plan in one file: " + strings.Join(names, ", "),
-		})
+		}})
 	}
 	return fs
 }

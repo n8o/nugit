@@ -342,3 +342,35 @@ func TestReadDirSkipsGitignoredFiles(t *testing.T) {
 		}
 	}
 }
+
+// The PR view carries only the store defects a PR adds to. The pilot's views
+// repeated the same standing plan-store warnings on 416 of 534 PRs.
+func TestLintChangesReportsOnlyWhatThePRWorsens(t *testing.T) {
+	parse := func(lines ...string) Store {
+		return storeOf(ParseJSONL([]byte(strings.Join(lines, "\n"))))
+	}
+	a1 := `{"id":"p-a-1","title":"one","issue_type":"epic","status":"in_progress"}`
+	a2 := `{"id":"p-a-2","title":"two","issue_type":"epic","status":"in_progress"}`
+	a3 := `{"id":"p-a-3","title":"three","issue_type":"epic","status":"in_progress"}`
+	a3closed := `{"id":"p-a-3","title":"three","issue_type":"epic","status":"closed"}`
+	task := `{"id":"p-b-9","title":"a task","issue_type":"task","status":"open"}`
+	task2 := `{"id":"p-b-8","title":"another","issue_type":"task","status":"open"}`
+
+	base := parse(a1, a2, a3, task)
+	if fs := LintChanges(base, true, parse(a1, a2, a3, task)); len(fs) != 0 {
+		t.Errorf("an unchanged store must add nothing to the PR view: %+v", fs)
+	}
+	if fs := LintChanges(base, true, parse(a1, a2, a3closed, task)); len(fs) != 0 {
+		t.Errorf("closing one of three in-flight steps is progress, not a defect: %+v", fs)
+	}
+	if fs := LintChanges(base, true, parse(a1, a2, a3, task, task2)); len(fs) != 0 {
+		t.Errorf("a new non-epic is backlog shape, not a PR defect: %+v", fs)
+	}
+	fs := LintChanges(parse(a1, a2, a3closed), true, parse(a1, a2, a3))
+	if len(fs) != 1 || fs[0].Title != "plan p-a has 3 steps in flight at once" {
+		t.Errorf("starting a third concurrent step is this PR's: %+v", fs)
+	}
+	if fs := LintChanges(Store{}, false, parse(a1, a2)); len(fs) != 1 {
+		t.Errorf("a store new in this PR is all this PR's: %+v", fs)
+	}
+}

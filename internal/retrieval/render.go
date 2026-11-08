@@ -245,7 +245,7 @@ func viaSuffix(via string) string {
 func oneLine(s string) string {
 	s = strings.ReplaceAll(s, "\n", " ")
 	if len(s) > 180 {
-		return s[:180] + "…"
+		return strings.ToValidUTF8(s[:180], "") + "…"
 	}
 	return s
 }

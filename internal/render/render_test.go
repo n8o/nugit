@@ -2,8 +2,10 @@ package render
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/n8o/nugit/internal/model"
 )
@@ -207,5 +209,37 @@ func TestNoDowngradeNoNotice(t *testing.T) {
 	}
 	if strings.Contains(string(crb), "enforcement downgraded") {
 		t.Error("check-run must not mention a downgrade when none happened")
+	}
+}
+
+// A huge PR lists the first files per component and summarizes the rest by
+// directory, so the view stays within what a PR body can hold.
+func TestCodeSectionCapsLongFileLists(t *testing.T) {
+	var files []model.FileChange
+	for i := 0; i < maxFilesPerComponent+40; i++ {
+		dir := "a/gen"
+		if i%4 == 0 {
+			dir = "a/ref"
+		}
+		files = append(files, model.FileChange{Path: fmt.Sprintf("%s/f%03d.txt", dir, i), Status: "A", Added: 2})
+	}
+	out := codeSection(model.CodeDelta{Files: files, ByComp: map[string][]model.FileChange{"c": files}})
+	if got := strings.Count(out, "\n- `"); got != maxFilesPerComponent {
+		t.Errorf("listed %d files, want %d", got, maxFilesPerComponent)
+	}
+	if !strings.Contains(out, "…and 40 more files not listed (+80/-0)") || !strings.Contains(out, "`a/gen/`") {
+		t.Errorf("overflow line missing or wrong:\n%s", out)
+	}
+	if !strings.Contains(out, "**c** — 70 files, +140/-0") {
+		t.Errorf("the component total must still count every file:\n%s", out)
+	}
+}
+
+// oneLine cuts by bytes; a cut inside a multi-byte rune put invalid UTF-8 in
+// 16 of 25 pilot PR views (the plan note ends in "…" lists).
+func TestOneLineNeverSplitsARune(t *testing.T) {
+	s := strings.Repeat("a", 199) + "é and more"
+	if got := oneLine(s); !utf8.ValidString(got) {
+		t.Errorf("invalid UTF-8: %q", got)
 	}
 }

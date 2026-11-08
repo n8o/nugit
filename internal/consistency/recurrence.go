@@ -148,7 +148,7 @@ func recurrenceDetail(fixes []model.Commit, governing []model.KnowledgeObject) s
 	for _, c := range show {
 		s := c.Subject
 		if len(s) > 60 {
-			s = s[:60] + "…"
+			s = strings.ToValidUTF8(s[:60], "") + "…"
 		}
 		parts = append(parts, fmt.Sprintf("%s %q", short(c.SHA), s))
 	}
