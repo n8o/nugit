@@ -222,6 +222,7 @@ deps:
       - "wiring"
   "editgate":
     mayDependOn:
+      - "claim"
       - "config"
       - "gitutil"
       - "retrieval"

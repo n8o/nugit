@@ -135,6 +135,7 @@ graph LR
   doctor --> model_
   doctor --> modelfacts
   doctor --> wiring
+  editgate --> claim
   editgate --> config
   editgate --> gitutil
   editgate --> retrieval

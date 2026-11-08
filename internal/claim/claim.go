@@ -132,11 +132,16 @@ type Source string
 const (
 	FromClaim   Source = "claim"
 	FromCommits Source = "commits"
+	// FromBranchName is a bead id the branch is named after
+	// (feat/irisux-7-scenes → PROJ-irisux-7). Agents name branches after the
+	// bead far more often than they run the claim command.
+	FromBranchName Source = "branch"
 )
 
 // Current is the objective the current branch works toward: its claim, else
 // the first `objective:` named by its own commits (those not on the remote's
-// default branch). Branch is "" outside a branch.
+// default branch), else a bead the branch is named after. Branch is "" outside
+// a branch.
 type Current struct {
 	Branch    string
 	Objective string
@@ -155,21 +160,86 @@ func Resolve(repoDir string) Current {
 		cur.Objective, cur.Source = c.Objective, FromClaim
 		return cur
 	}
-	base := repo.DefaultRemoteBranch()
-	if base == "" {
-		return cur
+	if base := repo.DefaultRemoteBranch(); base != "" {
+		commits, _ := repo.Log(repo.MergeBase(base, "HEAD"), "HEAD") // oldest first
+		for _, c := range commits {
+			if id := trailers.Parse(c.Body).Objective; id != "" {
+				cur.Objective, cur.Source = id, FromCommits
+				return cur
+			}
+		}
 	}
-	commits, err := repo.Log(repo.MergeBase(base, "HEAD"), "HEAD") // oldest first
-	if err != nil {
-		return cur
-	}
-	for _, c := range commits {
-		if id := trailers.Parse(c.Body).Objective; id != "" {
-			cur.Objective, cur.Source = id, FromCommits
-			break
+	if st, err := beads.ReadDir(repoDir); err == nil {
+		if id := BeadInBranch(cur.Branch, st); id != "" {
+			cur.Objective, cur.Source = id, FromBranchName
 		}
 	}
 	return cur
+}
+
+// BeadInBranch returns the bead a branch is named after, or "". A bead
+// matches when its id, or its id without the store's leading prefix segment
+// (PROJ-irisux-7 → irisux-7), appears in the branch name between separators.
+// The short form must carry a letter and a digit, so a bare number never
+// matches. A match contained in a longer match yields to it (the plan
+// PROJ-irisux inside feat/PROJ-irisux-7); two separate beads named in one
+// branch are ambiguous and match nothing.
+func BeadInBranch(branch string, st beads.Store) string {
+	b := strings.ToLower(branch)
+	type hit struct{ id, form string }
+	var hits []hit
+	for _, it := range st.Issues {
+		for _, form := range idForms(it.ID) {
+			if f := strings.ToLower(form); boundedIn(b, f) {
+				hits = append(hits, hit{it.ID, f})
+			}
+		}
+	}
+	winner := ""
+	for _, h := range hits {
+		subsumed := false
+		for _, o := range hits {
+			if o.id != h.id && len(o.form) > len(h.form) && strings.Contains(o.form, h.form) {
+				subsumed = true
+				break
+			}
+		}
+		if subsumed || h.id == winner {
+			continue
+		}
+		if winner != "" {
+			return ""
+		}
+		winner = h.id
+	}
+	return winner
+}
+
+func idForms(id string) []string {
+	forms := []string{id}
+	if _, short, ok := strings.Cut(id, "-"); ok && strings.ContainsAny(short, "0123456789") &&
+		strings.ContainsAny(short, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ") {
+		forms = append(forms, short)
+	}
+	return forms
+}
+
+// boundedIn reports whether needle occurs in s with a separator (or the end
+// of s) on both sides, so irisux-7 matches feat/irisux-7-scenes but not
+// feat/irisux-70.
+func boundedIn(s, needle string) bool {
+	sep := func(c byte) bool { return c == '/' || c == '-' || c == '_' || c == '.' }
+	for i := 0; ; {
+		j := strings.Index(s[i:], needle)
+		if j < 0 {
+			return false
+		}
+		start, end := i+j, i+j+len(needle)
+		if (start == 0 || sep(s[start-1])) && (end == len(s) || sep(s[end])) {
+			return true
+		}
+		i = start + 1
+	}
 }
 
 // Stamp returns msg with `objective: <id>` appended when the message names no

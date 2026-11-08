@@ -18,7 +18,10 @@ SessionStart hook tells you whether this branch already has one.
 - **No objective yet:** find the bead for the task, or create one with
   acceptance criteria. Then run `nugit objective claim <bead-id>` on the task's
   branch. The commit-msg hook then adds `objective: <bead-id>` to every commit,
-  so you don't have to write it.
+  so you don't have to write it. A branch named after its bead
+  (`feat/<bead-id>-short-name`) needs no claim: the hooks read the id from the
+  name. Each new branch needs its own objective, including one you start
+  mid-session; the pre-edit hook reminds you once if a branch has none.
 - **Stay on it.** If the user asks for unrelated work, say so and suggest a
   separate session on its own branch (with agent-deck:
   `agent-deck launch -t "<title>" -c claude -worktree <branch> -b <repo>`)

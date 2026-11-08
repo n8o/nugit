@@ -1278,7 +1278,7 @@ func cmdHook(args []string) int {
 func stampObjective(dir, msgFile string) {
 	defer func() { _ = recover() }() // never block a commit
 	cur := claim.Resolve(dir)
-	if cur.Source != claim.FromClaim {
+	if cur.Source != claim.FromClaim && cur.Source != claim.FromBranchName {
 		return
 	}
 	b, err := os.ReadFile(msgFile)
@@ -1288,11 +1288,15 @@ func stampObjective(dir, msgFile string) {
 	out, added, other := claim.Stamp(string(b), cur.Objective)
 	switch {
 	case other != "":
-		fmt.Fprintf(os.Stderr, "nugit: this commit names objective %s, but %s claims %s; one session, one objective (ADR-0048)\n",
+		fmt.Fprintf(os.Stderr, "nugit: this commit names objective %s, but %s works toward %s; one session, one objective (ADR-0048)\n",
 			other, cur.Branch, cur.Objective)
 	case added:
+		how := "claimed for"
+		if cur.Source == claim.FromBranchName {
+			how = "named by branch"
+		}
 		if os.WriteFile(msgFile, []byte(out), 0o644) == nil {
-			fmt.Fprintf(os.Stderr, "nugit: added `objective: %s` (claimed for %s)\n", cur.Objective, cur.Branch)
+			fmt.Fprintf(os.Stderr, "nugit: added `objective: %s` (%s %s)\n", cur.Objective, how, cur.Branch)
 		}
 	}
 }

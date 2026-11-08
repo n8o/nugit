@@ -19,6 +19,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/n8o/nugit/internal/claim"
 	"github.com/n8o/nugit/internal/config"
 	"github.com/n8o/nugit/internal/gitutil"
 	"github.com/n8o/nugit/internal/retrieval"
@@ -144,6 +145,10 @@ func Evaluate(in Input, opt Options) *Output {
 	}
 	records, _ := usage.Read(root)
 	by := usage.FindCover(records, e, opt.Window)
+	remind := ""
+	if firstEditOnBranch(records, e) {
+		remind = claim.Reminder(nugitRoot)
+	}
 	covered := by != ""
 	_ = usage.Append(root, usage.Record{
 		Time: e.Time, Source: usage.SourceHook, Branch: e.Branch,
@@ -151,18 +156,40 @@ func Evaluate(in Input, opt Options) *Output {
 		Path: rel, Component: e.Component, Tool: in.ToolName,
 		Covered: &covered, CoveredBy: by, Gate: cfg.ContextGate,
 	})
-	if covered {
+	if covered && remind == "" {
 		return nil
 	}
-	msg := Message(rel, e.Component, root)
 	hso := HookSpecificOutput{HookEventName: "PreToolUse"}
-	if cfg.ContextGate == "block" {
-		hso.PermissionDecision = "deny"
-		hso.PermissionDecisionReason = "Blocked by nugit (context_gate: block). " + msg
-	} else {
-		hso.AdditionalContext = msg
+	var context []string
+	if !covered {
+		msg := Message(rel, e.Component, root)
+		if cfg.ContextGate == "block" {
+			hso.PermissionDecision = "deny"
+			hso.PermissionDecisionReason = "Blocked by nugit (context_gate: block). " + msg
+		} else {
+			context = append(context, msg)
+		}
 	}
+	if remind != "" {
+		context = append(context, remind)
+	}
+	hso.AdditionalContext = strings.Join(context, "\n\n")
 	return &Output{HookSpecificOutput: hso}
+}
+
+// firstEditOnBranch reports whether e is the session's first recorded edit on
+// its branch, which is when an unclaimed branch gets its one reminder. With no
+// session id there is no "once" to keep, so it never fires.
+func firstEditOnBranch(records []usage.Record, e usage.Edit) bool {
+	if e.Session == "" || e.Branch == "" || e.Branch == "HEAD" {
+		return false
+	}
+	for _, r := range records {
+		if r.Source == usage.SourceHook && r.Session == e.Session && r.Branch == e.Branch {
+			return false
+		}
+	}
+	return true
 }
 
 // Message is the instruction an uncovered edit gets: short, and naming the

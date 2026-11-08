@@ -427,6 +427,7 @@ workspace "nugit" "Git-native typed knowledge & unified PR view — self-model (
             editgate -> gitutil "resolves the edited file's worktree + branch"
             editgate -> retrieval "resolves the component exactly as context() does"
             editgate -> usage "reads prior context() calls; records the edit"
+            editgate -> claim "reminds an unclaimed branch of its objective, once per session"
             doctor -> agentcfg "detects the installed pre-edit and session-start hooks"
 
             // --- brownfield adoption: prose vs code, before any store exists (ADR-0036) ---
