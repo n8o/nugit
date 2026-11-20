@@ -150,11 +150,15 @@ func Evaluate(in Input, opt Options) *Output {
 		remind = claim.Reminder(nugitRoot)
 	}
 	covered := by != ""
+	lost := ""
+	if !covered {
+		lost = usage.LostCover(records, e, opt.Window)
+	}
 	_ = usage.Append(root, usage.Record{
 		Time: e.Time, Source: usage.SourceHook, Branch: e.Branch,
 		Session: e.Session, AgentSession: e.AgentSession,
 		Path: rel, Component: e.Component, Tool: in.ToolName,
-		Covered: &covered, CoveredBy: by, Gate: cfg.ContextGate,
+		Covered: &covered, CoveredBy: by, Gate: cfg.ContextGate, LostTo: lost,
 	})
 	if covered && remind == "" {
 		return nil
@@ -163,6 +167,9 @@ func Evaluate(in Input, opt Options) *Output {
 	var context []string
 	if !covered {
 		msg := Message(rel, e.Component, root)
+		if lost != "" {
+			msg += " " + LostNote(lost)
+		}
 		if cfg.ContextGate == "block" {
 			hso.PermissionDecision = "deny"
 			hso.PermissionDecisionReason = "Blocked by nugit (context_gate: block). " + msg
@@ -203,6 +210,72 @@ func Message(rel, component, root string) string {
 		"Before editing it further, call the nugit MCP `context` tool with path %q and cwd %q "+
 		"(or run `nugit context -path %s`): it returns the decisions, rejected alternatives, "+
 		"lessons and architecture edges that govern this file.", rel, scope, rel, root, rel)
+}
+
+// LostNote explains an uncovered edit that an earlier call would have
+// covered (ADR-0054): the agent remembers calling context(), and needs to know
+// why that call stopped counting.
+func LostNote(boundary string) string {
+	what := "compacted"
+	if boundary == "clear" {
+		what = "cleared"
+	}
+	return "Your earlier context() call for it no longer counts: this session's context was " + what +
+		" after it, so that bundle is no longer in your window."
+}
+
+// SessionStartInput is the subset of the SessionStart hook's stdin JSON the
+// boundary reads.
+type SessionStartInput struct {
+	SessionID string `json:"session_id"`
+	Cwd       string `json:"cwd"`
+	Source    string `json:"source"` // startup | resume | clear | compact
+}
+
+// SessionStart records a context boundary when a session's window was
+// compacted or cleared (ADR-0054), so the edit gate stops counting calls made
+// before it. Like PreEdit it can never break a session: bad input, a non-reset
+// source, a path outside a checkout, logging or the gate turned off, or a
+// panic all record nothing.
+func SessionStart(stdin []byte, opt Options) {
+	defer func() { _ = recover() }()
+	if opt.Getenv == nil {
+		opt.Getenv = os.Getenv
+	}
+	if opt.Now.IsZero() {
+		opt.Now = time.Now().UTC()
+	}
+	var in SessionStartInput
+	if json.Unmarshal(stdin, &in) != nil || !usage.EndsContext(in.Source) {
+		return
+	}
+	cwd := in.Cwd
+	if cwd == "" {
+		cwd, _ = os.Getwd()
+	}
+	if cwd == "" {
+		return
+	}
+	root, err := gitutil.Repo{Dir: cwd}.WorktreeRoot()
+	if err != nil || root == "" {
+		return
+	}
+	cfg, err := config.Load(filepath.Join(root, opt.NugitDir))
+	if err != nil || cfg.ContextGate == "off" || cfg.Usage.Log == "off" {
+		return // the gate records nothing, so it has no cover to end
+	}
+	session := strings.TrimSpace(in.SessionID)
+	if session == "" {
+		session = strings.TrimSpace(opt.Getenv(usage.SessionEnv))
+	}
+	agent := strings.TrimSpace(opt.Getenv(usage.AgentSessionEnv))
+	if session == "" && agent == "" {
+		return // a boundary nobody can be matched to ends nothing
+	}
+	_ = usage.Append(root, usage.Record{
+		Time: opt.Now, Source: usage.SourceBoundary, Branch: gitutil.Repo{Dir: root}.CurrentBranch(),
+		Session: session, AgentSession: agent, Boundary: in.Source,
+	})
 }
 
 // locate resolves the edited file to (worktree root, absolute path, root-

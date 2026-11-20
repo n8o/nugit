@@ -181,8 +181,9 @@ func sortItems(items []Item) {
 		if oi != oj {
 			return oi < oj
 		}
-		// Relevance rank (ADR-0043): path binding > component > container >
-		// global > one-hop, task-matching first within each tier.
+		// Relevance rank (ADR-0043, ADR-0053): cited by the file > path
+		// binding > component > container > global > one-hop, task-matching
+		// first within each tier.
 		if items[i].rank != items[j].rank {
 			return items[i].rank < items[j].rank
 		}
@@ -208,7 +209,7 @@ func originRank(it Item) int {
 }
 
 func scopeRank(it Item) int {
-	if it.PathBound {
+	if it.Cited || it.PathBound {
 		return 0 // a direct path match is as near as component scope (ADR-0020)
 	}
 	if it.SharedSystem != "" {

@@ -33,10 +33,58 @@ type Edit struct {
 // carry no matching session — the same branch within window. Session matches
 // are preferred over a branch match so the record says how strong the
 // evidence was. Hook records never cover anything: an edit is not a read.
+//
+// A context boundary ends cover (ADR-0054): once e's session was compacted or
+// cleared, only calls made after its latest boundary can cover e, whichever
+// attribution they would match by. The bundle an earlier call returned is no
+// longer in the window, so it no longer informs the edit.
 func FindCover(records []Record, e Edit, window time.Duration) string {
+	return findCover(records, e, window, lastBoundary(records, e).Time)
+}
+
+// LostCover returns the boundary ("compact" or "clear") that ended the cover
+// of a call which would otherwise have covered e, or "" when e is covered or
+// was never covered (ADR-0054). It is what tells an agent why a context()
+// call it remembers making no longer counts.
+func LostCover(records []Record, e Edit, window time.Duration) string {
+	b := lastBoundary(records, e)
+	if b.Time.IsZero() || findCover(records, e, window, b.Time) != "" {
+		return ""
+	}
+	if findCover(records, e, window, time.Time{}) == "" {
+		return ""
+	}
+	return b.Boundary
+}
+
+// lastBoundary is the latest boundary record at or before e that belongs to
+// e's session, by Claude Code session or agent-deck session (zero Record =
+// none). The agent-deck id matters for /clear, which gives the conversation a
+// new Claude Code session id while the MCP server keeps reporting the old one.
+func lastBoundary(records []Record, e Edit) Record {
+	var last Record
+	for _, r := range records {
+		if r.Source != SourceBoundary || r.Time.After(e.Time) {
+			continue
+		}
+		mine := (e.Session != "" && r.Session == e.Session) ||
+			(e.AgentSession != "" && r.AgentSession == e.AgentSession)
+		if mine && r.Time.After(last.Time) {
+			last = r
+		}
+	}
+	return last
+}
+
+// findCover is FindCover with the boundary given: records at or before since
+// cover nothing (zero since = no boundary).
+func findCover(records []Record, e Edit, window time.Duration, since time.Time) string {
 	best := ""
 	for _, r := range records {
-		if r.Source == SourceHook || r.Time.After(e.Time) || !scopeCovers(r, e) {
+		if r.Source == SourceHook || r.Source == SourceBoundary || r.Time.After(e.Time) || !scopeCovers(r, e) {
+			continue
+		}
+		if !since.IsZero() && !r.Time.After(since) {
 			continue
 		}
 		switch {

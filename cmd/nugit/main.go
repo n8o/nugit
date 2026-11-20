@@ -1261,7 +1261,10 @@ func cmdHook(args []string) int {
 		if fs.Parse(args[1:]) != nil {
 			return 0
 		}
-		_, _ = io.Copy(io.Discard, os.Stdin) // the hook JSON; the digest needs only the repo
+		// The hook JSON. The digest needs only the repo; a compact or clear
+		// source also ends the session's context cover (ADR-0054).
+		in, _ := io.ReadAll(io.LimitReader(os.Stdin, 1<<20))
+		editgate.SessionStart(in, editgate.Options{NugitDir: *dir})
 		if out := sessionStartOutput(*dir); out != nil {
 			fmt.Println(string(out))
 		}

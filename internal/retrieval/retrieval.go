@@ -56,6 +56,11 @@ type Item struct {
 	// direct file binding (ADR-0020). The object applies here regardless of
 	// its scope and ranks with component-scoped items.
 	PathBound bool `json:"path_bound,omitempty"`
+	// Cited: the queried file names this object's id in its own text — the
+	// code's author pointed at it from the code it governs (ADR-0053). It
+	// applies here regardless of scope or task, and ranks above every other
+	// tier. Never silently privileged: the marker rides every rendered line.
+	Cited bool `json:"cited,omitempty"`
 	// ReinforcedBy: this object was re-confirmed after a recurrence by these
 	// ids, which widen its applicability (ADR-0019).
 	ReinforcedBy []string `json:"reinforced_by,omitempty"`
@@ -149,6 +154,11 @@ type Bundle struct {
 	// DroppedCount is the true number of budget drops when Dropped had to be
 	// shortened (0 = Dropped is complete).
 	DroppedCount int `json:"dropped_count,omitempty"`
+	// CitedDead names the records the queried file cites that are superseded
+	// or invalidated, each with what superseded it when the store says
+	// (ADR-0053). They are never served as live context, but the file still
+	// points a reader at them, so the bundle says the pointer is stale.
+	CitedDead []string `json:"cited_dead,omitempty"`
 	// Notices are the footer lines a reader must see: a clamp, an omission.
 	Notices []string `json:"notices,omitempty"`
 	// Chars is the size of the bundle's JSON encoding, measured when a char
@@ -251,6 +261,18 @@ func Context(opt Options) (Bundle, error) {
 
 	kw := keywords(opt.Task)
 
+	// Citations (ADR-0053): the ids of LOCAL objects the queried file names.
+	// A bare id in this repo's file names this repo's object; a peer's
+	// ADR-0001 is never what a local comment means by "ADR-0001".
+	localIDs := map[string]bool{}
+	for i := range objs {
+		if !objs[i].Foreign() && objs[i].ID != "" {
+			localIDs[objs[i].ID] = true
+		}
+	}
+	cited := citedIDs(opt.RepoDir, path, localIDs)
+	b.CitedDead = citedDead(objs, cited)
+
 	// In-scope objects: scope == component or "global". Nearer scope (component)
 	// is preferred when both a global and a component-scoped object would fill the
 	// same slot (handled by stable sort: component-scoped first).
@@ -286,7 +308,12 @@ func Context(opt Options) (Bundle, error) {
 		if o.Foreign() {
 			landSys = ownerOf[o.Origin]
 		}
-		if !bound && landSys == "" && !inScope(o, comp, parent) {
+		// Citation (ADR-0053): the queried file names this object. Like a path
+		// binding it substitutes for scope; unlike one it also substitutes for
+		// a task match — the author's own pointer, written in the file, is
+		// stronger evidence of relevance than any keyword overlap.
+		cite := !o.Foreign() && cited[o.ID]
+		if !cite && !bound && landSys == "" && !inScope(o, comp, parent) {
 			continue
 		}
 		// A superseded/invalidated record is known-wrong: never live context,
@@ -300,11 +327,12 @@ func Context(opt Options) (Bundle, error) {
 			// Component-scoped decisions always; global ones only when relevant to
 			// the task (else every global decision floods every path's bundle) —
 			// unless the queried path itself matches the decision's binding.
-			if !bound && landSys == "" && (o.Scope == "" || o.Scope == "global") && len(kw) > 0 && !matches(o, kw) {
+			if !cite && !bound && landSys == "" && (o.Scope == "" || o.Scope == "global") && len(kw) > 0 && !matches(o, kw) {
 				continue
 			}
 			it := toItem(o, "")
 			it.PathBound = bound
+			it.Cited = cite
 			it.SharedSystem = landSys
 			it.rank = relevanceRank(it, o, comp, parent, kw)
 			decisions = append(decisions, it)
@@ -312,20 +340,22 @@ func Context(opt Options) (Bundle, error) {
 		case model.KindSpec:
 			// One spec slot; a ratified spec displaces a proposed placeholder
 			// (ADR-0016) but never the other way around.
-			if (bound || relevant(o, comp, parent)) &&
+			if (cite || bound || relevant(o, comp, parent)) &&
 				(spec == nil || (spec.Status == string(model.StatusProposed) && o.Status != model.StatusProposed)) {
 				if spec != nil {
 					delete(pulled, itemKey(*spec))
 				}
 				it := toItem(o, "")
 				it.PathBound = bound
+				it.Cited = cite
 				spec = &it
 				pulled[knowledge.KeyOf(*o)] = true
 			}
 		case model.KindLesson:
-			if landSys != "" || len(kw) == 0 || matches(o, kw) {
+			if cite || landSys != "" || len(kw) == 0 || matches(o, kw) {
 				it := toItem(o, "")
 				it.PathBound = bound
+				it.Cited = cite
 				it.SharedSystem = landSys
 				it.rank = relevanceRank(it, o, comp, parent, kw)
 				lessons = append(lessons, it)
@@ -334,9 +364,10 @@ func Context(opt Options) (Bundle, error) {
 		case model.KindReference:
 			// Same rule as lessons: keyword-matched when a task is given, all
 			// in-scope otherwise (the budget truncates, never silently).
-			if landSys != "" || len(kw) == 0 || matches(o, kw) {
+			if cite || landSys != "" || len(kw) == 0 || matches(o, kw) {
 				it := toItem(o, "")
 				it.PathBound = bound
+				it.Cited = cite
 				it.SharedSystem = landSys
 				it.rank = relevanceRank(it, o, comp, parent, kw)
 				references = append(references, it)

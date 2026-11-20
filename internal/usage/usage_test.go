@@ -131,6 +131,19 @@ func TestFromBundleSetsReferences(t *testing.T) {
 	}
 }
 
+// The record counts served items the queried file cites (ADR-0053), across
+// every section, the spec slot included.
+func TestFromBundleCountsCited(t *testing.T) {
+	b := retrieval.Bundle{
+		Decisions: []retrieval.Item{{ID: "ADR-1", Cited: true}, {ID: "ADR-2"}},
+		Lessons:   []retrieval.Item{{ID: "LESSON-1", Cited: true}},
+		Spec:      &retrieval.Item{ID: "SPEC-1", Cited: true},
+	}
+	if r := FromBundle("mcp", "", b); r.Cited != 3 {
+		t.Fatalf("want Cited=3, got %d", r.Cited)
+	}
+}
+
 func TestReadMissingLogIsEmpty(t *testing.T) {
 	got, err := Read(t.TempDir())
 	if err != nil || got != nil {
