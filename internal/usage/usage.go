@@ -77,6 +77,9 @@ type Record struct {
 	RequestedBudget int  `json:"requested_budget,omitempty"`
 	Chars           int  `json:"chars,omitempty"`
 	Omitted         int  `json:"omitted,omitempty"`
+	// Cited counts the served items the queried file names by id (ADR-0053):
+	// how often the strongest relevance signal was the code's own pointer.
+	Cited int `json:"cited,omitempty"`
 }
 
 // FromBundle summarizes a served bundle into a Record.
@@ -102,7 +105,24 @@ func FromBundle(source, task string, b retrieval.Bundle) Record {
 		RequestedBudget: b.RequestedBudgetTokens,
 		Chars:           b.Chars,
 		Omitted:         omittedCount(b),
+		Cited:           citedCount(b),
 	}
+}
+
+// citedCount is how many served items the queried file names (ADR-0053).
+func citedCount(b retrieval.Bundle) int {
+	n := 0
+	for _, sec := range [][]retrieval.Item{b.Decisions, b.Lessons, b.References, b.Contracts} {
+		for _, it := range sec {
+			if it.Cited {
+				n++
+			}
+		}
+	}
+	if b.Spec != nil && b.Spec.Cited {
+		n++
+	}
+	return n
 }
 
 func droppedCount(b retrieval.Bundle) int {

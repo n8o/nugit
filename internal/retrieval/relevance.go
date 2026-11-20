@@ -3,6 +3,7 @@ package retrieval
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/n8o/nugit/internal/config"
 	"github.com/n8o/nugit/internal/model"
@@ -32,7 +33,8 @@ const (
 // task-matching item always outranks a non-matching one. Purely ordinal and
 // derived from declared structure: deterministic, LLM-free (ADR-0006).
 const (
-	tierPath      = iota // applies_to_paths binding or org-landscape binding
+	tierCited     = iota // the queried file names this object's id (ADR-0053)
+	tierPath             // applies_to_paths binding or org-landscape binding
 	tierComponent        // scoped to the queried path's component
 	tierContainer        // scoped to the component's parent container
 	tierGlobal           // repo-wide
@@ -59,6 +61,8 @@ func capsFrom(cfg config.Config) caps {
 func relevanceRank(it Item, o *model.KnowledgeObject, comp, parent string, kw map[string]bool) int {
 	tier := tierGlobal
 	switch {
+	case it.Cited:
+		tier = tierCited
 	case it.PathBound || it.SharedSystem != "":
 		tier = tierPath
 	case comp != "" && it.Scope == comp:
@@ -113,6 +117,10 @@ func finalize(b *Bundle) {
 	if b.Clamped {
 		b.Notices = append(b.Notices, fmt.Sprintf(
 			"budget clamped from %d to %d to fit the MCP output window", b.RequestedBudgetTokens, b.BudgetTokens))
+	}
+	if len(b.CitedDead) > 0 {
+		b.Notices = append(b.Notices, "this file cites records that are no longer live, so they are not served: "+
+			strings.Join(b.CitedDead, "; ")+" — follow the successor, and update the citation when you touch it")
 	}
 	for _, kind := range []string{"decision", "lesson", "reference"} {
 		if n := b.Omitted[kind]; n > 0 {

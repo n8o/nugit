@@ -180,8 +180,9 @@ func tierWord(it Item) string {
 
 // tierSuffix marks items on lines that don't carry a full status label
 // (lessons, references) with their trust tier and, when the queried path
-// matches the item's applies_to_paths, the path-bound marker (ADR-0020).
-// Foreign items lead with their origin (ADR-0032).
+// matches the item's applies_to_paths, the path-bound marker (ADR-0020); when
+// the queried file names the item, the cited marker (ADR-0053). Foreign items
+// lead with their origin (ADR-0032).
 func tierSuffix(it Item) string {
 	var parts []string
 	if s := originWord(it); s != "" {
@@ -189,6 +190,9 @@ func tierSuffix(it Item) string {
 	}
 	if t := tierWord(it); t != "" {
 		parts = append(parts, t)
+	}
+	if it.Cited {
+		parts = append(parts, citedWord)
 	}
 	if it.PathBound {
 		parts = append(parts, "path-bound")
@@ -202,6 +206,11 @@ func tierSuffix(it Item) string {
 	return ""
 }
 
+// citedWord is the marker on an item the queried file names (ADR-0053): it
+// says why an item outside the file's scope, or unrelated to the task, is
+// first in the bundle.
+const citedWord = "cited by this file"
+
 // originWord names the peer an item came from, so no line in a bundle can be
 // read as local knowledge when it isn't (ADR-0032). The qualified id already
 // carries the namespace; this says what the prefix MEANS.
@@ -214,7 +223,8 @@ func originWord(it Item) string {
 
 // statusLabel renders an item's status · trust tier, annotated when the
 // object is live but partially overridden by amendments (ADR-0015) and when
-// the queried path matches its applies_to_paths binding (ADR-0020).
+// the queried path matches its applies_to_paths binding (ADR-0020) or names it
+// (ADR-0053).
 func statusLabel(it Item) string {
 	s := it.Status
 	if o := originWord(it); o != "" {
@@ -222,6 +232,9 @@ func statusLabel(it Item) string {
 	}
 	if t := tierWord(it); t != "" {
 		s += " · " + t
+	}
+	if it.Cited {
+		s += " · " + citedWord
 	}
 	if it.PathBound {
 		s += " · path-bound"
