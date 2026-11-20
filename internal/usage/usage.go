@@ -51,7 +51,13 @@ type Record struct {
 	AgentSession string `json:"agent_session,omitempty"`
 	// Hook records only: the editing tool, whether a prior context() call
 	// covered the edit, which attribution matched it, and the gate mode.
-	Tool            string `json:"tool,omitempty"`
+	Tool string `json:"tool,omitempty"`
+	// Boundary records only (ADR-0054): the SessionStart source that ended
+	// the session's context, "compact" or "clear".
+	Boundary string `json:"boundary,omitempty"`
+	// LostTo, on an uncovered hook record, names the boundary that ended the
+	// cover of a call that would otherwise have covered the edit (ADR-0054).
+	LostTo          string `json:"lost_to,omitempty"`
 	Covered         *bool  `json:"covered,omitempty"`
 	CoveredBy       string `json:"covered_by,omitempty"` // session | agent_session | branch
 	Gate            string `json:"gate,omitempty"`       // warn | block
@@ -164,7 +170,20 @@ const (
 	SourceCLI  = "cli"
 	SourceMCP  = "mcp"
 	SourceHook = "hook"
+	// SourceBoundary marks the moment a session's context window lost what
+	// earlier context() calls returned: a compaction or a /clear (ADR-0054).
+	// It is neither a call nor an edit; it ends the cover of every call
+	// before it for that session.
+	SourceBoundary = "boundary"
 )
+
+// EndsContext reports whether a Claude Code SessionStart source discards the
+// conversation the model was holding (ADR-0054). A compaction summarizes it
+// and a /clear drops it; resume restores it, and a fresh startup has none to
+// lose.
+func EndsContext(sessionStartSource string) bool {
+	return sessionStartSource == "compact" || sessionStartSource == "clear"
+}
 
 // SessionEnv is the variable Claude Code sets, to the current session id, in
 // the environment of the processes it spawns: Bash tool commands and stdio MCP
@@ -248,6 +267,13 @@ type EditStats struct {
 	Covered     int            `json:"covered"`
 	CoveragePct float64        `json:"coverage_pct"`
 	ByCoveredBy map[string]int `json:"by_covered_by,omitempty"` // session | agent_session | branch
+	// Resets counts the context boundaries recorded (ADR-0054): the times a
+	// session's window was compacted or cleared, after which its earlier
+	// context() calls no longer cover its edits.
+	Resets int `json:"resets,omitempty"`
+	// LostToReset counts uncovered edits that an earlier call would have
+	// covered but for a reset: what the boundary rule changed.
+	LostToReset int `json:"lost_to_reset,omitempty"`
 	// BySession is present only when some record carries a session id.
 	BySession []SessionStats `json:"by_session,omitempty"`
 }
@@ -293,10 +319,17 @@ func Aggregate(records []Record, since time.Time) Stats {
 		if !since.IsZero() && r.Time.Before(since) {
 			continue
 		}
+		if r.Source == SourceBoundary {
+			s.Edits.Resets++ // not a call: it must not count as context served
+			continue
+		}
 		if r.Source == SourceHook {
 			ss := session(r)
 			s.Edits.Seen++
 			ss.Edits++
+			if r.LostTo != "" {
+				s.Edits.LostToReset++
+			}
 			if r.Covered != nil && *r.Covered {
 				s.Edits.Covered++
 				ss.Covered++
@@ -405,6 +438,10 @@ func (s Stats) writeEdits(b *strings.Builder) {
 	fmt.Fprintf(b, "- **preceded by context()**: %d (%.0f%%)\n", e.Covered, e.CoveragePct)
 	for _, k := range sortedKeys(e.ByCoveredBy) {
 		fmt.Fprintf(b, "  - matched by %s: %d\n", k, e.ByCoveredBy[k])
+	}
+	if e.Resets > 0 {
+		fmt.Fprintf(b, "- **context resets** (compact or /clear; earlier calls stop covering): %d\n", e.Resets)
+		fmt.Fprintf(b, "  - edits uncovered only because of a reset: %d\n", e.LostToReset)
 	}
 	if len(e.BySession) == 0 {
 		return

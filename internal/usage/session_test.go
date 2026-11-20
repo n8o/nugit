@@ -180,3 +180,54 @@ func TestAggregateWithoutSessionsOrEdits(t *testing.T) {
 		t.Errorf("no hook records: no edit section expected")
 	}
 }
+
+// A boundary is neither a call nor an edit: stats count it as a reset and
+// count the edits it uncovered, and never as context served (ADR-0054).
+func TestAggregateCountsResetsNotCalls(t *testing.T) {
+	base := time.Date(2026, 11, 20, 12, 0, 0, 0, time.UTC)
+	f := false
+	records := []Record{
+		{Time: base, Source: SourceMCP, Path: "a.go", Component: "a", Session: "s1", Decisions: 1},
+		{Time: base.Add(time.Minute), Source: SourceBoundary, Session: "s1", Boundary: "compact"},
+		{Time: base.Add(2 * time.Minute), Source: SourceHook, Path: "a.go", Session: "s1", Covered: &f, LostTo: "compact"},
+	}
+	s := Aggregate(records, time.Time{})
+	if s.Calls != 1 || s.BySource[SourceBoundary] != 0 || s.Unresolved != 0 {
+		t.Errorf("a boundary must not count as a call: %+v", s)
+	}
+	if s.Edits.Resets != 1 || s.Edits.LostToReset != 1 || s.Edits.Seen != 1 {
+		t.Errorf("want 1 reset, 1 edit lost to it: %+v", s.Edits)
+	}
+	if md := s.Markdown(); !strings.Contains(md, "context resets") {
+		t.Errorf("markdown must report resets:\n%s", md)
+	}
+}
+
+// FindCover and LostCover over a boundary, without the hook around them.
+func TestFindCoverAfterBoundary(t *testing.T) {
+	base := time.Date(2026, 11, 20, 12, 0, 0, 0, time.UTC)
+	call := Record{Time: base, Source: SourceCLI, Path: "a.go", Session: "s1"}
+	reset := Record{Time: base.Add(time.Minute), Source: SourceBoundary, Session: "s1", Boundary: "compact"}
+	e := Edit{Time: base.Add(2 * time.Minute), Session: "s1", Path: "a.go"}
+
+	if got := FindCover([]Record{call}, e, time.Hour); got != "session" {
+		t.Fatalf("no boundary: want session, got %q", got)
+	}
+	recs := []Record{call, reset}
+	if got := FindCover(recs, e, time.Hour); got != "" {
+		t.Errorf("a call before the boundary must not cover: %q", got)
+	}
+	if got := LostCover(recs, e, time.Hour); got != "compact" {
+		t.Errorf("LostCover = %q, want compact", got)
+	}
+	// A boundary after the edit is not this edit's business.
+	late := Edit{Time: base.Add(30 * time.Second), Session: "s1", Path: "a.go"}
+	if got := FindCover(recs, late, time.Hour); got != "session" {
+		t.Errorf("an edit before the boundary keeps its cover: %q", got)
+	}
+	// Never covered at all: nothing was lost.
+	other := Edit{Time: e.Time, Session: "s1", Path: "b.go"}
+	if got := LostCover(recs, other, time.Hour); got != "" {
+		t.Errorf("an edit no call ever covered lost nothing: %q", got)
+	}
+}
