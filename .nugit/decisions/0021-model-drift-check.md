@@ -74,6 +74,14 @@ twin in `nugit doctor` — one core, two surfaces.**
 5. **The check never feeds the significance verdict** (`IsUndeclaredEdge`
    excludes it): drift is model hygiene, not an architectural change in the PR.
 
+   *Amended 2026-11-21:* a deployable whose source the detector cannot place
+   is still a unit. The detector first derives a source dir from the build
+   context (a Dockerfile inside its own source tree) or from the one
+   directory its COPY lines name. When none can be derived, the unit is its
+   Dockerfile (`Unit.File`), so "its directory" in items 1–3 reads "its
+   Dockerfile": that file is what a glob maps, what a PR touches, and what
+   doctor lists. A derived dir never raises a SPEC-003 confidence tier.
+
 Why touched-dirs-only at PR time *and* a doctor full scan, rather than one or
 the other: a full-repo warn on every PR bills the whole modeling backlog to
 whoever touches the repo next — on a pilot 11 units deep, that is eleven warns

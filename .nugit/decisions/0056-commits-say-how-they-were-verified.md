@@ -51,6 +51,9 @@ What a hook can see, from the Claude Code docs, not assumed:
   `tool_input.subagent_type`.
 - **PostToolUse on `Bash`** has `tool_response` `{stdout, stderr, interrupted}`
   and **no exit-code field**. A failed call goes to `PostToolUseFailure`.
+- **A call with `run_in_background: true`** (Bash or Agent) gets its
+  PostToolUse when it is **launched**: the response names a background task,
+  and no hook fires when that task ends or reports how it exited.
 - `CLAUDE_CODE_SESSION_ID` is set in Bash tool subprocesses, so a `git commit`
   run by the agent passes it to the commit-msg hook. It matches the hook
   `session_id` (ADR-0042).
@@ -73,6 +76,10 @@ What a hook can see, from the Claude Code docs, not assumed:
      `verify.tests` is `tests`, unless the response was interrupted or reports
      a non-zero exit;
    - `UserPromptSubmit`: a typed `/<name>` matching either list.
+
+   A Bash or Agent call run in the background is not evidence. Its hook
+   fires at launch, so a test suite that then fails would otherwise stamp
+   the commit `tests`.
 
    A name matches when its last segment equals an entry, starts with it plus
    `-`, or ends with `-` plus it. The defaults are `verify` for skills,

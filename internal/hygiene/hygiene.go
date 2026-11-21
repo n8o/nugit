@@ -19,6 +19,7 @@ package hygiene
 
 import (
 	"fmt"
+	"math"
 	"regexp"
 	"sort"
 	"strings"
@@ -61,13 +62,20 @@ type Report struct {
 	Rules int    `json:"rules"`
 	Items int    `json:"checklist_items"`
 	// RetrievalSince is the earliest usage record that names what it served.
-	// Zero means the log has none, so "unused" rests on matches alone.
+	// Zero means the log has none.
 	RetrievalSince time.Time `json:"retrieval_since,omitempty"`
-	Scanned        int       `json:"commits_scanned"`
-	Capped         bool      `json:"capped,omitempty"`
-	Unused         []Rule    `json:"unused,omitempty"`
-	DeadPaths      []Rule    `json:"dead_paths,omitempty"`
-	NeverFired     []Rule    `json:"never_fired,omitempty"`
+	// CoverageDays is how many days of the unused window the served-id log
+	// covers, at most Days. Until it is Days, no rule is called unused:
+	// UnusedHeld counts the rules not served or matched so far, and
+	// JudgedFrom is when the log will cover the window.
+	CoverageDays float64   `json:"retrieval_coverage_days"`
+	UnusedHeld   int       `json:"unused_held,omitempty"`
+	JudgedFrom   time.Time `json:"unused_judged_from,omitempty"`
+	Scanned      int       `json:"commits_scanned"`
+	Capped       bool      `json:"capped,omitempty"`
+	Unused       []Rule    `json:"unused,omitempty"`
+	DeadPaths    []Rule    `json:"dead_paths,omitempty"`
+	NeverFired   []Rule    `json:"never_fired,omitempty"`
 }
 
 // Run builds the report for the store at opt.RepoDir.
@@ -119,6 +127,19 @@ func Run(opt Options) (Report, error) {
 		}
 	}
 
+	// "Unused in N days" needs N days of served ids. A log that began inside
+	// the window has not had the chance to see a rule served, so the list
+	// waits for it.
+	covered := false
+	if !rep.RetrievalSince.IsZero() {
+		covered = !rep.RetrievalSince.After(since)
+		rep.CoverageDays = float64(opt.Days)
+		if !covered {
+			rep.CoverageDays = math.Round(opt.Now.Sub(rep.RetrievalSince).Hours()/24*10) / 10
+			rep.JudgedFrom = rep.RetrievalSince.AddDate(0, 0, opt.Days)
+		}
+	}
+
 	// Matched: the items the window's commits fired, and, for never-fired,
 	// the items any commit since the oldest item was written fired.
 	matchedWindow, matchedEver := map[string]bool{}, map[string]bool{}
@@ -159,11 +180,13 @@ func Run(opt Options) (Report, error) {
 	tree, _ := repo.ListTree("HEAD")
 	tracked := make(map[string]bool, len(tree))
 	tops := map[string]bool{}
+	byBase := map[string][]string{} // file name -> tracked paths, for tail matches
 	for _, p := range tree {
 		tracked[p] = true
 		if i := strings.IndexByte(p, '/'); i > 0 {
 			tops[p[:i]] = true
 		}
+		byBase[lastSeg(p)] = append(byBase[lastSeg(p)], p)
 	}
 
 	for _, o := range rules {
@@ -172,23 +195,17 @@ func Run(opt Options) (Report, error) {
 		// the window to be used in.
 		young := !o.Created.IsZero() && o.Created.After(since)
 		if !young && !served[o.ID] && !matchedWindow[o.ID] {
-			d := fmt.Sprintf("served by no context() call in %d days", opt.Days)
-			if isItem {
-				d += " and matched by no commit in them"
-			}
-			if rep.RetrievalSince.IsZero() {
-				d = fmt.Sprintf("the usage log records no served ids yet; matched by no commit in %d days", opt.Days)
-				if !isItem {
-					d = ""
+			if !covered {
+				rep.UnusedHeld++
+			} else {
+				d := fmt.Sprintf("served by no context() call in %d days", opt.Days)
+				if isItem {
+					d += " and matched by no commit in them"
 				}
-			} else if rep.RetrievalSince.After(since) {
-				d += fmt.Sprintf(" (retrieval data only since %s)", rep.RetrievalSince.Format("2006-01-02"))
-			}
-			if d != "" {
 				rep.Unused = append(rep.Unused, Rule{ID: o.ID, Path: o.Path, Item: isItem, Detail: d})
 			}
 		}
-		if dead := deadPaths(o, prefix, tracked, tops); len(dead) > 0 {
+		if dead := deadPaths(o, prefix, tracked, tops, byBase); len(dead) > 0 {
 			rep.DeadPaths = append(rep.DeadPaths, Rule{ID: o.ID, Path: o.Path, Item: isItem,
 				Detail: strings.Join(dead, "; ")})
 		}
@@ -278,7 +295,16 @@ var citedPath = regexp.MustCompile("`([A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.*-]+)+)`")
 // globs that match no tracked file, and body-cited paths under a top-level
 // directory the tree still has that are themselves gone. The top-level
 // filter keeps prose like `a/b` or another repo's paths out of it.
-func deadPaths(o model.KnowledgeObject, prefix string, tracked map[string]bool, tops map[string]bool) []string {
+//
+// A cited path is relative to wherever its author was working: a lesson
+// about one app's UI tests cites `tests/ui/README.md`, meaning the one under
+// that app. So a cite is the TAIL of a path, and it is dead only when no
+// tracked file under the nugit root is it or ends with it. Resolving against
+// the record's scope alone would miss both common cases: a component bound
+// to `<app>/src/**` citing `<app>/tests/…`, and a global lesson citing a
+// file deep in one app. A cite with an elided segment (`helm/.../x.yaml`)
+// names no single path, so it is not judged.
+func deadPaths(o model.KnowledgeObject, prefix string, tracked map[string]bool, tops map[string]bool, byBase map[string][]string) []string {
 	if len(tracked) == 0 {
 		return nil
 	}
@@ -307,14 +333,45 @@ func deadPaths(o model.KnowledgeObject, prefix string, tracked map[string]bool, 
 			continue
 		}
 		seen[p] = true
+		if elided(p) {
+			continue
+		}
 		full := prefix + p
 		top := full[:strings.IndexByte(full, '/')]
-		if !tops[top] || tracked[full] {
+		if !tops[top] || tracked[full] || hasTail(byBase[lastSeg(p)], prefix, p) {
 			continue
 		}
 		dead = append(dead, fmt.Sprintf("cites `%s`, which is no longer in the tree", p))
 	}
 	return dead
+}
+
+// num renders a day count: "0.5", or "12" when it is whole.
+func num(d float64) string {
+	if d == float64(int(d)) {
+		return fmt.Sprintf("%d", int(d))
+	}
+	return fmt.Sprintf("%.1f", d)
+}
+
+// elided reports a cite with a "..." segment, written to shorten a path.
+func elided(p string) bool {
+	for _, seg := range strings.Split(p, "/") {
+		if seg == "..." {
+			return true
+		}
+	}
+	return false
+}
+
+// hasTail reports a tracked path under prefix that ends with "/"+tail.
+func hasTail(candidates []string, prefix, tail string) bool {
+	for _, c := range candidates {
+		if strings.HasPrefix(c, prefix) && strings.HasSuffix(c, "/"+tail) {
+			return true
+		}
+	}
+	return false
 }
 
 func matchesAny(glob string, tracked map[string]bool) bool {
@@ -341,7 +398,8 @@ func (r Report) Markdown() string {
 	if r.RetrievalSince.IsZero() {
 		b.WriteString("- **retrieval data**: none yet — the usage log names served ids from this version on\n")
 	} else {
-		fmt.Fprintf(&b, "- **retrieval data**: since %s\n", r.RetrievalSince.Format("2006-01-02"))
+		fmt.Fprintf(&b, "- **retrieval data**: since %s, %s of the %d-day window\n",
+			r.RetrievalSince.Format("2006-01-02 15:04"), num(r.CoverageDays), r.Days)
 	}
 	if r.Items > 0 {
 		capped := ""
@@ -365,10 +423,22 @@ func (r Report) Markdown() string {
 	}
 	section(fmt.Sprintf("unused in %d days", r.Days),
 		"supersede, merge into a rule that is used, or delete it", r.Unused)
+	if r.UnusedHeld > 0 {
+		fmt.Fprintf(&b, "\n### unused in %d days — held\n\n", r.Days)
+		if r.RetrievalSince.IsZero() {
+			fmt.Fprintf(&b, "_The usage log has no served ids yet, so no rule is judged unused. "+
+				"%d rule(s) have not been served or matched so far._\n", r.UnusedHeld)
+		} else {
+			fmt.Fprintf(&b, "_The usage log names served ids for %s of %d days (since %s). "+
+				"%d rule(s) have not been served or matched so far; they are judged once the log "+
+				"covers the window, on %s._\n", num(r.CoverageDays), r.Days,
+				r.RetrievalSince.Format("2006-01-02 15:04"), r.UnusedHeld, r.JudgedFrom.Format("2006-01-02"))
+		}
+	}
 	section("dead paths", "point the binding at where the code went, or retire the rule with it", r.DeadPaths)
 	section("checklist items that never fired",
 		"loosen the trigger if it should have fired, or delete the item", r.NeverFired)
-	if len(r.Unused)+len(r.DeadPaths)+len(r.NeverFired) == 0 {
+	if len(r.Unused)+len(r.DeadPaths)+len(r.NeverFired)+r.UnusedHeld == 0 {
 		b.WriteString("\n_Nothing to prune._\n")
 	}
 	return b.String()

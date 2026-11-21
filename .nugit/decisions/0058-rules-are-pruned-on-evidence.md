@@ -49,12 +49,22 @@ The tree says which paths still exist.
    (a checklist item is a lesson with a diff trigger) under three headings:
    - **unused in N days:** served by no context() call in the window, and,
      for a checklist item, matched by no commit in it. A rule younger than
-     the window is not judged. With no served ids in the log at all, only
-     checklist items are judged, on matches alone.
+     the window is not judged. The list is **held** until the log's served
+     ids cover the whole window: while the earliest one is inside it, the
+     report gives how many days of the window the log covers, how many rules
+     are unserved so far, and the date it will cover the window, and names
+     none. That includes checklist items, since unused means neither served
+     nor matched. (A pilot run named every rule "unused in 90 days" from less
+     than a day of served ids.)
    - **dead paths:** an `applies_to_paths` or `diff_trigger.paths` glob that
      matches no tracked file, or a backticked file path the body cites that
      is no longer in the tree. To keep prose and other repos' paths out, a
      cited path is checked only when its top-level directory exists here.
+     A cited path is written from wherever its author was working, so it is
+     the tail of a path. It is dead only when no tracked file is it or ends
+     with it, and a cite with an elided `...` segment is not judged. (A
+     pilot run called five cites dead that lived under one app's directory,
+     among them a component bound to `<app>/src/**` citing `tests/ui/…`.)
    - **never fired:** a checklist item that no commit since it was written
      has matched.
 
@@ -93,7 +103,7 @@ The tree says which paths still exist.
 - New `internal/hygiene` component: `cli -> hygiene` and `hygiene ->
   {knowledge, checklist, gitutil, usage, model}` are declared in
   `workspace.dsl`. `gitutil` gains a bounded `LogPatch`.
-- "Unused" stays empty for plain lessons until the log has a window of
-  served ids. That is the honest state of a log that never recorded them.
+- "Unused" stays empty until the log has a window of served ids. That is the
+  honest state of a log that has not recorded them for that long.
 - Decisions are not judged. A decision is in force whether or not anyone is
   shown it, and ADR-0003's supersession is how one stops applying.

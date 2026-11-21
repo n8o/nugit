@@ -355,7 +355,7 @@ func modelCoverage(repoDir string, m model.Model) (bool, string) {
 	}
 	dirs := make([]string, 0, len(unmodeled))
 	for _, u := range unmodeled {
-		dirs = append(dirs, u.Dir)
+		dirs = append(dirs, u.Key()) // a deployable with no source dir is named by its Dockerfile
 	}
 	shown := dirs
 	if len(shown) > 5 {

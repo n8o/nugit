@@ -335,3 +335,24 @@ func checkByName(t *testing.T, rep Report, name string) Check {
 	t.Fatalf("check %q missing from doctor report", name)
 	return Check{}
 }
+
+// Doctor's backlog names a deployable known only by its Dockerfile.
+func TestModelCoverageListsDockerfileOnlyUnits(t *testing.T) {
+	dir := t.TempDir()
+	write(t, dir, ".nugit/architecture/workspace.dsl",
+		"workspace \"m\" {\n  model {\n    s = softwareSystem \"m\" {\n"+
+			"      core = component \"Core\" { properties { paths \"libs/core/**\" } }\n"+
+			"    }\n  }\n}\n")
+	write(t, dir, "libs/core/CMakeLists.txt", "add_library(core core.cpp)\n")
+	write(t, dir, "docker/Dockerfile.acme-probe", "FROM alpine\nRUN apk add curl\n")
+
+	for _, c := range Run(dir).Checks {
+		if c.Name == "model covers detected units" {
+			if c.OK || !strings.Contains(c.Detail, "docker/Dockerfile.acme-probe") {
+				t.Fatalf("the coverage scan must list the Dockerfile-only deployable, got OK=%v %q", c.OK, c.Detail)
+			}
+			return
+		}
+	}
+	t.Fatal("model-coverage check missing from doctor report")
+}

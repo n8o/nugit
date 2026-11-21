@@ -6,8 +6,10 @@
 package deploy
 
 import (
+	"encoding/json"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -40,10 +42,15 @@ var (
 
 // Dockerfile is a parsed deployable image definition.
 type Dockerfile struct {
-	Path         string // repo-relative
-	Image        string // suffix of Dockerfile.<image>, else parent dir name
-	Binary       string // artifact copied into the runtime stage, if any
-	SourceDir    string // apps/<svc> the image ships, if determinable
+	Path      string // repo-relative
+	Image     string // suffix of Dockerfile.<image>, else parent dir name
+	Binary    string // artifact copied into the runtime stage, if any
+	SourceDir string // apps/<svc> the image ships, if determinable
+	// DerivedDir is the source dir read from the build context or the COPY
+	// lines when the apps/ rules find none (DerivedFrom says how). It gives
+	// the unit a path; it never raises a confidence tier.
+	DerivedDir   string
+	DerivedFrom  string
 	Language     string // cpp|python|rust|go|node|unknown
 	IsBaseOrTest bool   // base/builder/sdk/test/init → not a first-party service
 }
@@ -129,6 +136,12 @@ func Detect(repoDir string) ([]Container, Summary, error) {
 			c.Evidence = append(c.Evidence, "deploy-confirmed: "+img)
 			matched[key] = true
 		}
+		// The derived source dir is set after the tiers and the deploy match,
+		// which read only the apps/ rules, so it changes neither.
+		if c.SourceDir == "" && d.DerivedDir != "" {
+			c.SourceDir = d.DerivedDir
+			c.Evidence = append(c.Evidence, d.DerivedFrom)
+		}
 		out = append(out, c)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
@@ -208,8 +221,170 @@ func parseDockerfile(repoDir, rel string) Dockerfile {
 			df.SourceDir = m[1]
 		}
 	}
-	df.Language = detectLanguage(repoDir, df.SourceDir, text)
+	langDir := df.SourceDir
+	if df.SourceDir == "" {
+		df.DerivedDir, df.DerivedFrom = deriveSourceDir(repoDir, rel, df.Image, text)
+		langDir = df.DerivedDir
+	}
+	df.Language = detectLanguage(repoDir, langDir, text)
 	return df
+}
+
+// deriveSourceDir finds the source an image is built from when the apps/
+// rules find none, so the deployable has a path a change can touch.
+//
+//   - A Dockerfile inside a source tree (not under docker/, not at the root)
+//     is built with its own directory as the context: that is its source.
+//   - Otherwise the context is the repo root, and the source is what the
+//     image COPYs or ADDs from it: the one directory those lines name, or,
+//     when they name several, the one whose name is the image's.
+//
+// Anything else derives nothing, and the unit is known by its Dockerfile.
+func deriveSourceDir(repoDir, rel, image, text string) (dir, from string) {
+	if d := path.Dir(rel); d != "." && isNested(rel) {
+		return d, "source dir is the build context: " + d
+	}
+	var dirs []string
+	srcOf := map[string]string{}
+	for _, src := range copySources(text) {
+		d := sourceDirOf(repoDir, src)
+		if d == "" {
+			continue
+		}
+		if _, ok := srcOf[d]; !ok {
+			srcOf[d] = src
+			dirs = append(dirs, d)
+		}
+	}
+	dirs = outermost(dirs)
+	switch {
+	case len(dirs) == 1:
+		return dirs[0], "source dir from COPY " + srcOf[dirs[0]]
+	case len(dirs) > 1:
+		if d := namedFor(image, dirs); d != "" {
+			return d, "source dir from COPY " + srcOf[d] + " (named for the image)"
+		}
+	}
+	return "", ""
+}
+
+// copySources returns the source arguments of each COPY or ADD that reads
+// the build context: no --from (a stage or image), no heredoc, no URL.
+func copySources(text string) []string {
+	text = strings.ReplaceAll(text, "\\\r\n", " ")
+	text = strings.ReplaceAll(text, "\\\n", " ")
+	var out []string
+	for _, line := range strings.Split(text, "\n") {
+		f := strings.Fields(line)
+		if len(f) < 3 {
+			continue
+		}
+		if kw := strings.ToUpper(f[0]); kw != "COPY" && kw != "ADD" {
+			continue
+		}
+		args := f[1:]
+		for len(args) > 0 && strings.HasPrefix(args[0], "--") {
+			if strings.HasPrefix(args[0], "--from") {
+				args = nil
+				break
+			}
+			args = args[1:]
+		}
+		if len(args) > 0 && strings.HasPrefix(args[0], "[") {
+			var arr []string
+			if json.Unmarshal([]byte(strings.Join(args, " ")), &arr) != nil {
+				continue
+			}
+			args = arr
+		}
+		if len(args) < 2 {
+			continue
+		}
+		for _, src := range args[:len(args)-1] {
+			if strings.HasPrefix(src, "<<") || strings.Contains(src, "://") || strings.Contains(src, "$") {
+				continue
+			}
+			out = append(out, src)
+		}
+	}
+	return out
+}
+
+// sourceDirOf is the repo directory a COPY source names: itself when it is a
+// directory, its parent when it is a file or a glob, and "" for the repo
+// root or for anything the tree does not have.
+func sourceDirOf(repoDir, src string) string {
+	p := path.Clean(strings.TrimPrefix(src, "./"))
+	if strings.HasPrefix(p, "..") || strings.HasPrefix(p, "/") {
+		return ""
+	}
+	if strings.ContainsAny(path.Base(p), "*?[") {
+		p = path.Dir(p)
+	}
+	st, err := os.Stat(filepath.Join(repoDir, filepath.FromSlash(p)))
+	switch {
+	case err != nil:
+		return ""
+	case !st.IsDir():
+		p = path.Dir(p)
+	}
+	if p == "." || p == "" {
+		return ""
+	}
+	return p
+}
+
+// outermost drops each directory another one in the list contains.
+func outermost(dirs []string) []string {
+	var out []string
+	for _, d := range dirs {
+		inside := false
+		for _, o := range dirs {
+			if o != d && strings.HasPrefix(d, o+"/") {
+				inside = true
+				break
+			}
+		}
+		if !inside {
+			out = append(out, d)
+		}
+	}
+	return out
+}
+
+// namedFor picks the directory whose name is the image's: equal after
+// dropping case and punctuation, else one containing the other (at least
+// four characters, so "src" or "lib" never matches by accident). Two
+// candidates at the same level are ambiguous, and pick none.
+func namedFor(image string, dirs []string) string {
+	img := alnum(image)
+	var equal, contains []string
+	for _, d := range dirs {
+		b := alnum(path.Base(d))
+		switch {
+		case b == img:
+			equal = append(equal, d)
+		case len(b) >= 4 && len(img) >= 4 && (strings.Contains(b, img) || strings.Contains(img, b)):
+			contains = append(contains, d)
+		}
+	}
+	if len(equal) == 1 {
+		return equal[0]
+	}
+	if len(equal) == 0 && len(contains) == 1 {
+		return contains[0]
+	}
+	return ""
+}
+
+func alnum(s string) string {
+	var b strings.Builder
+	for _, r := range strings.ToLower(s) {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
 }
 
 // detectLanguage prefers the source dir's build files, falling back to Dockerfile cues.

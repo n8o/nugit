@@ -3,6 +3,7 @@ package deploy
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -154,5 +155,87 @@ func TestTestingImagesAreSkippedAndAdaptersCounted(t *testing.T) {
 		if got := baseOrTestImage.MatchString(img); got != want {
 			t.Errorf("baseOrTestImage(%q) = %v, want %v", img, got, want)
 		}
+	}
+}
+
+// A deployable the apps/ rules cannot place still gets a source dir when its
+// build context or its COPY lines name one, and that never raises its tier or
+// confirms it against a deployment by a dir name alone.
+func TestDerivedSourceDirs(t *testing.T) {
+	root := t.TempDir()
+
+	// One source dir, named only by the files the image copies from it.
+	write(t, root, "third_party/acme-bridge/adapter/package.json", "{}\n")
+	write(t, root, "third_party/acme-bridge/adapter/index.js", "\n")
+	write(t, root, "docker/Dockerfile.acme-bridge-adapter",
+		"FROM node:22\nWORKDIR /app\nCOPY third_party/acme-bridge/adapter/package.json ./\n"+
+			"COPY third_party/acme-bridge/adapter/index.js ./\nCMD [\"node\", \"index.js\"]\n")
+
+	// A Dockerfile in its own source tree: the build context is its dir.
+	write(t, root, "services/acme-ingest/main.py", "\n")
+	write(t, root, "services/acme-ingest/Dockerfile", "FROM python:3.12\nCOPY . /app\n")
+
+	// Two dirs; the one named for the image is its source. It ships Python,
+	// which would be HIGH-2 under the apps/ rule, and must stay NEEDS-AGENT.
+	write(t, root, "libs/acme_shared/shared.py", "\n")
+	write(t, root, "tools/acme-report/requirements.txt", "requests\n")
+	write(t, root, "docker/Dockerfile.acme-report",
+		"FROM python:3.12\nCOPY libs/acme_shared/ /opt/shared/\nCOPY --chown=app:app tools/acme-report/ /opt/report/\n")
+
+	// The exec (JSON) form, and a stage copy that is not the context.
+	write(t, root, "tools/acme-json/run.sh", "#!/bin/sh\n")
+	write(t, root, "docker/Dockerfile.acme-json",
+		"FROM alpine\nCOPY --from=builder /out/acme /usr/local/bin/\nCOPY [\"tools/acme-json/run.sh\", \"/usr/local/bin/\"]\n")
+
+	// Several unrelated dirs and a root file: no single source.
+	write(t, root, "cmake/x.cmake", "\n")
+	write(t, root, "common/c.h", "\n")
+	write(t, root, "CMakeLists.txt", "project(acme)\n")
+	write(t, root, "docker/Dockerfile.acme-suite",
+		"FROM ubuntu\nCOPY cmake/ /src/cmake/\nCOPY libs/ /src/libs/\nCOPY common/ /src/common/\nCOPY CMakeLists.txt /src/\n")
+
+	// Nothing copied at all.
+	write(t, root, "docker/Dockerfile.acme-probe", "FROM alpine\nRUN apk add curl\n")
+
+	// A deployment named for a derived dir's base, not for the image.
+	write(t, root, "k8s/acme.yaml",
+		"kind: Deployment\nspec:\n  template:\n    spec:\n      containers:\n        - image: registry.acme.com/app/adapter:1\n")
+
+	got, _, err := Detect(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	by := map[string]Container{}
+	for _, c := range got {
+		by[c.Name] = c
+	}
+	for name, want := range map[string]string{
+		"acme-bridge-adapter": "third_party/acme-bridge/adapter",
+		"acme-ingest":         "services/acme-ingest",
+		"acme-report":         "tools/acme-report",
+		"acme-json":           "tools/acme-json",
+		"acme-suite":          "",
+		"acme-probe":          "",
+	} {
+		c, ok := by[name]
+		if !ok {
+			t.Errorf("%s: not detected: %+v", name, got)
+			continue
+		}
+		if c.SourceDir != want {
+			t.Errorf("%s: source dir %q, want %q (evidence %v)", name, c.SourceDir, want, c.Evidence)
+		}
+		if c.Confidence != "NEEDS-AGENT" {
+			t.Errorf("%s: a derived source dir must not raise the tier, got %s", name, c.Confidence)
+		}
+		if want != "" && !strings.Contains(strings.Join(c.Evidence, "; "), "source dir") {
+			t.Errorf("%s: evidence must say where the source dir came from: %v", name, c.Evidence)
+		}
+	}
+	if c := by["acme-report"]; c.Language != "python" {
+		t.Errorf("acme-report: language from its derived dir = %q, want python", c.Language)
+	}
+	if by["acme-bridge-adapter"].DeployConfirmed {
+		t.Error("a derived dir's base name must not confirm a deployment")
 	}
 }
