@@ -113,8 +113,12 @@ What a hook can see, from the Claude Code docs, not assumed:
    by kind and lists every unverified one with its reason. Under **enforce**,
    an `unverified-commits` warn names the commits with no line, a bare `none`,
    or a release. Merge commits are skipped: an "Update branch" merge carries
-   no work of its own, and no hook could have stamped it. Under observe it never warns. A repo that has never stamped
-   a commit sees nothing new.
+   no work of its own, and no hook could have stamped it. The commit-msg hook
+   skips a merge for the same reason (`git merge` runs it too, and enforce
+   must not stop an agent merging the default branch in): it sees `MERGE_HEAD`
+   beside the message file git hands it, with no extra git call. Under
+   observe the view never warns. A repo that has never stamped a commit sees
+   nothing new.
 
 6. **`nugit stats`** reports evidence by kind and the gate's verdicts:
    verified, explained, would-block, blocked, released. `nugit doctor` reports

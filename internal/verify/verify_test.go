@@ -236,3 +236,36 @@ func TestCommitMsgBlocks(t *testing.T) {
 		t.Errorf("a blocked message is left as written: %q", b)
 	}
 }
+
+// `git merge` runs the commit-msg hook too, with its message file in the git
+// dir beside MERGE_HEAD, and so does the `git commit` that concludes a
+// conflicted merge. The PR view skips merge commits (they carry no work of
+// their own), so the hook does too: under enforce an agent's merge of the
+// default branch is never blocked, and no merge is stamped `verified: none`.
+func TestCommitMsgSkipsAMerge(t *testing.T) {
+	dir := gitInit(t)
+	c := cfg("enforce")
+	gitDir := filepath.Join(dir, ".git")
+	f := filepath.Join(gitDir, "MERGE_MSG")
+	merge := "Merge branch 'main' into feat/x\n"
+	_ = os.WriteFile(f, []byte(merge), 0o644)
+	if err := os.WriteFile(filepath.Join(gitDir, "MERGE_HEAD"), []byte("0123456789abcdef0123456789abcdef01234567\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	env := map[string]string{usage.SessionEnv: "s1"}
+	var stderr bytes.Buffer
+	if code := CommitMsg(dir, f, &stderr, Options{Now: t0, Config: &c, Getenv: func(k string) string { return env[k] }}); code != 0 {
+		t.Fatalf("a merge was blocked: code=%d stderr=%s", code, stderr.String())
+	}
+	if b, _ := os.ReadFile(f); string(b) != merge {
+		t.Errorf("a merge message was stamped: %q", b)
+	}
+	if recs, _ := usage.Read(dir); len(recs) != 0 {
+		t.Errorf("a merge was recorded as a commit verdict: %+v", recs)
+	}
+	// The same message file with no merge in progress is an ordinary commit.
+	_ = os.Remove(filepath.Join(gitDir, "MERGE_HEAD"))
+	if code := CommitMsg(dir, f, &stderr, Options{Now: t0, Config: &c, Getenv: func(k string) string { return env[k] }}); code != 1 {
+		t.Errorf("with no merge in progress the gate applies: code=%d", code)
+	}
+}

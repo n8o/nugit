@@ -492,6 +492,14 @@ func CommitMsg(dir, msgFile string, stderr io.Writer, opt Options) (code int) {
 	if err != nil || cfg.Verify.Gate == Off || cfg.Usage.Log == "off" {
 		return 0
 	}
+	// A merge carries no work of its own, so the PR view skips it, and so
+	// does the gate: `git merge` runs this hook too, and enforce must not
+	// stop an agent merging the default branch in. Git hands the hook a
+	// message file in the git dir, where MERGE_HEAD sits while a merge is
+	// being concluded: a stat, not one more git call on the commit path.
+	if _, err := os.Stat(filepath.Join(filepath.Dir(msgFile), "MERGE_HEAD")); err == nil {
+		return 0
+	}
 	b, err := os.ReadFile(msgFile)
 	if err != nil {
 		return 0

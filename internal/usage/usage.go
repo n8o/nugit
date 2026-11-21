@@ -531,26 +531,6 @@ const maxSessionRows = 15
 
 // writeEdits renders edit-time coverage (ADR-0042). Silent until the
 // pre-edit hook has recorded something, so a repo without it sees no change.
-// writeVerify renders the commit gate's record (ADR-0056). would-block is the
-// number to read before moving a repo from observe to enforce.
-func (s Stats) writeVerify(b *strings.Builder) {
-	v := s.Verify
-	if v.Commits == 0 && v.Blocked == 0 && len(v.Evidence) == 0 {
-		return
-	}
-	b.WriteString("\n### verification (verify gate)\n\n")
-	if len(v.Evidence) > 0 {
-		b.WriteString("- **evidence recorded**:")
-		for _, k := range sortedKeys(v.Evidence) {
-			fmt.Fprintf(b, " %s %d", k, v.Evidence[k])
-		}
-		b.WriteString("\n")
-	}
-	fmt.Fprintf(b, "- **agent commits**: %d — verified %d, explained %d, released %d\n", v.Commits, v.Verified, v.Explained, v.Released)
-	fmt.Fprintf(b, "- **would have been blocked** (observe): %d\n", v.WouldBlock)
-	fmt.Fprintf(b, "- **blocked** (enforce): %d\n", v.Blocked)
-}
-
 func (s Stats) writeEdits(b *strings.Builder) {
 	e := s.Edits
 	if e.Seen == 0 {
@@ -577,6 +557,26 @@ func (s Stats) writeEdits(b *strings.Builder) {
 		}
 		fmt.Fprintf(b, "  - %s: %d · %d · %d\n", ss.Session, ss.Calls, ss.Edits, ss.Covered)
 	}
+}
+
+// writeVerify renders the commit gate's record (ADR-0056). would-block is the
+// number to read before moving a repo from observe to enforce.
+func (s Stats) writeVerify(b *strings.Builder) {
+	v := s.Verify
+	if v.Commits == 0 && v.Blocked == 0 && len(v.Evidence) == 0 {
+		return
+	}
+	b.WriteString("\n### verification (verify gate)\n\n")
+	if len(v.Evidence) > 0 {
+		b.WriteString("- **evidence recorded**:")
+		for _, k := range sortedKeys(v.Evidence) {
+			fmt.Fprintf(b, " %s %d", k, v.Evidence[k])
+		}
+		b.WriteString("\n")
+	}
+	fmt.Fprintf(b, "- **agent commits**: %d — verified %d, explained %d, released %d\n", v.Commits, v.Verified, v.Explained, v.Released)
+	fmt.Fprintf(b, "- **would have been blocked** (observe): %d\n", v.WouldBlock)
+	fmt.Fprintf(b, "- **blocked** (enforce): %d\n", v.Blocked)
 }
 
 type kv struct {
