@@ -112,3 +112,24 @@ func TestNoRetrievalDataNamesNoPlainLesson(t *testing.T) {
 		t.Errorf("no data, no verdict: %+v", rep.Unused)
 	}
 }
+
+// From a nested nugit root a binding to a file that exists is not dead, and
+// a cited file that is gone is.
+func TestNestedRootDeadPaths(t *testing.T) {
+	root := t.TempDir()
+	run(t, root, nil, "init", "-q", "-b", "main")
+	put(t, root, "README.md", "x\n")
+	put(t, root, "apps/op/db/a.sql", "select 1;\n")
+	op := filepath.Join(root, "apps", "op")
+	put(t, op, ".nugit/lessons/live.md", lesson("LESSON-live", "2026-01-01T00:00:00Z",
+		"applies_to_paths: [\"apps/op/db/**\"]\n", "see `db/a.sql`"))
+	put(t, op, ".nugit/lessons/gone.md", lesson("LESSON-gone", "2026-01-01T00:00:00Z", "", "see `db/removed.sql`"))
+	commitAt(t, root, "seed", now.AddDate(0, -6, 0))
+	rep, err := Run(Options{RepoDir: op, Now: now, Ref: "HEAD"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rep.DeadPaths) != 1 || rep.DeadPaths[0].ID != "LESSON-gone" {
+		t.Fatalf("dead paths from a nested root: %+v", rep.DeadPaths)
+	}
+}
