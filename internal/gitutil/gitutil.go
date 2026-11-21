@@ -598,6 +598,48 @@ const (
 	fieldSep  = "\x1f" // unit separator
 )
 
+// PatchCommit is one commit's diff against its parent, from LogPatch.
+type PatchCommit struct {
+	SHA  string
+	Time time.Time
+	Diff string
+}
+
+// LogPatch returns the non-merge commits reachable from ref in the last
+// sinceDays (0 = no date bound) that touch paths (git-root-relative; none =
+// all), newest first, each with its unified diff limited to those paths. Both
+// bounds keep a history scan O(window), like LogSince and ChurnSince: maxCount
+// caps the commits read however long the window is.
+func (r Repo) LogPatch(ref string, sinceDays, maxCount int, paths []string) ([]PatchCommit, error) {
+	args := []string{"-c", "core.quotepath=false", "log", "--no-merges", "-p", "--no-color", "--no-ext-diff",
+		"--format=" + commitSep + "%H" + fieldSep + "%cI", fmt.Sprintf("--max-count=%d", maxCount)}
+	if sinceDays > 0 {
+		args = append(args, fmt.Sprintf("--since=%d.days.ago", sinceDays))
+	}
+	args = append(args, ref, "--")
+	for _, p := range paths {
+		args = append(args, ":(top)"+p)
+	}
+	out, err := r.git(args...)
+	if err != nil {
+		return nil, err
+	}
+	var commits []PatchCommit
+	for _, rec := range strings.Split(out, commitSep) {
+		if strings.TrimSpace(rec) == "" {
+			continue
+		}
+		head, diff, _ := strings.Cut(rec, "\n")
+		sha, when, ok := strings.Cut(head, fieldSep)
+		if !ok {
+			continue
+		}
+		t, _ := time.Parse(time.RFC3339, strings.TrimSpace(when))
+		commits = append(commits, PatchCommit{SHA: strings.TrimSpace(sha), Time: t, Diff: diff})
+	}
+	return commits, nil
+}
+
 // ChurnSince counts, per git-root-relative path, how many of the last maxCount
 // non-merge commits within sinceDays touched it. One git invocation for the
 // whole repo: the alternative — asking per component — is a git call per

@@ -20,6 +20,7 @@ graph LR
   evidence["Evidence tiers"]
   gitutil["Git plumbing"]
   goimports["Go import analyzer"]
+  hygiene["Rule hygiene"]
   icepanel["IcePanel projection"]
   knowledge["Knowledge reader"]
   localmem["Working memory"]
@@ -83,6 +84,7 @@ graph LR
   cli --> editgate
   cli --> engine
   cli --> gitutil
+  cli --> hygiene
   cli --> icepanel
   cli --> knowledge
   cli --> localmem
@@ -170,6 +172,11 @@ graph LR
   evidence --> model_
   evidence --> tsdeps
   gitutil --> model_
+  hygiene --> checklist
+  hygiene --> gitutil
+  hygiene --> knowledge
+  hygiene --> model_
+  hygiene --> usage
   icepanel --> model_
   knowledge --> gitutil
   knowledge --> model_

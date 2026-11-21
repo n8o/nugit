@@ -219,6 +219,9 @@ func ParseDiff(diff string) map[string]Lines {
 			if cur == "" {
 				cur = oldPath // a deletion: +++ /dev/null
 			}
+			if _, ok := out[cur]; !ok && cur != "" {
+				out[cur] = Lines{} // changed, even if no hunk follows
+			}
 			continue
 		case strings.HasPrefix(raw, "@@"):
 			inHunk = cur != ""

@@ -33,6 +33,7 @@ import (
 	"github.com/n8o/nugit/internal/editgate"
 	"github.com/n8o/nugit/internal/engine"
 	"github.com/n8o/nugit/internal/gitutil"
+	"github.com/n8o/nugit/internal/hygiene"
 	"github.com/n8o/nugit/internal/icepanel"
 	"github.com/n8o/nugit/internal/knowledge"
 	"github.com/n8o/nugit/internal/localmem"
@@ -67,7 +68,8 @@ usage:
   nugit skill [flags]         print/install the agent skill files that teach an agent to use nugit
   nugit context [flags]       scoped, typed knowledge bundle for a path (for agents)
   nugit mcp [flags]           run the MCP stdio server (exposes context() to agents)
-  nugit stats [flags]         aggregate the local context() usage log (+ edit coverage, per session)
+  nugit stats [flags]         aggregate the local context() usage log (+ edit coverage, per session);
+                              -rules [-days 90]: rule hygiene — unused, dead-path, never-fired rules (ADR-0058)
   nugit remember [flags]      jot ephemeral working memory (.nugit-local/, gitignored)
   nugit objective [claim <id>] show, or claim, the objective this branch's session works toward (ADR-0048)
   nugit orphans [flags]       report work started toward an objective and then left (ADR-0048, read-only)
@@ -1544,7 +1546,28 @@ func cmdStats(args []string) int {
 	dir := fs.String("C", ".", "repo directory")
 	since := fs.String("since", "", "window: a duration (e.g. 168h) or a date (YYYY-MM-DD); default all")
 	format := fs.String("format", "markdown", "output: markdown|json")
+	rules := fs.Bool("rules", false, "report rule hygiene instead: lessons and checklist items unused, pointing at gone paths, or never fired (ADR-0058)")
+	days := fs.Int("days", 90, "with -rules: the unused window in days")
 	_ = fs.Parse(args)
+
+	if *rules {
+		rep, err := hygiene.Run(hygiene.Options{RepoDir: *dir, Days: *days})
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "nugit stats: %v\n", err)
+			return 1
+		}
+		if *format == "json" {
+			out, err := json.MarshalIndent(rep, "", "  ")
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "nugit stats: %v\n", err)
+				return 1
+			}
+			fmt.Println(string(out))
+			return 0
+		}
+		fmt.Print(rep.Markdown())
+		return 0
+	}
 
 	var cutoff time.Time
 	if *since != "" {

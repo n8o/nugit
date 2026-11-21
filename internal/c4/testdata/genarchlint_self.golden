@@ -47,6 +47,8 @@ components:
     in: "internal/gitutil/**"
   "goimports":
     in: "internal/goimports/**"
+  "hygiene":
+    in: "internal/hygiene/**"
   "icepanel":
     in: "internal/icepanel/**"
   "knowledge":
@@ -158,6 +160,7 @@ deps:
       - "editgate"
       - "engine"
       - "gitutil"
+      - "hygiene"
       - "icepanel"
       - "knowledge"
       - "localmem"
@@ -271,6 +274,13 @@ deps:
       - "model_"
   "goimports":
     mayDependOn: []
+  "hygiene":
+    mayDependOn:
+      - "checklist"
+      - "gitutil"
+      - "knowledge"
+      - "model_"
+      - "usage"
   "icepanel":
     mayDependOn:
       - "model_"
