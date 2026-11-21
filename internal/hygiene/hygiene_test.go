@@ -201,3 +201,40 @@ func TestNestedRootDeadPaths(t *testing.T) {
 		t.Fatalf("dead paths from a nested root: %+v", rep.DeadPaths)
 	}
 }
+
+// A relative cite names a file by the tail of its path, written from the code
+// its author was in. It is dead only when no tracked file has that tail.
+func TestRelativeCitesResolveWhereTheirAuthorMeantThem(t *testing.T) {
+	dir := t.TempDir()
+	run(t, dir, nil, "init", "-q", "-b", "main")
+	old := "2026-01-01T00:00:00Z"
+	put(t, dir, "tests/smoke.sh", "#!/bin/sh\n") // a top-level tests/ dir exists too
+	put(t, dir, "helm/Chart.yaml", "name: acme\n")
+	put(t, dir, "k8s/base/kustomization.yaml", "resources: []\n")
+	put(t, dir, "apps/acme-panel/src/main.go", "package main\n")
+	put(t, dir, "apps/acme-panel/tests/ui/README.md", "x\n")
+	put(t, dir, "apps/acme-api/src/k8s/types.ts", "export {}\n")
+	put(t, dir, "helm/acme/templates/acme-pool.yaml", "kind: Service\n")
+	// A component-scoped lesson citing a path under its component's project dir.
+	put(t, dir, ".nugit/lessons/panel.md", lesson("LESSON-panel", old, "",
+		"the gestures are listed in `tests/ui/README.md`"))
+	// A global lesson citing a file deep in one app.
+	put(t, dir, ".nugit/lessons/crd.md", lesson("LESSON-crd", old, "",
+		"the field is declared in `k8s/types.ts`"))
+	// An elided path is unknown, not dead.
+	put(t, dir, ".nugit/lessons/pool.md", lesson("LESSON-pool", old, "",
+		"see `helm/.../acme-pool.yaml` and `helm/…/acme-pool.yaml`"))
+	// Gone everywhere: still dead.
+	put(t, dir, ".nugit/lessons/gone.md", lesson("LESSON-gone", old, "",
+		"see `tests/ui/removed.md`"))
+	commitAt(t, dir, "seed", now.AddDate(0, -6, 0))
+
+	rep, err := Run(Options{RepoDir: dir, Now: now, Ref: "HEAD"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rep.DeadPaths) != 1 || rep.DeadPaths[0].ID != "LESSON-gone" ||
+		!strings.Contains(rep.DeadPaths[0].Detail, "tests/ui/removed.md") {
+		t.Errorf("dead paths = %+v, want only LESSON-gone", rep.DeadPaths)
+	}
+}
