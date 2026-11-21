@@ -106,3 +106,28 @@ func TestItems(t *testing.T) {
 		t.Errorf("with no hub configured no foreign item fires: %v", got)
 	}
 }
+
+// A change with no ---/+++ lines still changes its path: binary, mode-only,
+// an empty new file, a pure rename. A path-only item must see all four.
+func TestParseDiffHeaderOnlyChanges(t *testing.T) {
+	d := `diff --git a/assets/logo.png b/assets/logo.png
+index 1..2 100644
+Binary files a/assets/logo.png and b/assets/logo.png differ
+diff --git a/bin/run.sh b/bin/run.sh
+old mode 100644
+new mode 100755
+diff --git a/db/empty.sql b/db/empty.sql
+new file mode 100644
+index 0000000..e69de29
+diff --git a/old/name.go b/new/name.go
+similarity index 100%
+rename from old/name.go
+rename to new/name.go
+`
+	got := ParseDiff(d)
+	for _, p := range []string{"assets/logo.png", "bin/run.sh", "db/empty.sql", "new/name.go"} {
+		if _, ok := got[p]; !ok {
+			t.Errorf("%s must be registered as changed: %v", p, got)
+		}
+	}
+}

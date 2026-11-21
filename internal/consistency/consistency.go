@@ -278,14 +278,16 @@ func checkModelHealth(in Input) []model.Finding {
 	// Checklist items that can never fire, or fire with nothing to ask
 	// (ADR-0057). Scoped to records this PR adds or modifies: the PR view
 	// reports what the PR did, and `nugit doctor` reports the whole store.
+	// The delta's paths are git-root-relative and the store's are nugit-root-
+	// relative; compare the two forms so a nested root matches too.
 	touched := map[string]bool{}
 	for _, kc := range in.Knowledge.Changes {
 		if kc.Object != nil {
-			touched[kc.Object.Path] = true
+			touched[strings.TrimPrefix(kc.Object.Path, in.Prefix)] = true
 		}
 	}
 	for _, bad := range knowledge.InvalidTriggers(in.AllObjects) {
-		if !touched[bad.Path] {
+		if !touched[strings.TrimPrefix(bad.Path, in.Prefix)] {
 			continue
 		}
 		id := bad.ID

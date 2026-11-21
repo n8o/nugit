@@ -195,6 +195,21 @@ func ParseDiff(diff string) map[string]Lines {
 		switch {
 		case strings.HasPrefix(raw, "diff --git "):
 			cur, oldPath, inHunk = "", "", false
+			// A change with no ---/+++ lines (binary, mode-only, an empty new
+			// file, a pure rename) is still a change to its path: register it
+			// from the header, which is unambiguous when both sides agree.
+			if p := headerPath(raw[len("diff --git "):]); p != "" {
+				if _, ok := out[p]; !ok {
+					out[p] = Lines{}
+				}
+			}
+			continue
+		case !inHunk && strings.HasPrefix(raw, "rename to "):
+			if p := strings.TrimSpace(raw[len("rename to "):]); p != "" {
+				if _, ok := out[p]; !ok {
+					out[p] = Lines{}
+				}
+			}
 			continue
 		case !inHunk && strings.HasPrefix(raw, "--- "):
 			oldPath = diffPath(raw[4:], "a/")
@@ -226,6 +241,22 @@ func ParseDiff(diff string) map[string]Lines {
 		out[cur] = l
 	}
 	return out
+}
+
+// headerPath reads "a/X b/X" from a diff header when both sides name the same
+// path, the only case the header alone settles; a rename is read from its
+// "rename to" line instead.
+func headerPath(s string) string {
+	s = strings.TrimRight(s, "\r")
+	if !strings.HasPrefix(s, "a/") || len(s) < 6 || (len(s)-1)%2 != 0 {
+		return ""
+	}
+	half := (len(s) - 1) / 2
+	a, sep, b := s[:half], s[half:half+1], s[half+1:]
+	if sep != " " || !strings.HasPrefix(b, "b/") || a[2:] != b[2:] {
+		return ""
+	}
+	return a[2:]
 }
 
 func diffPath(s, side string) string {

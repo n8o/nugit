@@ -80,3 +80,25 @@ func TestChecklistItemWithoutACheckIsReported(t *testing.T) {
 		t.Fatalf("want one model-health finding for the missing check:, got %+v", fs)
 	}
 }
+
+// A nested nugit root (apps/op/ inside a larger repo): the store is read at
+// the ref and the item fires on the git-root-relative path it names.
+func TestChecklistItemFiresInANestedRoot(t *testing.T) {
+	root, opDir, _ := seedNested(t)
+	item := strings.Replace(checklistLesson, `paths: ["b/**"]`, `paths: ["apps/op/b/**"]`, 1)
+	write(t, root, "apps/op/.nugit/lessons/new-field.md", item)
+	git(t, root, "add", "-A")
+	git(t, root, "commit", "-q", "-m", "item")
+	base := git(t, root, "rev-parse", "HEAD")
+	write(t, root, "apps/op/b/b.go", "package b\n\ntype Msg struct {\n\tAttempt int `json:\"attempt\"`\n}\n\nfunc B() {}\n")
+	git(t, root, "add", "-A")
+	git(t, root, "commit", "-q", "-m", "field")
+	head := git(t, root, "rev-parse", "HEAD")
+	rep, err := BuildReport(Options{RepoDir: opDir, Base: base, Head: head})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rep.Checklist) != 1 || rep.Checklist[0].File != "apps/op/b/b.go" {
+		t.Fatalf("the item must fire from a nested root: %+v", rep.Checklist)
+	}
+}
