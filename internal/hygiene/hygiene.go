@@ -19,6 +19,7 @@ package hygiene
 
 import (
 	"fmt"
+	"math"
 	"regexp"
 	"sort"
 	"strings"
@@ -61,13 +62,20 @@ type Report struct {
 	Rules int    `json:"rules"`
 	Items int    `json:"checklist_items"`
 	// RetrievalSince is the earliest usage record that names what it served.
-	// Zero means the log has none, so "unused" rests on matches alone.
+	// Zero means the log has none.
 	RetrievalSince time.Time `json:"retrieval_since,omitempty"`
-	Scanned        int       `json:"commits_scanned"`
-	Capped         bool      `json:"capped,omitempty"`
-	Unused         []Rule    `json:"unused,omitempty"`
-	DeadPaths      []Rule    `json:"dead_paths,omitempty"`
-	NeverFired     []Rule    `json:"never_fired,omitempty"`
+	// CoverageDays is how many days of the unused window the served-id log
+	// covers, at most Days. Until it is Days, no rule is called unused:
+	// UnusedHeld counts the rules not served or matched so far, and
+	// JudgedFrom is when the log will cover the window.
+	CoverageDays float64   `json:"retrieval_coverage_days"`
+	UnusedHeld   int       `json:"unused_held,omitempty"`
+	JudgedFrom   time.Time `json:"unused_judged_from,omitempty"`
+	Scanned      int       `json:"commits_scanned"`
+	Capped       bool      `json:"capped,omitempty"`
+	Unused       []Rule    `json:"unused,omitempty"`
+	DeadPaths    []Rule    `json:"dead_paths,omitempty"`
+	NeverFired   []Rule    `json:"never_fired,omitempty"`
 }
 
 // Run builds the report for the store at opt.RepoDir.
@@ -116,6 +124,19 @@ func Run(opt Options) (Report, error) {
 			for _, id := range r.Served {
 				served[id] = true
 			}
+		}
+	}
+
+	// "Unused in N days" needs N days of served ids. A log that began inside
+	// the window has not had the chance to see a rule served, so the list
+	// waits for it.
+	covered := false
+	if !rep.RetrievalSince.IsZero() {
+		covered = !rep.RetrievalSince.After(since)
+		rep.CoverageDays = float64(opt.Days)
+		if !covered {
+			rep.CoverageDays = math.Round(opt.Now.Sub(rep.RetrievalSince).Hours()/24*10) / 10
+			rep.JudgedFrom = rep.RetrievalSince.AddDate(0, 0, opt.Days)
 		}
 	}
 
@@ -172,19 +193,13 @@ func Run(opt Options) (Report, error) {
 		// the window to be used in.
 		young := !o.Created.IsZero() && o.Created.After(since)
 		if !young && !served[o.ID] && !matchedWindow[o.ID] {
-			d := fmt.Sprintf("served by no context() call in %d days", opt.Days)
-			if isItem {
-				d += " and matched by no commit in them"
-			}
-			if rep.RetrievalSince.IsZero() {
-				d = fmt.Sprintf("the usage log records no served ids yet; matched by no commit in %d days", opt.Days)
-				if !isItem {
-					d = ""
+			if !covered {
+				rep.UnusedHeld++
+			} else {
+				d := fmt.Sprintf("served by no context() call in %d days", opt.Days)
+				if isItem {
+					d += " and matched by no commit in them"
 				}
-			} else if rep.RetrievalSince.After(since) {
-				d += fmt.Sprintf(" (retrieval data only since %s)", rep.RetrievalSince.Format("2006-01-02"))
-			}
-			if d != "" {
 				rep.Unused = append(rep.Unused, Rule{ID: o.ID, Path: o.Path, Item: isItem, Detail: d})
 			}
 		}
@@ -317,6 +332,14 @@ func deadPaths(o model.KnowledgeObject, prefix string, tracked map[string]bool, 
 	return dead
 }
 
+// num renders a day count: "0.5", or "12" when it is whole.
+func num(d float64) string {
+	if d == float64(int(d)) {
+		return fmt.Sprintf("%d", int(d))
+	}
+	return fmt.Sprintf("%.1f", d)
+}
+
 func matchesAny(glob string, tracked map[string]bool) bool {
 	for p := range tracked {
 		if ok, _ := doublestar.Match(glob, p); ok {
@@ -341,7 +364,8 @@ func (r Report) Markdown() string {
 	if r.RetrievalSince.IsZero() {
 		b.WriteString("- **retrieval data**: none yet — the usage log names served ids from this version on\n")
 	} else {
-		fmt.Fprintf(&b, "- **retrieval data**: since %s\n", r.RetrievalSince.Format("2006-01-02"))
+		fmt.Fprintf(&b, "- **retrieval data**: since %s, %s of the %d-day window\n",
+			r.RetrievalSince.Format("2006-01-02 15:04"), num(r.CoverageDays), r.Days)
 	}
 	if r.Items > 0 {
 		capped := ""
@@ -365,10 +389,22 @@ func (r Report) Markdown() string {
 	}
 	section(fmt.Sprintf("unused in %d days", r.Days),
 		"supersede, merge into a rule that is used, or delete it", r.Unused)
+	if r.UnusedHeld > 0 {
+		fmt.Fprintf(&b, "\n### unused in %d days — held\n\n", r.Days)
+		if r.RetrievalSince.IsZero() {
+			fmt.Fprintf(&b, "_The usage log has no served ids yet, so no rule is judged unused. "+
+				"%d rule(s) have not been served or matched so far._\n", r.UnusedHeld)
+		} else {
+			fmt.Fprintf(&b, "_The usage log names served ids for %s of %d days (since %s). "+
+				"%d rule(s) have not been served or matched so far; they are judged once the log "+
+				"covers the window, on %s._\n", num(r.CoverageDays), r.Days,
+				r.RetrievalSince.Format("2006-01-02 15:04"), r.UnusedHeld, r.JudgedFrom.Format("2006-01-02"))
+		}
+	}
 	section("dead paths", "point the binding at where the code went, or retire the rule with it", r.DeadPaths)
 	section("checklist items that never fired",
 		"loosen the trigger if it should have fired, or delete the item", r.NeverFired)
-	if len(r.Unused)+len(r.DeadPaths)+len(r.NeverFired) == 0 {
+	if len(r.Unused)+len(r.DeadPaths)+len(r.NeverFired)+r.UnusedHeld == 0 {
 		b.WriteString("\n_Nothing to prune._\n")
 	}
 	return b.String()

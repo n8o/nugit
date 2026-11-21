@@ -62,6 +62,9 @@ func TestReport(t *testing.T) {
 	put(t, dir, "internal/store/store.go", "package store\n\nfunc Retry() {}\n")
 	commitAt(t, dir, "add retry", now.AddDate(0, 0, -10))
 
+	// The log names served ids from before the window, so it covers it.
+	_ = usage.Append(dir, usage.Record{Time: now.AddDate(0, 0, -120), Source: usage.SourceMCP,
+		Path: "README.md", Served: []string{"ADR-0001"}})
 	_ = usage.Append(dir, usage.Record{Time: now.AddDate(0, 0, -5), Source: usage.SourceMCP,
 		Path: "internal/store/store.go", Served: []string{"LESSON-used"}})
 
@@ -110,6 +113,71 @@ func TestNoRetrievalDataNamesNoPlainLesson(t *testing.T) {
 	}
 	if len(rep.Unused) != 0 || !rep.RetrievalSince.IsZero() {
 		t.Errorf("no data, no verdict: %+v", rep.Unused)
+	}
+}
+
+// Served ids were first logged less than a day ago. "Unused in 90 days" would
+// rest on hours of data, so the list is held, and the report says how much of
+// the window the log covers and when it will cover all of it.
+func TestUnusedIsHeldUntilTheLogCoversTheWindow(t *testing.T) {
+	dir := t.TempDir()
+	run(t, dir, nil, "init", "-q", "-b", "main")
+	old := "2026-01-01T00:00:00Z"
+	put(t, dir, "internal/store/store.go", "package store\n")
+	put(t, dir, ".nugit/lessons/a.md", lesson("LESSON-a", old, "", "x"))
+	put(t, dir, ".nugit/lessons/b.md", lesson("LESSON-b", old, "", "y"))
+	put(t, dir, ".nugit/lessons/item.md", lesson("LESSON-item", old,
+		"diff_trigger:\n  paths: [\"internal/store/**\"]\n  added: \"NEVER_WRITTEN\"\ncheck: q?\n", "z"))
+	commitAt(t, dir, "seed", now.AddDate(0, -6, 0))
+	_ = usage.Append(dir, usage.Record{Time: now.Add(-12 * time.Hour), Source: usage.SourceMCP,
+		Path: "internal/store/store.go", Served: []string{"LESSON-a"}})
+
+	rep, err := Run(Options{RepoDir: dir, Now: now, Ref: "HEAD"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rep.Unused) != 0 {
+		t.Errorf("half a day of served ids cannot call a rule unused in 90 days: %+v", rep.Unused)
+	}
+	if rep.UnusedHeld != 2 { // LESSON-b and LESSON-item; LESSON-a was served
+		t.Errorf("held = %d, want 2", rep.UnusedHeld)
+	}
+	if rep.CoverageDays != 0.5 || !rep.JudgedFrom.Equal(now.Add(-12*time.Hour).AddDate(0, 0, 90)) {
+		t.Errorf("coverage = %v days, judged from %v", rep.CoverageDays, rep.JudgedFrom)
+	}
+	md := rep.Markdown()
+	for _, want := range []string{"held", "0.5 of 90 days", "2 rule(s)", "2027-02-18"} {
+		if !strings.Contains(md, want) {
+			t.Errorf("markdown lacks %q:\n%s", want, md)
+		}
+	}
+	if strings.Contains(md, "Nothing to prune") {
+		t.Errorf("a held list is not nothing to prune:\n%s", md)
+	}
+	// The other signals do not rest on the log, and still report.
+	if len(rep.NeverFired) != 1 || rep.NeverFired[0].ID != "LESSON-item" {
+		t.Errorf("never fired = %+v", rep.NeverFired)
+	}
+}
+
+// With no served ids at all, a checklist item is not called unused on its
+// commit matches alone: unused means neither served nor matched.
+func TestNoRetrievalDataHoldsChecklistItems(t *testing.T) {
+	dir := t.TempDir()
+	run(t, dir, nil, "init", "-q", "-b", "main")
+	put(t, dir, "internal/store/store.go", "package store\n")
+	put(t, dir, ".nugit/lessons/item.md", lesson("LESSON-item", "2026-01-01T00:00:00Z",
+		"diff_trigger:\n  paths: [\"internal/store/**\"]\n  added: \"NEVER_WRITTEN\"\ncheck: q?\n", "z"))
+	commitAt(t, dir, "seed", now.AddDate(0, -6, 0))
+	rep, err := Run(Options{RepoDir: dir, Now: now, Ref: "HEAD"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rep.Unused) != 0 || rep.UnusedHeld != 1 || rep.CoverageDays != 0 {
+		t.Errorf("no served ids: unused=%+v held=%d coverage=%v", rep.Unused, rep.UnusedHeld, rep.CoverageDays)
+	}
+	if md := rep.Markdown(); !strings.Contains(md, "no served ids yet") {
+		t.Errorf("markdown:\n%s", md)
 	}
 }
 
