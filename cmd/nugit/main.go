@@ -55,6 +55,7 @@ import (
 	"github.com/n8o/nugit/internal/skills"
 	"github.com/n8o/nugit/internal/trailers"
 	usagelog "github.com/n8o/nugit/internal/usage"
+	"github.com/n8o/nugit/internal/verify"
 )
 
 const usage = `nugit — git-native PR view (thin keystone)
@@ -80,6 +81,9 @@ usage:
                               whether context() preceded the edit; context_gate: warn|block|off
   nugit hook session-start    Claude Code SessionStart entrypoint: tell the session its objective,
                               or how to claim one (ADR-0048)
+  nugit hook evidence         Claude Code PostToolUse/UserPromptSubmit entrypoint: record that the
+                              verify skill, a review or the tests ran; the commit-msg hook stamps
+                              "verified:" from it (verify.gate: off|observe|enforce, ADR-0056)
   nugit c4 render [flags]      render the C4 model as Mermaid
   nugit c4 gen-rules [flags]   generate go-arch-lint YAML from the C4 model
   nugit c4 export [flags]      export the C4 model (-format icepanel) as an import payload
@@ -103,8 +107,9 @@ agent flags:
   -client c      claude-code (default) | cursor | codex | opencode | generic
   -install       write the config file (claude-code only; others print the snippet)
   -force         with -install: overwrite an existing .mcp.json
-  -hook          with -install: also merge the pre-edit PreToolUse hook (ADR-0042)
-                 and the SessionStart objective digest (ADR-0048) into
+  -hook          with -install: also merge the pre-edit PreToolUse hook (ADR-0042),
+                 the SessionStart objective digest (ADR-0048) and the verify-evidence
+                 PostToolUse/UserPromptSubmit hook (ADR-0056) into
                  .claude/settings.json (existing settings are kept)
   -bin path      nugit binary to embed (default "nugit", resolved from PATH)
 
@@ -494,6 +499,10 @@ func cmdAgent(args []string) int {
 				fmt.Printf("  merged   %s (PreToolUse %s → nugit hook pre-edit)\n", hpath, agentcfg.PreEditMatcher)
 			case "SessionStart":
 				fmt.Printf("  merged   %s (SessionStart %s → nugit hook session-start)\n", hpath, agentcfg.SessionStartMatcher)
+			case "PostToolUse":
+				fmt.Printf("  merged   %s (PostToolUse %s → nugit hook evidence)\n", hpath, agentcfg.EvidenceMatcher)
+			case "UserPromptSubmit":
+				fmt.Printf("  merged   %s (UserPromptSubmit → nugit hook evidence)\n", hpath)
 			}
 		}
 		if len(added) == 0 {
@@ -1189,7 +1198,7 @@ func cmdRemember(args []string) int {
 
 func cmdHook(args []string) int {
 	if len(args) < 1 {
-		fmt.Fprintln(os.Stderr, "nugit hook: usage: nugit hook commit-msg <file> | nugit hook pre-edit | nugit hook session-start")
+		fmt.Fprintln(os.Stderr, "nugit hook: usage: nugit hook commit-msg <file> | nugit hook pre-edit | nugit hook session-start | nugit hook evidence")
 		return 2
 	}
 	switch args[0] {
@@ -1208,6 +1217,13 @@ func cmdHook(args []string) int {
 		// whatever the capture mode, because it is not capture: it is what
 		// the PR view frames the change with. Any failure leaves the message.
 		stampObjective(*dir, rest[0])
+		// ADR-0056: stamp how the commit was verified, from the session's
+		// evidence, and under verify.gate: enforce stop an unverified commit
+		// that gives no reason. Runs whatever the capture mode: it is not
+		// capture. It only returns non-zero on a deliberate block.
+		if code := verify.CommitMsg(*dir, rest[0], os.Stderr, verify.Options{}); code != 0 {
+			return code
+		}
 		// The capture mode is governed (ADR-0055): read from origin's default
 		// branch, so a branch cannot switch its own commit gate off.
 		cfg, _ := editgate.LocalConfig(*dir)
@@ -1253,6 +1269,17 @@ func cmdHook(args []string) int {
 		if out := editgate.PreEdit(os.Stdin, editgate.Options{NugitDir: *dir}); out != nil {
 			fmt.Println(string(out))
 		}
+		return 0
+	case "evidence":
+		// ADR-0056: a Claude Code PostToolUse / UserPromptSubmit hook. It
+		// records and never answers: no stdout, exit 0, whatever happens.
+		fs := flag.NewFlagSet("hook evidence", flag.ContinueOnError)
+		fs.SetOutput(io.Discard)
+		dir := fs.String("C", ".", "nugit root")
+		if fs.Parse(args[1:]) != nil {
+			return 0
+		}
+		verify.Evidence(os.Stdin, verify.Options{NugitDir: *dir})
 		return 0
 	case "session-start":
 		// ADR-0048: a Claude Code SessionStart hook. Like pre-edit it can never

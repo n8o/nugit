@@ -143,6 +143,11 @@ func Run(repoDir string) Report {
 
 	// SessionStart objective digest (ADR-0048). Advisory, like pre-edit: it
 	// is what tells each session to claim one objective.
+	// Verify-evidence hook (ADR-0056). Advisory: without it no session has
+	// evidence, so every agent commit is stamped `verified: none`.
+	eok, edetail := evidenceHook(repoDir, cfg)
+	r.Checks = append(r.Checks, Check{Name: "verify-evidence hook installed", OK: eok, Advisory: true, Detail: edetail})
+
 	sok, sdetail := sessionStartHook(repoDir)
 	r.Checks = append(r.Checks, Check{Name: "session-start hook installed", OK: sok, Advisory: true, Detail: sdetail})
 
@@ -521,6 +526,40 @@ func sessionStartHook(repoDir string) (bool, string) {
 		}
 	}
 	return false, "not installed — sessions are not told to claim an objective; " +
+		"run `nugit agent -client claude-code -install -hook`"
+}
+
+// evidenceHook reports whether the ADR-0056 evidence hook is installed for
+// both events it needs. With verify.gate: off there is nothing to feed.
+func evidenceHook(repoDir string, cfg config.Config) (bool, string) {
+	if cfg.Verify.Gate == "off" {
+		return true, "verify.gate: off — no evidence is recorded and no commit is stamped"
+	}
+	for _, name := range []string{"settings.json", "settings.local.json"} {
+		rel := filepath.Join(".claude", name)
+		b, err := os.ReadFile(filepath.Join(repoDir, rel))
+		if err != nil {
+			continue
+		}
+		var s struct {
+			Hooks struct {
+				PostToolUse      []json.RawMessage `json:"PostToolUse"`
+				UserPromptSubmit []json.RawMessage `json:"UserPromptSubmit"`
+			} `json:"hooks"`
+		}
+		if json.Unmarshal(b, &s) != nil {
+			continue
+		}
+		post, prompt := agentcfg.EvidenceInstalled(s.Hooks.PostToolUse), agentcfg.EvidenceInstalled(s.Hooks.UserPromptSubmit)
+		switch {
+		case post && prompt:
+			return true, fmt.Sprintf("%s runs `nugit hook evidence` (verify.gate: %s)", rel, cfg.Verify.Gate) + lookPathHint()
+		case post:
+			return false, rel + " records skill, agent and test runs but not a typed /verify (UserPromptSubmit); " +
+				"run `nugit agent -client claude-code -install -hook`"
+		}
+	}
+	return false, fmt.Sprintf("not installed — sessions record no verification, so the commit-msg hook stamps agent commits `verified: none` (verify.gate: %s); ", cfg.Verify.Gate) +
 		"run `nugit agent -client claude-code -install -hook`"
 }
 

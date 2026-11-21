@@ -12,12 +12,14 @@
 //	spec: SPEC-014
 //	keywords: payments, timeout, retry, billing
 //	objective: acme-142
+//	verified: e2e, tests
 //
 // `learned:` and `keywords:` are the only mandatory fields; `symptom:` is
 // optional but is the sole reliable seed for a distilled lesson's Trigger
 // (ADR-0028) — nothing else in a commit records what was OBSERVED.
-// `objective:` names the bead the commit works toward (ADR-0048); it is not a
-// capture field, so a commit carrying only it needs no `learned:`.
+// `objective:` names the bead the commit works toward (ADR-0048) and
+// `verified:` says how the commit was verified (ADR-0056). Neither is a
+// capture field, so a commit carrying only them needs no `learned:`.
 package trailers
 
 import (
@@ -67,6 +69,8 @@ func Parse(body string) model.Trailer {
 			if t.Objective == "" {
 				t.Objective = val
 			}
+		case "verified":
+			t.Verified = join(t.Verified, val)
 		case "affects":
 			t.Affects = union(t.Affects, splitList(val))
 		case "keywords":

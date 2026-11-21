@@ -47,6 +47,7 @@ graph LR
   trailers["Trailer parser"]
   tsdeps["TS analyzer"]
   usage["Usage log"]
+  verify["Verify gate"]
   wiring["Wiring scan"]
   adopt --> distill
   adopt --> gitutil
@@ -101,6 +102,7 @@ graph LR
   cli --> skills
   cli --> trailers
   cli --> usage
+  cli --> verify
   consistency --> c4
   consistency --> cmake
   consistency --> config
@@ -155,6 +157,7 @@ graph LR
   engine --> objective
   engine --> significance
   engine --> trailers
+  engine --> verify
   engine --> wiring
   eval --> engine
   eval --> model_
@@ -235,4 +238,9 @@ graph LR
   usage --> config
   usage --> gitutil
   usage --> retrieval
+  verify --> config
+  verify --> gitutil
+  verify --> model_
+  verify --> trailers
+  verify --> usage
   wiring --> config

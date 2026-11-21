@@ -81,7 +81,7 @@ func lastBoundary(records []Record, e Edit) Record {
 func findCover(records []Record, e Edit, window time.Duration, since time.Time) string {
 	best := ""
 	for _, r := range records {
-		if r.Source == SourceHook || r.Source == SourceBoundary || r.Time.After(e.Time) || !scopeCovers(r, e) {
+		if !r.IsCall() || r.Time.After(e.Time) || !scopeCovers(r, e) {
 			continue
 		}
 		if !since.IsZero() && !r.Time.After(since) {

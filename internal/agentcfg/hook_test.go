@@ -76,8 +76,11 @@ func TestInstallHookMergesWithoutClobbering(t *testing.T) {
 	if m["env"].(map[string]any)["FOO"] != "1" {
 		t.Errorf("env lost")
 	}
-	if post := m["hooks"].(map[string]any)["PostToolUse"].([]any); len(post) != 1 {
-		t.Errorf("PostToolUse hook lost")
+	// The foreign PostToolUse entry stays first; the evidence hook (ADR-0056)
+	// is appended after it.
+	if post := m["hooks"].(map[string]any)["PostToolUse"].([]any); len(post) != 2 ||
+		post[0].(map[string]any)["matcher"] != "Write" {
+		t.Errorf("PostToolUse hook lost or reordered: %v", post)
 	}
 	pre := preToolUse(t, m)
 	if len(pre) != 2 || pre[0].(map[string]any)["matcher"] != "Bash" {
@@ -157,8 +160,8 @@ func TestInstallHooksAddsSessionStart(t *testing.T) {
   "SessionStart": [{"matcher": "startup", "hooks": [{"type": "command", "command": "other.sh"}]}]
 }}`)
 	added, _, err := InstallClaudeCodeHooks(dir, "")
-	if err != nil || strings.Join(added, ",") != "SessionStart" {
-		t.Fatalf("added = %v, err = %v; want only SessionStart", added, err)
+	if err != nil || strings.Join(added, ",") != "SessionStart,PostToolUse,UserPromptSubmit" {
+		t.Fatalf("added = %v, err = %v; want SessionStart and the evidence hooks", added, err)
 	}
 	_, m := readSettings(t, dir)
 	hooks := m["hooks"].(map[string]any)
@@ -177,5 +180,30 @@ func TestInstallHooksAddsSessionStart(t *testing.T) {
 	write(`{"hooks": {"SessionStart": {}}}`)
 	if _, _, err := InstallClaudeCodeHooks(dir, ""); err == nil {
 		t.Error("a non-array SessionStart was rewritten")
+	}
+}
+
+// ADR-0056: the evidence hook installs on PostToolUse (Skill|Agent|Bash) and
+// on UserPromptSubmit, which has no matcher, and is recognized afterwards.
+func TestInstallHooksAddsEvidence(t *testing.T) {
+	dir := t.TempDir()
+	if _, _, err := InstallClaudeCodeHooks(dir, ""); err != nil {
+		t.Fatal(err)
+	}
+	_, m := readSettings(t, dir)
+	hooks := m["hooks"].(map[string]any)
+	post := hooks["PostToolUse"].([]any)[0].(map[string]any)
+	if post["matcher"] != EvidenceMatcher || post["hooks"].([]any)[0].(map[string]any)["command"] != "nugit hook evidence" {
+		t.Errorf("PostToolUse entry: %v", post)
+	}
+	ups := hooks["UserPromptSubmit"].([]any)[0].(map[string]any)
+	if ups["hooks"].([]any)[0].(map[string]any)["command"] != "nugit hook evidence" {
+		t.Errorf("UserPromptSubmit entry: %v", ups)
+	}
+	b, _ := json.Marshal(hooks["PostToolUse"])
+	var entries []json.RawMessage
+	_ = json.Unmarshal(b, &entries)
+	if !EvidenceInstalled(entries) {
+		t.Error("EvidenceInstalled must recognize the installed entry")
 	}
 }
