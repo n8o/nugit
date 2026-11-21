@@ -330,19 +330,7 @@ func nearestDir(p string) string {
 	}
 }
 
-// targetReadTimeout bounds the hook's read of the target's config. The hook
-// runs before every edit and every commit, so a slow git must cost at most
-// this, after which the checkout's config applies as it did before ADR-0055.
-const targetReadTimeout = 500 * time.Millisecond
-
-// LocalConfig is the config a local hook is governed by (ADR-0055): the
-// checkout's, with every governed key read from origin's default branch, so
-// an agent cannot turn a gate off by editing the file next to the one the
-// gate stopped it editing. Without a remote default it is the checkout's.
-// The commit-msg hook uses it too, which is why it is exported.
-func LocalConfig(nugitRoot string) (config.Config, error) {
-	repo := gitutil.Repo{Dir: nugitRoot}
-	return config.LoadLocal(nugitRoot, func() (string, bool) {
-		return repo.DefaultBranchFile(".nugit/config.yml", targetReadTimeout)
-	})
-}
+// LocalConfig is the config a local hook is governed by (ADR-0055); see
+// usage.LocalConfig, which the usage log's writer shares so the two can never
+// disagree about usage.log. The commit-msg hook uses it too.
+func LocalConfig(nugitRoot string) (config.Config, error) { return usage.LocalConfig(nugitRoot) }

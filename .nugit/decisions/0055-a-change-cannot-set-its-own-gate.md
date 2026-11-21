@@ -81,7 +81,10 @@ does not get to answer that one.
 4. **The local gates read governed keys from the remote default branch**
    (`refs/remotes/origin/HEAD`). The commit-msg hook (`capture.commit_msg`) and
    the pre-edit and session-start hooks (`context_gate`, `usage.log`) apply
-   the same rule as pr-render. Where the clone records no remote default, or
+   the same rule as pr-render, and so does the context() usage log's writer.
+   The gate and the log it reads must agree on `usage.log`. Otherwise a
+   checkout that sets it `off` would stop every call being logged while the
+   gate, reading the default branch, went on demanding one. Where the clone records no remote default, or
    it cannot be read within the hook's deadline, they fall back to the
    checkout, as before. A local-only repo has no branch the change cannot
    modify, so there is nothing better to read.
@@ -129,7 +132,10 @@ does not get to answer that one.
   reaches `origin`'s default branch. Someone trying `context_gate: block` in a
   working tree will see warn behaviour until it lands. `nugit doctor` reports
   the governed keys where the checkout and the target disagree.
+- `usage.log: off` in a checkout, like any governed key, takes effect once
+  it lands on the default branch.
 - `config` gains `Govern` and `GovernedChanges`, pure functions over two
-  parsed configs. `gitutil` gains a bounded `ShowFileTimeout` for the hook
+  parsed configs, and `usage.LocalConfig` is the one place the local readers
+  get it from. `gitutil` gains a bounded `ShowFileTimeout` for the hook
   path (LESSON-any-git-call-added-to-the-commit-path-must-carry-i). No new
   cross-package edge.

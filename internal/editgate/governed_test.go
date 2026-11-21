@@ -4,6 +4,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/n8o/nugit/internal/retrieval"
+	"github.com/n8o/nugit/internal/usage"
 )
 
 // cloneOf clones origin into a fresh directory, so the clone records
@@ -62,5 +65,27 @@ func TestDefaultBranchWithoutConfigReadsTheCheckout(t *testing.T) {
 	o := run(t, dir, input(t, dir, "Edit", filepath.Join(dir, "internal/foo/foo.go"), "s1"), nil)
 	if o == nil || !strings.Contains(o.HookSpecificOutput.PermissionDecisionReason, "block") {
 		t.Fatalf("want a deny under the checkout's block: %+v", o)
+	}
+}
+
+// The context() writer and the gate read the same governed config. A checkout
+// that sets `usage.log: off` must not stop calls being logged while the gate,
+// reading origin's config, goes on demanding one: that would deny every edit.
+func TestUsageLogAndGateAgree(t *testing.T) {
+	origin := repo(t, "block")
+	dir := cloneOf(t, origin)
+	write(t, dir, ".nugit/config.yml", "context_gate: block\nusage:\n  log: off\n")
+	b := retrieval.Bundle{Path: "internal/foo/foo.go", Component: "foo"}
+	t.Setenv(usage.SessionEnv, "s1")
+	if err := usage.Log(dir, usage.SourceCLI, "", b); err != nil {
+		t.Fatal(err)
+	}
+	recs, _ := usage.Read(dir)
+	if len(recs) != 1 || recs[0].Session != "s1" {
+		t.Fatalf("origin's usage.log (on) governs the writer too, so the call is logged: %+v", recs)
+	}
+	cfg, _ := LocalConfig(dir)
+	if cfg.Usage.Log != "on" || cfg.ContextGate != "block" {
+		t.Errorf("the gate reads the same: %+v", cfg)
 	}
 }
