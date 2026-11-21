@@ -291,6 +291,10 @@ type Commit struct {
 	Subject string
 	Body    string
 	Trailer Trailer
+	// Merge is true for a merge commit. It carries no work of its own (an
+	// "Update branch" merge has no message a hook could stamp), so per-commit
+	// checks such as ADR-0056's skip it. Kept out of the JSON.
+	Merge bool `json:"-"`
 }
 
 // Component is one C4 component parsed from workspace.dsl.

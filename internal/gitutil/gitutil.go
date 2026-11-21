@@ -805,7 +805,18 @@ func (r Repo) Log(base, head string) ([]model.Commit, error) {
 	if err != nil {
 		return nil, err
 	}
-	return parseCommits(out), nil
+	commits := parseCommits(out)
+	// Mark merges with one more call rather than widen the shared format.
+	if m, err := r.git("rev-list", "--merges", base+".."+head); err == nil && strings.TrimSpace(m) != "" {
+		merges := map[string]bool{}
+		for _, sha := range strings.Fields(m) {
+			merges[sha] = true
+		}
+		for i := range commits {
+			commits[i].Merge = merges[commits[i].SHA]
+		}
+	}
+	return commits, nil
 }
 
 // CommitFiles returns the git-root-relative paths one commit changed against

@@ -209,12 +209,13 @@ func Matches(name string, entries []string) bool {
 }
 
 // TestCommand returns the configured prefix a shell command runs, or "". The
-// command is split on && || ; | and newlines, and leading `cd x`, env
-// assignments and `time` are skipped, so `cd api && GOFLAGS=-count=1 go test
-// ./...` counts.
+// command is split into simple commands on unquoted && || ; | and newlines;
+// quoted text and heredoc bodies are never split, so `git commit -m "fix; go
+// test green"` runs no tests. Leading env assignments, `time` and `command`
+// are skipped, and a leading `cd x` is its own command, so `cd api &&
+// GOFLAGS=-count=1 go test ./...` counts.
 func TestCommand(cmd string, prefixes []string) string {
-	seps := strings.NewReplacer("&&", "\n", "||", "\n", ";", "\n", "|", "\n")
-	for _, seg := range strings.Split(seps.Replace(cmd), "\n") {
+	for _, seg := range simpleCommands(cmd) {
 		fields := strings.Fields(seg)
 		for len(fields) > 0 && (strings.Contains(fields[0], "=") || fields[0] == "time" || fields[0] == "command") {
 			fields = fields[1:]
@@ -228,6 +229,97 @@ func TestCommand(cmd string, prefixes []string) string {
 		}
 	}
 	return ""
+}
+
+// simpleCommands splits a shell command line on unquoted separators. It is
+// not a shell parser: it tracks single and double quotes and backslash
+// escapes, and drops heredoc bodies (from the line after an unquoted `<<WORD`
+// to the line that is WORD), which is enough to keep quoted prose and commit
+// messages from reading as commands.
+func simpleCommands(cmd string) []string {
+	var out []string
+	var cur strings.Builder
+	var quote rune
+	var heredocs []string
+	flush := func() {
+		if s := strings.TrimSpace(cur.String()); s != "" {
+			out = append(out, s)
+		}
+		cur.Reset()
+	}
+	lines := strings.Split(cmd, "\n")
+	for li := 0; li < len(lines); li++ {
+		line := lines[li]
+		rs := []rune(line)
+		for i := 0; i < len(rs); i++ {
+			c := rs[i]
+			switch {
+			case quote != 0:
+				if c == '\\' && quote == '"' && i+1 < len(rs) {
+					cur.WriteRune(c)
+					i++
+					cur.WriteRune(rs[i])
+					continue
+				}
+				if c == quote {
+					quote = 0
+				}
+				cur.WriteRune(c)
+			case c == '\'' || c == '"':
+				quote = c
+				cur.WriteRune(c)
+			case c == '\\' && i+1 < len(rs):
+				cur.WriteRune(c)
+				i++
+				cur.WriteRune(rs[i])
+			case c == '<' && i+1 < len(rs) && rs[i+1] == '<':
+				j := i + 2
+				if j < len(rs) && rs[j] == '-' {
+					j++
+				}
+				for j < len(rs) && rs[j] == ' ' {
+					j++
+				}
+				k := j
+				for k < len(rs) && !strings.ContainsRune(" ;&|<>", rs[k]) {
+					k++
+				}
+				if word := strings.Trim(string(rs[j:k]), `'"`); word != "" {
+					heredocs = append(heredocs, word)
+				}
+				cur.WriteString(string(rs[i:k]))
+				i = k - 1
+			case c == ';' || c == '|' || c == '&':
+				if c == '&' && (i+1 >= len(rs) || rs[i+1] != '&') {
+					cur.WriteRune(c) // a lone & (background, 2>&1) is not a split
+					continue
+				}
+				flush()
+				if i+1 < len(rs) && (rs[i+1] == c) {
+					i++
+				}
+			default:
+				cur.WriteRune(c)
+			}
+		}
+		if quote != 0 {
+			cur.WriteRune('\n')
+			continue
+		}
+		flush()
+		// Skip heredoc bodies opened on this line.
+		for _, word := range heredocs {
+			for li+1 < len(lines) {
+				li++
+				if strings.TrimSpace(lines[li]) == word {
+					break
+				}
+			}
+		}
+		heredocs = nil
+	}
+	flush()
+	return out
 }
 
 // failed reports whether a Bash tool_response says the command exited non-zero
@@ -297,9 +389,17 @@ func Decide(cfg config.Config, c Commit, records []usage.Record) Decision {
 	}
 	var lastEdit time.Time
 	for _, r := range records {
-		if r.Source == usage.SourceHook && mine(r) && !r.Time.After(c.Time) && r.Time.After(lastEdit) {
-			lastEdit = r.Time
+		if r.Source != usage.SourceHook || !mine(r) || r.Time.After(c.Time) || !r.Time.After(lastEdit) {
+			continue
 		}
+		// An edit context_gate: block denied never changed the tree, so it
+		// cannot make a check stale. (An edit the user rejected at the
+		// permission prompt leaves the same record as one that happened;
+		// the hook cannot tell them apart.)
+		if r.Gate == "block" && (r.Covered == nil || !*r.Covered) {
+			continue
+		}
+		lastEdit = r.Time
 	}
 	stale := 0
 	for _, r := range records {
@@ -354,9 +454,11 @@ func Decide(cfg config.Config, c Commit, records []usage.Record) Decision {
 	}
 	if blocks >= ReleaseAfter {
 		d.Verdict = usage.VerdictRelease
-		if !hasLine {
-			d.Stamp = fmt.Sprintf("verified: none — released after %d blocked commits", blocks)
-		}
+		// Always stamped, even over the author's own line: a released commit
+		// is unverified whatever it claims, and the PR view must say so. A
+		// bare `verified: tests` the session never backed would otherwise
+		// reach the PR reading as verified.
+		d.Stamp = fmt.Sprintf("verified: none — released after %d blocked commits", blocks)
 		d.Message = fmt.Sprintf("nugit: %s; letting this commit through after %d blocks so the session is not stuck (verify.gate: enforce, ADR-0056)\n", why, blocks)
 		return d
 	}
@@ -364,8 +466,10 @@ func Decide(cfg config.Config, c Commit, records []usage.Record) Decision {
 	d.Block = true
 	d.Stamp = ""
 	d.Message = "nugit: commit blocked (verify.gate: enforce): " + why + ".\n" +
-		"  Run the repo's verify skill, a review, or the tests, then commit again;\n" +
-		"  or say why it was not verified with a line in the message, e.g.\n" +
+		"  Run the repo's verify skill, a review, or the tests, then commit again.\n" +
+		"  Run the check as its own command: one chained into the commit (`go test && git commit`)\n" +
+		"  has not finished when this hook runs, so it cannot count yet. Or\n" +
+		"  say why it was not verified with a line in the message, e.g.\n" +
 		"    verified: none — docs-only change\n" +
 		fmt.Sprintf("  After %d blocks in this session the next commit goes through.\n", ReleaseAfter)
 	return d
@@ -382,19 +486,22 @@ func CommitMsg(dir, msgFile string, stderr io.Writer, opt Options) (code int) {
 		}
 	}()
 	cfg, err := gateConfig(dir, opt)
-	if err != nil || cfg.Verify.Gate == Off {
+	// No log, no evidence, and no record of blocks to release on: the gate
+	// stands down rather than stamp or stop commits on nothing (as the edit
+	// gate does, ADR-0042).
+	if err != nil || cfg.Verify.Gate == Off || cfg.Usage.Log == "off" {
 		return 0
 	}
 	b, err := os.ReadFile(msgFile)
 	if err != nil {
 		return 0
 	}
-	repo := gitutil.Repo{Dir: dir}
+	// No branch on the record: it would be one more git call on the commit
+	// path, and nothing reads it (LESSON-any-git-call-added-to-the-commit-path-must-carry-i).
 	c := Commit{
 		Message:      string(b),
 		Session:      strings.TrimSpace(opt.getenv(usage.SessionEnv)),
 		AgentSession: strings.TrimSpace(opt.getenv(usage.AgentSessionEnv)),
-		Branch:       repo.CurrentBranch(),
 		Time:         opt.now(),
 	}
 	if c.Session == "" && c.AgentSession == "" {
@@ -403,23 +510,24 @@ func CommitMsg(dir, msgFile string, stderr io.Writer, opt Options) (code int) {
 	if strings.TrimSpace(stripComments(c.Message)) == "" {
 		return 0 // an empty message aborts the commit anyway
 	}
-	var recs []usage.Record
-	if cfg.Usage.Log != "off" {
-		recs, _ = usage.Read(dir)
-	}
+	recs, _ := usage.Read(dir)
 	d := Decide(cfg, c, recs)
 	if d.Verdict == "" {
 		return 0
 	}
+	recErr := usage.Append(dir, usage.Record{
+		Time: c.Time, Source: usage.SourceCommit,
+		Session: c.Session, AgentSession: c.AgentSession,
+		Gate: d.Mode, Verdict: d.Verdict, Kinds: d.Kinds,
+	})
+	if d.Block && recErr != nil {
+		// A block nugit cannot record can never count toward the release,
+		// so enforcing it could block this session forever. Stand down.
+		fmt.Fprintf(stderr, "nugit: verify.gate would block this commit, but the usage log cannot be written (%v); letting it through\n", recErr)
+		return 0
+	}
 	if d.Stamp != "" {
 		_ = os.WriteFile(msgFile, []byte(appendTrailer(c.Message, d.Stamp)), 0o644)
-	}
-	if cfg.Usage.Log != "off" {
-		_ = usage.Append(dir, usage.Record{
-			Time: c.Time, Source: usage.SourceCommit, Branch: c.Branch,
-			Session: c.Session, AgentSession: c.AgentSession,
-			Gate: d.Mode, Verdict: d.Verdict, Kinds: d.Kinds,
-		})
 	}
 	if d.Message != "" {
 		fmt.Fprint(stderr, d.Message)
@@ -431,15 +539,13 @@ func CommitMsg(dir, msgFile string, stderr io.Writer, opt Options) (code int) {
 }
 
 // gateConfig is the governing config (ADR-0055): verify.gate comes from the
-// default branch, so a branch cannot turn its own gate off.
+// default branch, so a branch cannot turn its own gate off, and usage.log
+// comes from the same place the log's writer reads it.
 func gateConfig(nugitRoot string, opt Options) (config.Config, error) {
 	if opt.Config != nil {
 		return *opt.Config, nil
 	}
-	repo := gitutil.Repo{Dir: nugitRoot}
-	return config.LoadLocal(nugitRoot, func() (string, bool) {
-		return repo.DefaultBranchFile(".nugit/config.yml", 500*time.Millisecond)
-	})
+	return usage.LocalConfig(nugitRoot)
 }
 
 func nugitDir(opt Options) string {
