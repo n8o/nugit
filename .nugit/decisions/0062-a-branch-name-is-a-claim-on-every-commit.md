@@ -1,6 +1,6 @@
 ---
 schema_version: 1
-id: ADR-0061
+id: ADR-0062
 type: decision
 scope: claim
 status: proposed
@@ -16,7 +16,7 @@ provenance:
 confidence: high
 ---
 
-# ADR-0061 — A branch named after its bead is claimed by its name, on every commit
+# ADR-0062 — A branch named after its bead is claimed by its name, on every commit
 
 ## Context
 
@@ -68,3 +68,11 @@ whole path is tested against a real repo.
   objective claim` settles it, because a claim outranks the name.
 - `nugit objective` and the digest report `from branch` for a named branch
   for its whole life, not only until its first commit.
+- Export scoping (n8o/nugit#100) reads the same resolver to pick the plan a
+  `plan normalize -merge` export may change. It accepts every source, so it
+  never missed an objective the way the hook did. But under the old order a
+  stacked branch named after its own bead took the base branch's objective
+  from the commits, and the export was scoped to the base's plan. This
+  branch's own bead edits, such as the close, were then written as HEAD had
+  them and only reported as outside the scope. With the name ahead of the
+  commits, the export is scoped to the branch's own plan.

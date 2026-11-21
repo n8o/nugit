@@ -103,6 +103,11 @@ func TestStackedBranchIsNotStampedWithItsBaseObjective(t *testing.T) {
 		t.Errorf("unnamed stacked branch was stamped %q from its base's commits (%s)", got, said)
 	}
 	git(t, dir, "checkout", "-q", "-b", "feat/acme-2-later")
+	// What export scoping (plan normalize -merge) reads, before any commit of
+	// this branch exists: the name's bead, not the base branch's objective.
+	if cur := Resolve(dir); cur.Objective != "acme-2" || cur.Source != FromBranchName {
+		t.Errorf("stacked branch named after acme-2 resolves to %+v", cur)
+	}
 	if got, _ := commit(t, dir, "feat: the later step\n"); got != "acme-2" {
 		t.Errorf("stacked branch named after acme-2 was stamped %q", got)
 	}
