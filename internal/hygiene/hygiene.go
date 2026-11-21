@@ -180,11 +180,13 @@ func Run(opt Options) (Report, error) {
 	tree, _ := repo.ListTree("HEAD")
 	tracked := make(map[string]bool, len(tree))
 	tops := map[string]bool{}
+	byBase := map[string][]string{} // file name -> tracked paths, for tail matches
 	for _, p := range tree {
 		tracked[p] = true
 		if i := strings.IndexByte(p, '/'); i > 0 {
 			tops[p[:i]] = true
 		}
+		byBase[lastSeg(p)] = append(byBase[lastSeg(p)], p)
 	}
 
 	for _, o := range rules {
@@ -203,7 +205,7 @@ func Run(opt Options) (Report, error) {
 				rep.Unused = append(rep.Unused, Rule{ID: o.ID, Path: o.Path, Item: isItem, Detail: d})
 			}
 		}
-		if dead := deadPaths(o, prefix, tracked, tops); len(dead) > 0 {
+		if dead := deadPaths(o, prefix, tracked, tops, byBase); len(dead) > 0 {
 			rep.DeadPaths = append(rep.DeadPaths, Rule{ID: o.ID, Path: o.Path, Item: isItem,
 				Detail: strings.Join(dead, "; ")})
 		}
@@ -293,7 +295,16 @@ var citedPath = regexp.MustCompile("`([A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.*-]+)+)`")
 // globs that match no tracked file, and body-cited paths under a top-level
 // directory the tree still has that are themselves gone. The top-level
 // filter keeps prose like `a/b` or another repo's paths out of it.
-func deadPaths(o model.KnowledgeObject, prefix string, tracked map[string]bool, tops map[string]bool) []string {
+//
+// A cited path is relative to wherever its author was working: a lesson
+// about one app's UI tests cites `tests/ui/README.md`, meaning the one under
+// that app. So a cite is the TAIL of a path, and it is dead only when no
+// tracked file under the nugit root is it or ends with it. Resolving against
+// the record's scope alone would miss both common cases: a component bound
+// to `<app>/src/**` citing `<app>/tests/…`, and a global lesson citing a
+// file deep in one app. A cite with an elided segment (`helm/.../x.yaml`)
+// names no single path, so it is not judged.
+func deadPaths(o model.KnowledgeObject, prefix string, tracked map[string]bool, tops map[string]bool, byBase map[string][]string) []string {
 	if len(tracked) == 0 {
 		return nil
 	}
@@ -322,9 +333,12 @@ func deadPaths(o model.KnowledgeObject, prefix string, tracked map[string]bool, 
 			continue
 		}
 		seen[p] = true
+		if elided(p) {
+			continue
+		}
 		full := prefix + p
 		top := full[:strings.IndexByte(full, '/')]
-		if !tops[top] || tracked[full] {
+		if !tops[top] || tracked[full] || hasTail(byBase[lastSeg(p)], prefix, p) {
 			continue
 		}
 		dead = append(dead, fmt.Sprintf("cites `%s`, which is no longer in the tree", p))
@@ -338,6 +352,26 @@ func num(d float64) string {
 		return fmt.Sprintf("%d", int(d))
 	}
 	return fmt.Sprintf("%.1f", d)
+}
+
+// elided reports a cite with a "..." segment, written to shorten a path.
+func elided(p string) bool {
+	for _, seg := range strings.Split(p, "/") {
+		if seg == "..." {
+			return true
+		}
+	}
+	return false
+}
+
+// hasTail reports a tracked path under prefix that ends with "/"+tail.
+func hasTail(candidates []string, prefix, tail string) bool {
+	for _, c := range candidates {
+		if strings.HasPrefix(c, prefix) && strings.HasSuffix(c, "/"+tail) {
+			return true
+		}
+	}
+	return false
 }
 
 func matchesAny(glob string, tracked map[string]bool) bool {

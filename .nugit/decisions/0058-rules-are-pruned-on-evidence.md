@@ -60,6 +60,11 @@ The tree says which paths still exist.
      matches no tracked file, or a backticked file path the body cites that
      is no longer in the tree. To keep prose and other repos' paths out, a
      cited path is checked only when its top-level directory exists here.
+     A cited path is written from wherever its author was working, so it is
+     the tail of a path. It is dead only when no tracked file is it or ends
+     with it, and a cite with an elided `...` segment is not judged. (A
+     pilot run called five cites dead that lived under one app's directory,
+     among them a component bound to `<app>/src/**` citing `tests/ui/…`.)
    - **never fired:** a checklist item that no commit since it was written
      has matched.
 
