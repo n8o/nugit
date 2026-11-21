@@ -18,15 +18,22 @@ func View(commits []model.Commit, gate string) *model.VerificationView {
 	if gate == Off || len(commits) == 0 {
 		return nil
 	}
-	v := &model.VerificationView{Gate: gate, Commits: len(commits), ByKind: map[string]int{}}
+	v := &model.VerificationView{Gate: gate, ByKind: map[string]int{}}
 	stamped := 0
 	for _, c := range commits {
+		if c.Merge {
+			continue // no work of its own, and no hook could have stamped it
+		}
+		v.Commits++
 		line := c.Trailer.Verified
 		if line != "" {
 			stamped++
 		}
 		p := trailers.ParseVerified(line)
-		if p.Verified() {
+		// A commit the gate released is unverified whatever else its lines
+		// claim: the release is the gate saying it found no evidence.
+		released := strings.Contains(p.Note, releasedNote)
+		if p.Verified() && !released {
 			v.Verified++
 			for _, k := range p.Kinds {
 				if k != trailers.VerifiedNone {
@@ -36,11 +43,10 @@ func View(commits []model.Commit, gate string) *model.VerificationView {
 			continue
 		}
 		v.Unverified = append(v.Unverified, model.UnverifiedCommit{
-			SHA: c.SHA, Subject: c.Subject, Note: p.Note, Stamped: line != "",
-			Released: strings.HasPrefix(p.Note, releasedNote),
+			SHA: c.SHA, Subject: c.Subject, Note: p.Note, Stamped: line != "", Released: released,
 		})
 	}
-	if gate == Observe && stamped == 0 {
+	if v.Commits == 0 || (gate == Observe && stamped == 0) {
 		return nil
 	}
 	if len(v.ByKind) == 0 {

@@ -82,8 +82,10 @@ What a hook can see, from the Claude Code docs, not assumed:
 3. **The commit-msg hook stamps and gates.** It finds the session's evidence:
    records from the same Claude Code or agent-deck session, with no edit
    recorded for that session after them. A check that ran before the tree
-   changed checked a different tree. Without the pre-edit hook there are no
-   edit records, and any evidence in the session counts. The hook then:
+   changed checked a different tree. An edit `context_gate: block` denied
+   does not count, since it never happened. Without edit records (no pre-edit
+   hook, or `context_gate: off`), any evidence in the session counts. The
+   hook then:
    - **evidence:** stamps `verified: e2e, tests` (only when the message has no
      `verified:` line);
    - **a reason in the message** (`verified: none — docs-only change`, or any
@@ -92,10 +94,15 @@ What a hook can see, from the Claude Code docs, not assumed:
      `would-block` and prints nothing. Under **enforce** it blocks with a
      message naming both ways forward. After **two blocks** since the
      session's last commit, the next commit goes through stamped
-     `verified: none — released after 2 blocked commits`.
+     `verified: none — released after 2 blocked commits`. The release stamp
+     is added even over the author's own line, and the PR view counts a
+     released commit as unverified whatever else it claims.
 
-   Every verdict is a `source: "commit"` usage record. A commit made with no
-   session id at all is a person at a terminal. nugit has no evidence about
+   Every verdict is a `source: "commit"` usage record. With `usage.log: off`
+   the gate stands down entirely: there is no evidence to read and nowhere to
+   count blocks. A block that cannot be recorded is not enforced, because it
+   could never count toward the release. A commit made with no session id at
+   all is a person at a terminal. nugit has no evidence about
    how they checked their work, so it stamps nothing and gates nothing.
 
 4. **`verify.gate: off | observe | enforce`, default `observe`.** The mode is
@@ -105,7 +112,8 @@ What a hook can see, from the Claude Code docs, not assumed:
 5. **pr-render shows the range.** A *Verification* section counts the commits
    by kind and lists every unverified one with its reason. Under **enforce**,
    an `unverified-commits` warn names the commits with no line, a bare `none`,
-   or a release. Under observe it never warns. A repo that has never stamped
+   or a release. Merge commits are skipped: an "Update branch" merge carries
+   no work of its own, and no hook could have stamped it. Under observe it never warns. A repo that has never stamped
    a commit sees nothing new.
 
 6. **`nugit stats`** reports evidence by kind and the gate's verdicts:
@@ -148,6 +156,16 @@ What a hook can see, from the Claude Code docs, not assumed:
 - `verified: none` will appear on agent commits in a repo that has the
   commit-msg hook but not the evidence hook. That is accurate, since no
   verification was recorded, and doctor names the fix.
+- **A check chained into the commit does not count.** In
+  `go test ./... && git commit`, the commit-msg hook runs before the Bash
+  call finishes, so PostToolUse has not recorded the tests yet. The block
+  message and the skill text say to run the check as its own command.
+- Under observe, an author's bare `verified: tests` with no evidence reaches
+  the PR as written. The view reports what commits say, and only enforce
+  checks the claim. That is the difference between the two modes.
+- A test command is recognized per simple command. Quoted text and heredoc
+  bodies are not split, so a commit message mentioning `go test` is not
+  evidence.
 - Matching skill names is a heuristic. A repo whose verify skill is called
   something else sets `verify.skills`.
 - PostToolUse is documented as the success event. If a non-zero Bash exit
