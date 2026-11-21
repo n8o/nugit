@@ -156,3 +156,29 @@ func TestModelDriftNestedPrefix(t *testing.T) {
 		t.Fatalf("want one model-drift finding for the nested unit, got %+v", fs)
 	}
 }
+
+// A deployable known only by its Dockerfile drifts when a PR changes that
+// file and no element maps it, and is clean once a glob covers the file.
+func TestModelDriftDockerfileOnlyUnit(t *testing.T) {
+	root := t.TempDir()
+	writeTree(t, root, map[string]string{
+		"libs/core/CMakeLists.txt":     "add_library(core core.cpp)\n",
+		"docker/Dockerfile.acme-probe": "FROM alpine\nRUN apk add curl\n",
+	})
+	change := model.FileChange{Path: "docker/Dockerfile.acme-probe", Status: "M"}
+
+	fs := checkModelDrift(driftInput(root, driftModel(), change))
+	if len(fs) != 1 || !strings.Contains(fs[0].Title, "docker/Dockerfile.acme-probe") ||
+		!strings.Contains(fs[0].Detail, `"docker/Dockerfile.acme-probe"`) {
+		t.Fatalf("a change to an unmodeled image's Dockerfile must warn and name it, got %+v", fs)
+	}
+
+	images := model.Component{ID: "images", Name: "Images", Paths: []string{"docker/**"}}
+	if fs := checkModelDrift(driftInput(root, driftModel(images), change)); len(fs) != 0 {
+		t.Errorf("a glob over the Dockerfile models the unit, got %+v", fs)
+	}
+	other := model.FileChange{Path: "libs/core/core.cpp", Status: "M", Component: "core"}
+	if fs := checkModelDrift(driftInput(root, driftModel(), other)); len(fs) != 0 {
+		t.Errorf("a PR that does not touch the Dockerfile must not warn about it, got %+v", fs)
+	}
+}

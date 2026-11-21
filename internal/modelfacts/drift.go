@@ -17,7 +17,11 @@ import (
 // model-drift check (ADR-0021). Every Unit should correspond to a workspace.dsl
 // element; one that doesn't is model drift.
 type Unit struct {
-	Dir      string `json:"dir"`      // nugit-root-relative source directory
+	Dir string `json:"dir"` // nugit-root-relative source directory
+	// File is the unit's one file when it has no source directory: a
+	// deployable whose Dockerfile names no source the detector can derive.
+	// Dir is then empty, and a change to the Dockerfile is a change to it.
+	File     string `json:"file,omitempty"`
 	Name     string `json:"name"`     // detector name (container image, else dir base)
 	Kind     string `json:"kind"`     // "deployable" | "cmake" | "go"
 	Evidence string `json:"evidence"` // why the detector believes this unit exists
@@ -45,11 +49,11 @@ func Units(repoDir string) []Unit {
 
 	byDir := map[string]Unit{}
 	add := func(u Unit) {
-		if u.Dir == "" || u.Dir == "." {
+		if u.Dir == "." || (u.Dir == "" && u.File == "") {
 			return // the repo root is the system, not a sub-unit
 		}
-		if _, ok := byDir[u.Dir]; !ok {
-			byDir[u.Dir] = u
+		if _, ok := byDir[u.Key()]; !ok {
+			byDir[u.Key()] = u
 		}
 	}
 	if containers, _, err := deploy.Detect(repoDir); err == nil {
@@ -57,8 +61,14 @@ func Units(repoDir string) []Unit {
 			if !admits(c.Dockerfile) {
 				continue
 			}
-			add(Unit{Dir: c.SourceDir, Name: c.Name, Kind: "deployable",
-				Evidence: "dockerfile " + c.Dockerfile})
+			u := Unit{Dir: c.SourceDir, Name: c.Name, Kind: "deployable",
+				Evidence: "dockerfile " + c.Dockerfile}
+			if u.Dir == "" {
+				// No source dir to name: the Dockerfile is the unit, so a
+				// change to it still reaches the drift check and doctor.
+				u.File = c.Dockerfile
+			}
+			add(u)
 		}
 	}
 	g, _ := cmake.Discover(repoDir)
@@ -77,7 +87,7 @@ func Units(repoDir string) []Unit {
 	for _, u := range byDir {
 		out = append(out, u)
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Dir < out[j].Dir })
+	sort.Slice(out, func(i, j int) bool { return out[i].Key() < out[j].Key() })
 	return out
 }
 
@@ -96,15 +106,24 @@ func Unmodeled(units []Unit, prefix string, resolveDir func(string) string, elem
 	}
 	var out []Unit
 	for _, u := range units {
-		if resolveDir(prefix+u.Dir) != "" {
+		if resolveDir(prefix+u.Key()) != "" {
 			continue
 		}
-		if names[normalize(u.Name)] || names[normalize(path.Base(u.Dir))] {
+		if names[normalize(u.Name)] || (u.Dir != "" && names[normalize(path.Base(u.Dir))]) {
 			continue
 		}
 		out = append(out, u)
 	}
 	return out
+}
+
+// Key is the path a unit is known by: its source directory, or, for a
+// deployable with none, its Dockerfile.
+func (u Unit) Key() string {
+	if u.Dir != "" {
+		return u.Dir
+	}
+	return u.File
 }
 
 // trackedFiles returns the set of repoDir-relative paths git tracks, or nil
