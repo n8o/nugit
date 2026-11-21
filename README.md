@@ -58,8 +58,11 @@ after it count, because the earlier bundle is no longer in the window (ADR-0054)
 
 A bundle is filled by relevance, not to the budget: the records the queried file
 itself names by id (ADR-0053), then exact-path bindings, then the component, then
-its container, then global, then one-hop pulls, task matches first within each
-tier, and at most 12 decisions / 8 lessons / 6 references (override under
+its container, then global, then one-hop pulls. Within each tier, task matches
+come first, and among them the record containing the task's rarer words: a word
+weighs by how few records in the store contain it, so "the" counts for nothing
+and a product name for a lot (ADR-0055). At most 12 decisions / 8 lessons / 6
+references are served (override under
 `retrieval: {max_decisions, max_lessons, max_references}`). The MCP result is also
 hard-capped at 40,000 characters, whatever `budget_tokens` the agent passes, because
 Claude Code puts a larger result in a file the model never reads. A clamp or an
@@ -134,8 +137,18 @@ folds the store committed at `<ref>` back in. Given `-merge-base`, the previous
 raw export of the same database, it is an exact three-way merge per bead and per
 field (no timestamps needed; `bd` moves none for a label or dependency edit), and
 deleting a bead in `bd` carries through. Without a base it falls back to
-`updated_at` and keeps any committed close. Derived dependency counts are
-recomputed. Save each export as the next run's base (ADR-0047).
+`updated_at` and keeps any committed close. Save each export as the next run's
+base (ADR-0047). A line nobody changed is written back byte for byte, and a
+derived dependency count moves only by the edges the merge moved.
+
+**Why scope.** The database and the base are shared by every session of the
+clone, so the base cannot tell this session's edits from another's. The export
+is therefore scoped to the plan of the branch's objective: its claim, its
+`objective:` commits, or the bead it is named after (ADR-0048, ADR-0049). Every
+other plan is written exactly as `<ref>` has it, and the report names the beads
+the database changed there. `-plans p,…` adds plans for a PR that spans them,
+and `-plans all` exports every plan. A branch with no objective is exported
+unscoped, and the export says so (ADR-0061).
 
 **Why check.** The reader is deliberately tolerant — it skips an unparseable
 line, drops a duplicate id last-write-wins, renders an unknown status as
