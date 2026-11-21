@@ -61,7 +61,7 @@ itself names by id (ADR-0053), then exact-path bindings, then the component, the
 its container, then global, then one-hop pulls. Within each tier, task matches
 come first, and among them the record containing the task's rarer words: a word
 weighs by how few records in the store contain it, so "the" counts for nothing
-and a product name for a lot (ADR-0055). At most 12 decisions / 8 lessons / 6
+and a product name for a lot (ADR-0063). At most 12 decisions / 8 lessons / 6
 references are served (override under
 `retrieval: {max_decisions, max_lessons, max_references}`). The MCP result is also
 hard-capped at 40,000 characters, whatever `budget_tokens` the agent passes, because

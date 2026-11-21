@@ -31,7 +31,7 @@ const (
 // Relevance tiers, strongest first. An item's rank is tier*2, plus one when a
 // task was given and the item matches none of its keywords — so within a tier a
 // task-matching item always outranks a non-matching one. Within one rank, the
-// item matching the task's rarer words comes first (taskWeights, ADR-0055).
+// item matching the task's rarer words comes first (taskWeights, ADR-0063).
 // Both are deterministic, LLM-free functions of the task and the store
 // (ADR-0006).
 const (
