@@ -14,7 +14,7 @@ relates_to:
   - amends:ADR-0026
 provenance:
   commit: seed
-  citation: "pilot repo at 2026-10-08: ADR-JBS-0051 carried by 3 files on master (merged 11:02, 12:19, 14:00 on 2026-08-27 from three bases); 368 of 393 relates_to edges carrying no verb across 162/220 objects; one install pin stale in 1 of 5 surfaces for four weeks; store 87→220 objects while health fell 65→55 and 68/92 components stayed uncovered"
+  citation: "pilot repo at 2026-10-08: its ADR 0051 carried by 3 files on master (merged 11:02, 12:19, 14:00 on 2026-08-27 from three bases); 368 of 393 relates_to edges carrying no verb across 162/220 objects; one install pin stale in 1 of 5 surfaces for four weeks; store 87→220 objects while health fell 65→55 and 68/92 components stayed uncovered"
 confidence: high
 ---
 
@@ -26,10 +26,10 @@ Six weeks of a fast pilot (593 commits, 220 knowledge objects, 24→70 plans)
 produced four failures. They look unrelated and are not: each is a check that
 was *present and correct* yet could not fire.
 
-**1. An id collided three times and every PR was green.** `ADR-JBS-0051` is
-carried by three different files on the pilot's master — fabrics-provider,
-offline-site-access, telemetry-producer — merged at 11:02, 12:19 and 14:00 on
-one day, from three different bases.
+**1. An id collided three times and every PR was green.** The pilot's ADR
+0051 is carried by three different files on its master, three unrelated
+decisions merged at 11:02, 12:19 and 14:00 on one day, from three different
+bases.
 
 ADR-0039 added exactly this check and it worked as specified: it reads the
 store at the reviewed **head**. But a head that has not merged the target

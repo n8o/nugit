@@ -206,19 +206,19 @@ func TestDigestUnknownBeadAndNoStore(t *testing.T) {
 
 func TestBeadInBranch(t *testing.T) {
 	st := beads.Store{Issues: []beads.Issue{
-		{ID: "proj-irisux-7"}, {ID: "proj-irisux-70"}, {ID: "proj-irisux"},
+		{ID: "proj-meadow-7"}, {ID: "proj-meadow-70"}, {ID: "proj-meadow"},
 		{ID: "proj-3305-f7"}, {ID: "OBJECTIVE-2"}, {ID: "proj-12"},
 	}}
 	for branch, want := range map[string]string{
-		"feat/irisux-7-scenes":      "proj-irisux-7",
-		"feat/irisux-70":            "proj-irisux-70",
-		"feat/proj-irisux-7":        "proj-irisux-7",
+		"feat/meadow-7-scenes":      "proj-meadow-7",
+		"feat/meadow-70":            "proj-meadow-70",
+		"feat/proj-meadow-7":        "proj-meadow-7",
 		"fix/3305-f7-retry":         "proj-3305-f7",
 		"feat/objective-2-claim":    "OBJECTIVE-2",
-		"feat/irisux-polish":        "", // a plan name is not a step
-		"feat/irisux-71":            "",
+		"feat/meadow-polish":        "", // a plan name is not a step
+		"feat/meadow-71":            "",
 		"feat/tile-12-chrome":       "", // a bare number never matches
-		"feat/irisux-7-and-3305-f7": "", // two beads, same length: ambiguous
+		"feat/meadow-7-and-3305-f7": "", // two beads, same length: ambiguous
 	} {
 		if got := BeadInBranch(branch, st); got != want {
 			t.Errorf("%s: got %q, want %q", branch, got, want)

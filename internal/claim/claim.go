@@ -133,7 +133,7 @@ const (
 	FromClaim   Source = "claim"
 	FromCommits Source = "commits"
 	// FromBranchName is a bead id the branch is named after
-	// (feat/irisux-7-scenes → PROJ-irisux-7). Agents name branches after the
+	// (feat/meadow-7-scenes → PROJ-meadow-7). Agents name branches after the
 	// bead far more often than they run the claim command.
 	FromBranchName Source = "branch"
 )
@@ -187,10 +187,10 @@ func Resolve(repoDir string) Current {
 
 // BeadInBranch returns the bead a branch is named after, or "". A bead
 // matches when its id, or its id without the store's leading prefix segment
-// (PROJ-irisux-7 → irisux-7), appears in the branch name between separators.
+// (PROJ-meadow-7 → meadow-7), appears in the branch name between separators.
 // The short form must carry a letter and a digit, so a bare number never
 // matches. A match contained in a longer match yields to it (the plan
-// PROJ-irisux inside feat/PROJ-irisux-7); two separate beads named in one
+// PROJ-meadow inside feat/PROJ-meadow-7); two separate beads named in one
 // branch are ambiguous and match nothing.
 func BeadInBranch(branch string, st beads.Store) string {
 	b := strings.ToLower(branch)
@@ -233,8 +233,8 @@ func idForms(id string) []string {
 }
 
 // boundedIn reports whether needle occurs in s with a separator (or the end
-// of s) on both sides, so irisux-7 matches feat/irisux-7-scenes but not
-// feat/irisux-70.
+// of s) on both sides, so meadow-7 matches feat/meadow-7-scenes but not
+// feat/meadow-70.
 func boundedIn(s, needle string) bool {
 	sep := func(c byte) bool { return c == '/' || c == '-' || c == '_' || c == '.' }
 	for i := 0; ; {

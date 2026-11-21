@@ -33,7 +33,7 @@ far it doesn't:
 - **4 of 21 logged retrievals resolved `component: ""`** and degraded to
   global-only bundles — the scope chain had nothing to hang knowledge on.
 - The **pilot preview-freeze root cause lived in `third_party/versions.env`**
-  — a file that the pilot's own ADR-0020 (MoQ draft lock, `scope: global`) is
+  — a file that the pilot's own ADR-0020 (a pinned dependency version, `scope: global`) is
   ENTIRELY about — yet nothing connected the file to the ADR: global scope
   only surfaces on task-keyword match, and the task wording didn't happen to
   hit. Same shape for `k8s/registry-local/configmap.yaml` (the registry-retention

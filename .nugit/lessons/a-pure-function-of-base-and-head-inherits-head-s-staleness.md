@@ -11,7 +11,7 @@ relates_to:
   - amends:LESSON-read-from-reviewed-ref
 provenance:
   commit: seed
-  citation: "pilot repo: ADR-JBS-0051 carried by 3 files on master, merged 11:02/12:19/14:00 on 2026-08-27 from three bases, every PR green"
+  citation: "pilot repo: its ADR 0051 carried by 3 files on master, merged 11:02/12:19/14:00 on 2026-08-27 from three bases, every PR green"
 confidence: high
 ---
 
@@ -32,7 +32,7 @@ push to this branch*.
 
 Anything that behaves like a shared mutable counter — a hand-assigned
 sequential id, a port number, a migration index — turns that window into a
-collision generator. On the pilot three branches cut before `ADR-JBS-0051`
+collision generator. On the pilot three branches cut before its ADR 0051
 existed all saw 0050 as the highest, all minted 0051, and all three landed
 within three hours with every check green.
 

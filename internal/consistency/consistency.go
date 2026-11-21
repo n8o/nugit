@@ -836,9 +836,9 @@ func short(sha string) string {
 // last push to this branch".
 //
 // A hand-assigned sequential id is a shared mutable counter, which makes that
-// window expensive. Three branches cut before ADR-JBS-0051 existed all saw
-// 0050 as the highest, all minted 0051, and all three landed inside three
-// hours on the pilot.
+// window expensive. On the pilot, three branches cut before its ADR 0051
+// existed all saw 0050 as the highest, all minted 0051, and all three landed
+// inside three hours.
 //
 // The fix is the reference point, not more scope. The engine reduces the base
 // to mergeBase(base, head) because that is what a DELTA is measured against —

@@ -22,7 +22,7 @@ confidence: high
 ## Context
 
 Code in a repo that uses nugit names its decisions. The comment that says
-`// DRAWING IS THE GPU'S (ADR-JBS-0091)` was written by the author of the code
+`// RETRIES ARE THE CLIENT'S (ADR-ACME-0091)` was written by the author of the code
 beside it, pointing at the record that governs it. It is the most specific
 relevance signal a bundle could have, and `context()` ignores it.
 
@@ -39,7 +39,7 @@ inside a tier the order is task match, then scope, status, and id. Without a
 task, the lowest ids win. With a task the order barely changes, because whole
 token overlap on ordinary words ("file", "path", "rank") matches nearly every
 body. A decision scoped to another component is not admitted at all, even when
-the file names it. A decision about the MXL flow identity, scoped to the
+the file names it. A decision about a stream's identity, scoped to the
 operator, is cited by the C++ writer it constrains, and that writer never sees it.
 
 The citation is already in the file the agent asked about, so reading it costs
@@ -90,8 +90,8 @@ nothing new. The fix needs no index, no store write and no capture step.
   author's own pointer whenever its id sorts first.
 - **Adopt a code-graph tool (Graphify) for citation links.** It links
   citations only for Python and JS/TS, its pattern misses namespaced ids like
-  `ADR-JBS-0091`, and it brings a 175 MB derived graph that has to be rebuilt
-  on every commit. ADR-0004's index trigger has not fired: this is a reach gap
+  `ADR-ACME-0091`, and it brings a derived graph of the whole repo that has to
+  be rebuilt on every commit. ADR-0004's index trigger has not fired: this is a reach gap
   that a regexp over one file closes.
 - **Raise the decision cap.** On the pilot, every slot was taken by globals in
   id order. More slots would only add more of them.
