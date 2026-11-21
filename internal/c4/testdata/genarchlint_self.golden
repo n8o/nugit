@@ -89,6 +89,8 @@ components:
     in: "internal/replay/**"
   "retrieval":
     in: "internal/retrieval/**"
+  "reverts":
+    in: "internal/reverts/**"
   "review":
     in: "internal/review/**"
   "scaffold":
@@ -177,6 +179,7 @@ deps:
       - "render"
       - "replay"
       - "retrieval"
+      - "reverts"
       - "review"
       - "scaffold"
       - "skillopt"
@@ -380,6 +383,9 @@ deps:
       - "mapping"
       - "model_"
       - "trailers"
+  "reverts":
+    mayDependOn:
+      - "gitutil"
   "review":
     mayDependOn:
       - "gitutil"

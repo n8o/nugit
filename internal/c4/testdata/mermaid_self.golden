@@ -41,6 +41,7 @@ graph LR
   render["Renderer"]
   replay["Replay-task export"]
   retrieval["Retrieval"]
+  reverts["Revert report"]
   review["Review server"]
   scaffold["Scaffold"]
   significance["Significance classifier"]
@@ -101,6 +102,7 @@ graph LR
   cli --> render
   cli --> replay
   cli --> retrieval
+  cli --> reverts
   cli --> review
   cli --> scaffold
   cli --> skillopt
@@ -236,6 +238,7 @@ graph LR
   retrieval --> mapping
   retrieval --> model_
   retrieval --> trailers
+  reverts --> gitutil
   review --> gitutil
   review --> knowledge
   review --> model_

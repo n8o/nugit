@@ -214,6 +214,11 @@ workspace "nugit" "Git-native typed knowledge & unified PR view — self-model (
                     "paths" "internal/hygiene/**"
                 }
             }
+            reverts = component "Revert report" "Counts merged changes and reverts per month, with a size-matched clean set, from first-parent history (ADR-0059)" "Go" {
+                properties {
+                    "paths" "internal/reverts/**"
+                }
+            }
             verify = component "Verify gate" "Records verification evidence from Claude Code hooks; stamps verified: on commits; off/observe/enforce (ADR-0056)" "Go" {
                 properties {
                     "paths" "internal/verify/**"
@@ -459,6 +464,8 @@ workspace "nugit" "Git-native typed knowledge & unified PR view — self-model (
             hygiene -> gitutil "bounded patch log, tracked tree"
             hygiene -> usage "reads which ids context() served"
             hygiene -> model_ "uses types"
+            cli -> reverts "stats -reviewers"
+            reverts -> gitutil "bounded first-parent log, revert log, ancestry lookup"
             doctor -> agentcfg "detects the installed pre-edit and session-start hooks"
 
             // --- brownfield adoption: prose vs code, before any store exists (ADR-0036) ---

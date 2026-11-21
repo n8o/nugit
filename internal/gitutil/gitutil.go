@@ -982,7 +982,12 @@ type TimedCommit struct {
 // LogTimed returns up to max commits of revRange (newest first), with bodies
 // and committer times.
 func (r Repo) LogTimed(revRange string, max int) ([]TimedCommit, error) {
-	out, err := r.git("log", fmt.Sprintf("-n%d", max), "--pretty=format:%ct"+fieldSep+logFormat, revRange)
+	return r.logTimed(fmt.Sprintf("-n%d", max), revRange)
+}
+
+// logTimed runs git log with args and parses TimedCommits.
+func (r Repo) logTimed(args ...string) ([]TimedCommit, error) {
+	out, err := r.git(append([]string{"log", "--pretty=format:%ct" + fieldSep + logFormat}, args...)...)
 	if err != nil {
 		return nil, err
 	}

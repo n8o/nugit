@@ -50,6 +50,7 @@ import (
 	"github.com/n8o/nugit/internal/render"
 	"github.com/n8o/nugit/internal/replay"
 	"github.com/n8o/nugit/internal/retrieval"
+	"github.com/n8o/nugit/internal/reverts"
 	"github.com/n8o/nugit/internal/review"
 	"github.com/n8o/nugit/internal/scaffold"
 	"github.com/n8o/nugit/internal/skillopt"
@@ -69,7 +70,9 @@ usage:
   nugit context [flags]       scoped, typed knowledge bundle for a path (for agents)
   nugit mcp [flags]           run the MCP stdio server (exposes context() to agents)
   nugit stats [flags]         aggregate the local context() usage log (+ edit coverage, per session);
-                              -rules [-days 90]: rule hygiene — unused, dead-path, never-fired rules (ADR-0058)
+                              -rules [-days 90]: rule hygiene — unused, dead-path, never-fired rules (ADR-0058);
+                              -reviewers [-months 6] [-ref R]: merged changes, reverts and a size-matched
+                              clean set per month, from first-parent history (ADR-0059)
   nugit remember [flags]      jot ephemeral working memory (.nugit-local/, gitignored)
   nugit objective [claim <id>] show, or claim, the objective this branch's session works toward (ADR-0048)
   nugit orphans [flags]       report work started toward an objective and then left (ADR-0048, read-only)
@@ -1548,7 +1551,33 @@ func cmdStats(args []string) int {
 	format := fs.String("format", "markdown", "output: markdown|json")
 	rules := fs.Bool("rules", false, "report rule hygiene instead: lessons and checklist items unused, pointing at gone paths, or never fired (ADR-0058)")
 	days := fs.Int("days", 90, "with -rules: the unused window in days")
+	reviewers := fs.Bool("reviewers", false, "report reverts per month instead: merged changes, reverts and a size-matched clean set, from the ref's first-parent history (ADR-0059)")
+	months := fs.Int("months", 6, "with -reviewers: the window in calendar months, counting the tip's")
+	ref := fs.String("ref", "", "with -reviewers: the branch to read (default: origin's default branch)")
+	asJSON := fs.Bool("json", false, "shorthand for -format json")
 	_ = fs.Parse(args)
+	if *asJSON {
+		*format = "json"
+	}
+
+	if *reviewers {
+		rep, err := reverts.Run(reverts.Options{RepoDir: *dir, Ref: *ref, Months: *months})
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "nugit stats -reviewers: %v\n", err)
+			return 1
+		}
+		if *format == "json" {
+			out, err := json.MarshalIndent(rep, "", "  ")
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "nugit stats: %v\n", err)
+				return 1
+			}
+			fmt.Println(string(out))
+			return 0
+		}
+		fmt.Print(rep.Markdown())
+		return 0
+	}
 
 	if *rules {
 		rep, err := hygiene.Run(hygiene.Options{RepoDir: *dir, Days: *days})
