@@ -79,6 +79,9 @@ type toolInput struct {
 	Skill        string `json:"skill"`         // Skill
 	Command      string `json:"command"`       // Bash
 	SubagentType string `json:"subagent_type"` // Agent
+	// RunInBackground is set on a Bash or Agent call that returns at once
+	// and runs on. Its PostToolUse fires at that launch.
+	RunInBackground bool `json:"run_in_background"`
 }
 
 // Evidence classifies one hook event and, when it is a verification, appends
@@ -143,6 +146,11 @@ func Evidence(r io.Reader, opt Options) (rec *usage.Record) {
 //   - UserPromptSubmit: a typed `/<skill>` matching either list. A typed
 //     slash command does not go through the Skill tool, so this is the only
 //     place it is seen.
+//
+// A Bash or Agent call run in the background is never evidence. Its
+// PostToolUse fires when it is launched, before the tests or the review have
+// run, and no hook reports how it ends, so a suite that goes on to fail would
+// otherwise stamp the commit tested.
 func Classify(event, tool string, rawIn, rawResp json.RawMessage, prompt string, cfg config.Config) (kind, via string) {
 	switch event {
 	case "UserPromptSubmit":
@@ -158,6 +166,9 @@ func Classify(event, tool string, rawIn, rawResp json.RawMessage, prompt string,
 	}
 	var ti toolInput
 	_ = json.Unmarshal(rawIn, &ti)
+	if (tool == "Bash" || tool == "Agent" || tool == "Task") && (ti.RunInBackground || background(rawResp)) {
+		return "", ""
+	}
 	switch tool {
 	case "Skill":
 		return skillKind(ti.Skill, cfg), ti.Skill
@@ -325,6 +336,15 @@ func simpleCommands(cmd string) []string {
 // failed reports whether a Bash tool_response says the command exited non-zero
 // or was interrupted. The documented PostToolUse response has no exit-code
 // field, so this only catches the "Exit code N" text a failure carries.
+// background reports a tool response that names a background task: the
+// call was launched, not run.
+func background(raw json.RawMessage) bool {
+	var resp struct {
+		BackgroundTaskID string `json:"backgroundTaskId"`
+	}
+	return json.Unmarshal(raw, &resp) == nil && resp.BackgroundTaskID != ""
+}
+
 func failed(raw json.RawMessage) bool {
 	var resp struct {
 		Stdout      string `json:"stdout"`

@@ -143,6 +143,13 @@ func TestClassify(t *testing.T) {
 		{"PostToolUse", "Bash", map[string]string{"command": "go vet ./..."}, nil, "", ""},
 		{"PostToolUse", "Bash", map[string]string{"command": "go test ./..."}, map[string]any{"interrupted": true}, "", ""},
 		{"PostToolUse", "Bash", map[string]string{"command": "go test ./..."}, map[string]any{"stderr": "Exit code 1\nFAIL"}, "", ""},
+		// A background call's PostToolUse fires at launch, before the command
+		// has run, so its outcome is unknown: not evidence (ADR-0056).
+		{"PostToolUse", "Bash", map[string]any{"command": "go test ./...", "run_in_background": true}, map[string]any{"backgroundTaskId": "bash_1"}, "", ""},
+		{"PostToolUse", "Bash", map[string]any{"command": "go test ./...", "run_in_background": true}, nil, "", ""},
+		{"PostToolUse", "Bash", map[string]any{"command": "go test ./..."}, map[string]any{"backgroundTaskId": "bash_1"}, "", ""},
+		{"PostToolUse", "Bash", map[string]any{"command": "go test ./...", "run_in_background": false}, map[string]any{"stdout": "ok"}, "", "tests"},
+		{"PostToolUse", "Agent", map[string]any{"subagent_type": "service-reviewer", "run_in_background": true}, nil, "", ""},
 		{"UserPromptSubmit", "", nil, nil, "/verify the checkout flow", "e2e"},
 		{"UserPromptSubmit", "", nil, nil, "/code-review high", "review"},
 		{"UserPromptSubmit", "", nil, nil, "please verify it", ""},
@@ -177,6 +184,35 @@ func gitInit(t *testing.T) string {
 		}
 	}
 	return dir
+}
+
+// A test suite launched in the background and then failed must not stamp the
+// commit as tested: the hook only ever sees the launch.
+func TestBackgroundTestLaunchIsNotEvidence(t *testing.T) {
+	dir := gitInit(t)
+	env := map[string]string{usage.SessionEnv: "s1"}
+	opt := Options{Now: t0, Getenv: func(k string) string { return env[k] }}
+	in, _ := json.Marshal(map[string]any{
+		"session_id": "s1", "cwd": dir, "hook_event_name": "PostToolUse",
+		"tool_name":     "Bash",
+		"tool_input":    map[string]any{"command": "go test ./...", "run_in_background": true},
+		"tool_response": map[string]any{"backgroundTaskId": "bash_7"},
+	})
+	if r := Evidence(bytes.NewReader(in), opt); r != nil {
+		t.Fatalf("a background launch was recorded as evidence: %+v", r)
+	}
+	f := filepath.Join(dir, "MSG")
+	if err := os.WriteFile(f, []byte(msg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	opt.Now = t0.Add(time.Minute)
+	var stderr bytes.Buffer
+	if code := CommitMsg(dir, f, &stderr, opt); code != 0 {
+		t.Fatalf("code=%d stderr=%s", code, stderr.String())
+	}
+	if b, _ := os.ReadFile(f); strings.Contains(string(b), "verified: tests") {
+		t.Errorf("the commit was stamped tested from a background launch: %q", b)
+	}
 }
 
 // End to end through the log: the evidence hook records a verify-skill run,

@@ -97,6 +97,8 @@ for the decision it grounds) and land it as a PR — never paste the full docume
   `go test ./... && git commit`, the commit-msg hook runs before that command
   finishes, so the tests are not recorded yet and the commit is stamped
   `verified: none`.
+- **Run the check in the foreground.** A test run started in the background
+  is not recorded: the hook sees it start, not how it ended.
 - **If the commit is blocked** (`verify.gate: enforce`), run the check, or
   give the reason. Do not retry the same commit unchanged. The gate lets a
   third attempt through so a wrong block cannot strand you, and the PR view
