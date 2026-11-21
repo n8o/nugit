@@ -134,8 +134,10 @@ does not get to answer that one.
   the governed keys where the checkout and the target disagree.
 - `usage.log: off` in a checkout, like any governed key, takes effect once
   it lands on the default branch.
-- `config` gains `Govern` and `GovernedChanges`, pure functions over two
-  parsed configs, and `usage.LocalConfig` is the one place the local readers
-  get it from. `gitutil` gains a bounded `ShowFileTimeout` for the hook
-  path (LESSON-any-git-call-added-to-the-commit-path-must-carry-i). No new
-  cross-package edge.
+- `config` gains `Govern`, `GovernedChanges` and `Resolve`, pure functions
+  over parsed configs, and `LoadLocal`, which takes the target's file from
+  its caller so the package stays free of git. `usage.LocalConfig` is the one
+  place the local readers get it from. `gitutil` gains `DefaultBranchFile`,
+  which reads a file from origin's default branch under one deadline for the
+  hook path (LESSON-any-git-call-added-to-the-commit-path-must-carry-i). No
+  new cross-package edge.
