@@ -29,7 +29,8 @@ type MergeReport struct {
 	Deleted []string
 	// Outside are beads in plans outside the scope that an unscoped merge
 	// would have changed: edits in the shared database this export did not
-	// carry. They are written as committed (ADR-0061).
+	// carry. They are written as committed (ADR-0061), and NextBase keeps
+	// them pending for the export that names their plan (ADR-0064).
 	Outside []string
 	// NoBase is true when no base was supplied and the timestamp rules
 	// decided instead (see Merge).
@@ -99,7 +100,8 @@ type pick struct {
 // database reopens other agents' closes and deletes plans added since the last
 // import.
 //
-// With a base — the previous raw export of this same database — Merge is an
+// With a base — what this database last shared with the committed store,
+// which NextBase writes for the next run — Merge is an
 // ordinary three-way merge per bead and, where both sides moved, per field:
 // whichever side differs from the base changed it; if both did, the export
 // wins and the bead is reported as a conflict. That is exact without any
@@ -137,10 +139,8 @@ func Merge(fresh, committed Store, base []Issue, scope Scope) (Store, MergeRepor
 		r, ok := rIdx[w.ID]
 		if ok = ok && w.raw != nil; ok {
 			seen[w.ID] = true
-			if getStr(w.raw, "plan") == "" {
-				w.Plan = r.Plan
-			}
 		}
+		w.Plan = planUnder(w, r, ok)
 		p, kept, why := decide(w, r, ok, bIdx, base != nil)
 		if !scope.Has(w.Plan) {
 			if kept != ok || (kept && !same(p.it.raw, r.raw)) {
@@ -184,6 +184,72 @@ func Merge(fresh, committed Store, base []Issue, scope Scope) (Store, MergeRepor
 	return out, rep
 }
 
+// planUnder is the plan Merge writes an exported bead under: the export's own
+// `plan` field, else the plan it is committed under (ok), else the export's.
+// A merge never moves a line between shard files on its own.
+func planUnder(w, r Issue, ok bool) string {
+	if ok && getStr(w.raw, "plan") == "" {
+		return r.Plan
+	}
+	return w.Plan
+}
+
+// NextBase is the base the next export of this database merges against: per
+// bead, the last line the database and the committed store are known to share
+// once this export's shards are committed (ADR-0064). Callers write it over
+// the base they passed to Merge; the raw export is NOT the next base.
+//
+// In scope, it is the export's line, as ADR-0047 had it. Where the export's
+// line was written, the committed store takes it; where the committed line was
+// kept, the database has not moved from the export's line. Either way the next
+// export compares the database against what it said last time.
+//
+// Outside the scope the export wrote nothing from the database, so the
+// database's edits there are still pending. Saving the raw export would
+// record them as shared: the next export that names the plan would then read
+// a bead filed there as deleted on main, and an edit to one as a database
+// behind main. So outside the scope the base keeps the line it had, or none,
+// unless the database and the committed store agree on the bead, which makes
+// their shared line the base.
+func NextBase(fresh, committed Store, base []Issue, scope Scope) []byte {
+	rIdx, bIdx := index(committed.Issues), index(base)
+	var b bytes.Buffer
+	write := func(it Issue) {
+		line := it.src
+		if line == nil {
+			line, _ = json.Marshal(it.raw)
+		}
+		b.Write(line)
+		b.WriteByte('\n')
+	}
+	seen := map[string]bool{}
+	for _, w := range fresh.Issues {
+		if w.ID == "" || w.raw == nil || seen[w.ID] {
+			continue
+		}
+		seen[w.ID] = true
+		r, ok := rIdx[w.ID]
+		switch {
+		case scope.Has(planUnder(w, r, ok)), ok && same(w.raw, r.raw):
+			write(w)
+		default:
+			if old, had := bIdx[w.ID]; had {
+				write(old)
+			}
+		}
+	}
+	for _, r := range committed.Issues {
+		if r.ID == "" || r.raw == nil || seen[r.ID] {
+			continue
+		}
+		seen[r.ID] = true
+		if old, had := bIdx[r.ID]; had && !scope.Has(r.Plan) {
+			write(old) // deleted in the database, outside the scope: still pending
+		}
+	}
+	return b.Bytes()
+}
+
 // verdict names the report lists a decision lands in, once the caller knows
 // the bead is in scope.
 type verdict func(*MergeReport) []*[]string
@@ -217,7 +283,7 @@ func decide(w, r Issue, ok bool, bIdx map[string]Issue, haveBase bool) (p pick, 
 		case same(r.raw, b.raw): // untouched on main: ours
 			return pick{it: w, side: fromExport}, true, none
 		default:
-			m, conflict := mergeFields(b.raw, w.raw, r.raw)
+			m, conflict := mergeFields(w.ID, b.raw, w.raw, r.raw)
 			w.raw = m
 			w.Status = norm(getStr(m, "status", "state"))
 			w.Title = getStr(m, "title", "summary", "name")
@@ -238,7 +304,7 @@ func decide(w, r Issue, ok bool, bIdx map[string]Issue, haveBase bool) (p pick, 
 // mergeFields merges two maps against their base, key by key. A key one side
 // left equal to the base takes the other side's value; a key both changed
 // differently keeps the export's (w) value and reports a conflict.
-func mergeFields(b, w, r map[string]any) (map[string]any, bool) {
+func mergeFields(id string, b, w, r map[string]any) (map[string]any, bool) {
 	out := map[string]any{}
 	conflict := false
 	keys := map[string]bool{}
@@ -251,11 +317,16 @@ func mergeFields(b, w, r map[string]any) (map[string]any, bool) {
 		bv, bok := b[k]
 		wv, wok := w[k]
 		rv, rok := r[k]
-		pick, ok := wv, wok
+		if k == "dependencies" {
+			bv, bok = ownEdges(id, bv)
+			wv, wok = ownEdges(id, wv)
+			rv, rok = ownEdges(id, rv)
+		}
+		pick, ok := w[k]
 		switch {
 		case eq(wv, wok, rv, rok):
 		case eq(wv, wok, bv, bok):
-			pick, ok = rv, rok
+			pick, ok = r[k]
 		case eq(rv, rok, bv, bok):
 		default:
 			if !derived[k] {
@@ -329,7 +400,13 @@ func deps(m map[string]any) []map[string]any {
 	return out
 }
 
-// same compares two lines ignoring the derived counts.
+// same reports whether two lines say the same thing about a bead: equal but
+// for the derived counts, the order of the dependencies, an empty dependency
+// list, and edges on the line that belong to other beads (ADR-0064). Writers
+// disagree on all of these (bd writes no empty list, and a hand-merged line can
+// carry a copy of another bead's edge), so none of them is an edit. Without a
+// base the timestamp rules would otherwise put such a line in every export's
+// diff.
 func same(a, b map[string]any) bool {
 	return bytes.Equal(canon(a), canon(b))
 }
@@ -341,8 +418,47 @@ func canon(m map[string]any) []byte {
 			c[k] = v
 		}
 	}
+	if v, ok := ownEdges(getStr(m, "id", "key"), c["dependencies"]); ok {
+		c["dependencies"] = v
+	} else {
+		delete(c, "dependencies")
+	}
 	b, _ := json.Marshal(c)
 	return b
+}
+
+// ownEdges is a dependencies value as a comparable set: the edges bead id
+// owns (issue_id is id, or absent), in a fixed order. An edge another bead
+// owns is that bead's to state; bd counts it there and only there. ok is
+// false when nothing is left, so an empty list equals no list.
+func ownEdges(id string, v any) (any, bool) {
+	list, isList := v.([]any)
+	if !isList {
+		return v, v != nil
+	}
+	type keyed struct {
+		key []byte
+		v   any
+	}
+	var own []keyed
+	for _, d := range list {
+		if dm, ok := d.(map[string]any); ok {
+			if from := getStr(dm, "issue_id"); from != "" && from != id {
+				continue
+			}
+		}
+		k, _ := json.Marshal(d)
+		own = append(own, keyed{k, d})
+	}
+	if len(own) == 0 {
+		return nil, false
+	}
+	sort.Slice(own, func(i, j int) bool { return bytes.Compare(own[i].key, own[j].key) < 0 })
+	out := make([]any, len(own))
+	for i, k := range own {
+		out[i] = k.v
+	}
+	return out, true
 }
 
 func index(issues []Issue) map[string]Issue {

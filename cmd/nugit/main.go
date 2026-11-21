@@ -182,7 +182,8 @@ plan flags:
   normalize  -C dir  -write    canonicalize the store (default: report what would change)
              -split            shard into .beads/plans/<plan>.jsonl, one file per plan
              -merge ref        with -split: keep what ref's store has that a stale database would revert
-             -merge-base f     with -merge: the previous raw bd export, for an exact three-way merge
+             -merge-base f     with -merge: the merge base, for an exact three-way merge; -write
+                               replaces it with the next one (keep the file, never save bd's export over it)
              -plans p,…        with -merge: export these plans too (default: only the branch
                                objective's plan; "all" exports every plan)
 
@@ -1853,7 +1854,7 @@ func cmdPlanNormalize(args []string) int {
 	write := fs.Bool("write", false, "write the files (default: report what would change)")
 	split := fs.Bool("split", false, "shard the store into .beads/plans/<plan>.jsonl, one file per plan")
 	merge := fs.String("merge", "", "with -split: fold in the store committed at this ref, so a database behind it cannot revert it (ADR-0047)")
-	mergeBase := fs.String("merge-base", "", "with -merge: the previous raw `bd export` of this database (a missing file means no base)")
+	mergeBase := fs.String("merge-base", "", "with -merge: the base of the three-way merge, which -write replaces with the next export's base (a missing file means no base; ADR-0064)")
 	var plans stringList
 	fs.Var(&plans, "plans", "with -merge: also export these plans, comma-separated and repeatable; \"all\" exports every plan (default: only the plan of the branch's objective, ADR-0061)")
 	_ = fs.Parse(args)
@@ -1867,6 +1868,7 @@ func cmdPlanNormalize(args []string) int {
 		fmt.Fprintf(os.Stderr, "nugit plan normalize: %v\n", err)
 		return 1
 	}
+	var nextBase []byte // with -merge-base: what -write saves there for the next export
 	if *merge != "" {
 		if !*split {
 			fmt.Fprintln(os.Stderr, "nugit plan normalize: -merge needs -split (it writes beads back to their committed shards)")
@@ -1875,9 +1877,11 @@ func cmdPlanNormalize(args []string) int {
 		committed, ok := beads.Read(gitutil.Repo{Dir: *dir}, *merge, "")
 		if !ok {
 			fmt.Fprintf(os.Stderr, "nugit plan normalize: no plan store at %s; nothing to merge\n", *merge)
+			nextBase = beads.NextBase(st, beads.Store{}, nil, nil)
 		} else {
-			// The base is the previous raw export of this database. Without one
-			// (first run, or a deleted file) Merge falls back to timestamps.
+			// The base is what this database last shared with the committed
+			// store, as the last -write saved it (ADR-0064). Without one (first
+			// run, or a deleted file) Merge falls back to timestamps.
 			var base []beads.Issue
 			if *mergeBase != "" {
 				if src, err := os.ReadFile(*mergeBase); err == nil {
@@ -1889,6 +1893,7 @@ func cmdPlanNormalize(args []string) int {
 			}
 			scope, line := exportScope(*dir, *merge, plans, committed, st)
 			fmt.Println(line)
+			nextBase = beads.NextBase(st, committed, base, scope)
 			var rep beads.MergeReport
 			st, rep = beads.Merge(st, committed, base, scope)
 			how := "three-way against the last export"
@@ -1956,6 +1961,7 @@ func cmdPlanNormalize(args []string) int {
 		fmt.Printf("\n%d file(s) would change. Re-run with -write to apply, then commit and re-export from `bd` as usual.\n", changed+len(stale))
 		return 0
 	}
+	saveBase := *mergeBase != "" && *merge != ""
 	for _, d := range dests {
 		full := filepath.Join(*dir, d)
 		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
@@ -1974,7 +1980,37 @@ func cmdPlanNormalize(args []string) int {
 		}
 	}
 	fmt.Printf("\nwrote %d file(s).\n", len(dests))
+	// The next base goes last, once the shards are down: a run that fails
+	// before this point leaves the old base, which still matches the database.
+	if saveBase {
+		if err := writeAtomic(*mergeBase, nextBase); err != nil {
+			fmt.Fprintf(os.Stderr, "nugit plan normalize: saving the next merge base: %v\n", err)
+			return 1
+		}
+		fmt.Printf("saved the next merge base to %s (%d bead(s))\n", *mergeBase, bytes.Count(nextBase, []byte("\n")))
+	}
 	return 0
+}
+
+// writeAtomic replaces path with b through a rename, so a reader (or a crash)
+// sees the old file or the new one, never half of one.
+func writeAtomic(path string, b []byte) error {
+	f, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(f.Name()) // a no-op once renamed
+	if _, err := f.Write(b); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	if err := os.Chmod(f.Name(), 0o644); err != nil { // CreateTemp makes it 0600
+		return err
+	}
+	return os.Rename(f.Name(), path)
 }
 
 // cmdReview serves the candidate lane in a browser (`nugit review`).
