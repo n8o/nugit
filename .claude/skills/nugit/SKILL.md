@@ -93,6 +93,10 @@ for the decision it grounds) and land it as a PR — never paste the full docume
   `verified: none — docs-only change`. Never write a kind you did not run.
   The hook cannot see a check you ran somewhere else, so a claim like that
   needs a note saying where it ran.
+- **Run the check as its own command, not chained into the commit.** In
+  `go test ./... && git commit`, the commit-msg hook runs before that command
+  finishes, so the tests are not recorded yet and the commit is stamped
+  `verified: none`.
 - **If the commit is blocked** (`verify.gate: enforce`), run the check, or
   give the reason. Do not retry the same commit unchanged. The gate lets a
   third attempt through so a wrong block cannot strand you, and the PR view
