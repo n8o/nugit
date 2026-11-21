@@ -30,8 +30,10 @@ const (
 
 // Relevance tiers, strongest first. An item's rank is tier*2, plus one when a
 // task was given and the item matches none of its keywords — so within a tier a
-// task-matching item always outranks a non-matching one. Purely ordinal and
-// derived from declared structure: deterministic, LLM-free (ADR-0006).
+// task-matching item always outranks a non-matching one. Within one rank, the
+// item matching the task's rarer words comes first (taskWeights, ADR-0055).
+// Both are deterministic, LLM-free functions of the task and the store
+// (ADR-0006).
 const (
 	tierCited     = iota // the queried file names this object's id (ADR-0053)
 	tierPath             // applies_to_paths binding or org-landscape binding
@@ -58,7 +60,7 @@ func capsFrom(cfg config.Config) caps {
 }
 
 // relevanceRank scores a directly in-scope item (lower is more relevant).
-func relevanceRank(it Item, o *model.KnowledgeObject, comp, parent string, kw map[string]bool) int {
+func relevanceRank(it Item, o *model.KnowledgeObject, comp, parent string, tw taskWeights) int {
 	tier := tierGlobal
 	switch {
 	case it.Cited:
@@ -70,16 +72,16 @@ func relevanceRank(it Item, o *model.KnowledgeObject, comp, parent string, kw ma
 	case parent != "" && it.Scope == parent:
 		tier = tierContainer
 	}
-	return tier*2 + kwMiss(o, kw)
+	return tier*2 + kwMiss(o, tw)
 }
 
 // hopRank scores an item pulled in by traversal: always below every direct item.
-func hopRank(o *model.KnowledgeObject, kw map[string]bool) int {
-	return tierHop*2 + kwMiss(o, kw)
+func hopRank(o *model.KnowledgeObject, tw taskWeights) int {
+	return tierHop*2 + kwMiss(o, tw)
 }
 
-func kwMiss(o *model.KnowledgeObject, kw map[string]bool) int {
-	if len(kw) > 0 && !matches(o, kw) {
+func kwMiss(o *model.KnowledgeObject, tw taskWeights) int {
+	if tw.misses(o) {
 		return 1
 	}
 	return 0

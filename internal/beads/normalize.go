@@ -47,24 +47,13 @@ func ReadDir(root string) (Store, error) {
 		return Store{}, fmt.Errorf("no .jsonl store under %s", dir)
 	}
 	sort.Strings(files)
-	st := Store{Files: files, Sharded: len(files) > 1, Stats: map[string]FileStat{}}
+	srcs := map[string][]byte{}
 	for _, f := range files {
-		src, e := os.ReadFile(filepath.Join(root, f))
-		if e != nil {
-			continue
+		if src, e := os.ReadFile(filepath.Join(root, f)); e == nil {
+			srcs[f] = src
 		}
-		issues := ParseJSONL(src)
-		for i := range issues {
-			issues[i].File = f
-		}
-		lines := countLines(src)
-		st.Stats[f] = FileStat{Lines: lines, Parsed: len(issues), Skipped: lines - len(issues)}
-		st.Issues = append(st.Issues, issues...)
 	}
-	st.DuplicateIDs = duplicateIDs(st.Issues)
-	st.Issues = dedupByID(st.Issues)
-	assignPlans(&st)
-	return st, nil
+	return fromFiles(files, srcs), nil
 }
 
 // Normalize returns the canonical bytes of the store, keyed by path.
@@ -86,6 +75,11 @@ func ReadDir(root string) (Store, error) {
 // the stronger form of the same idea — an agent working one plan then never
 // writes a file another agent's PR also touches — and it makes the file the
 // plan, so the grouping no longer depends on how ids were named.
+//
+// A line Merge kept as committed (asRead) is the exception: it stays in the
+// shard it was read from and is written back as read, and a shard holding
+// nothing else keeps its order too. Re-encoding a line no one changed puts it
+// in every export's diff (ADR-0061).
 func Normalize(st Store, split bool) (map[string][]byte, error) {
 	groups := map[string][]Issue{}
 	for _, it := range st.Issues {
@@ -93,14 +87,22 @@ func Normalize(st Store, split bool) (map[string][]byte, error) {
 			continue
 		}
 		dest := it.File
-		if split {
+		if split && !(it.asRead && strings.HasPrefix(it.File, ".beads/plans/")) {
 			dest = ".beads/plans/" + planSlug(it.Plan) + ".jsonl"
 		}
 		groups[dest] = append(groups[dest], it)
 	}
 	out := map[string][]byte{}
 	for dest, issues := range groups {
+		asRead := func(it Issue) bool { return it.asRead && it.File == dest }
+		untouched := true
+		for _, it := range issues {
+			untouched = untouched && asRead(it)
+		}
 		sort.SliceStable(issues, func(i, j int) bool {
+			if untouched {
+				return issues[i].Line < issues[j].Line
+			}
 			if issues[i].Plan != issues[j].Plan {
 				return issues[i].Plan < issues[j].Plan
 			}
@@ -108,6 +110,11 @@ func Normalize(st Store, split bool) (map[string][]byte, error) {
 		})
 		var b bytes.Buffer
 		for _, it := range issues {
+			if asRead(it) {
+				b.Write(it.src)
+				b.WriteByte('\n')
+				continue
+			}
 			line, err := json.Marshal(it.raw) // map keys marshal in sorted order
 			if err != nil {
 				return nil, fmt.Errorf("%s: re-encoding %s: %w", it.File, it.ID, err)
