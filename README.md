@@ -134,8 +134,18 @@ folds the store committed at `<ref>` back in. Given `-merge-base`, the previous
 raw export of the same database, it is an exact three-way merge per bead and per
 field (no timestamps needed; `bd` moves none for a label or dependency edit), and
 deleting a bead in `bd` carries through. Without a base it falls back to
-`updated_at` and keeps any committed close. Derived dependency counts are
-recomputed. Save each export as the next run's base (ADR-0047).
+`updated_at` and keeps any committed close. Save each export as the next run's
+base (ADR-0047). A line nobody changed is written back byte for byte, and a
+derived dependency count moves only by the edges the merge moved.
+
+**Why scope.** The database and the base are shared by every session of the
+clone, so the base cannot tell this session's edits from another's. The export
+is therefore scoped to the plan of the branch's objective: its claim, its
+`objective:` commits, or the bead it is named after (ADR-0048, ADR-0049). Every
+other plan is written exactly as `<ref>` has it, and the report names the beads
+the database changed there. `-plans p,…` adds plans for a PR that spans them,
+and `-plans all` exports every plan. A branch with no objective is exported
+unscoped, and the export says so (ADR-0061).
 
 **Why check.** The reader is deliberately tolerant — it skips an unparseable
 line, drops a duplicate id last-write-wins, renders an unknown status as
