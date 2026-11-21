@@ -80,6 +80,12 @@ func Run(repoDir string) Report {
 	cfg, err := config.Load(repoDir)
 	add("config.yml parses", err == nil, errOr(err, "c4.mode="+cfg.C4.Mode))
 
+	// ADR-0055: governed keys come from origin's default branch, for pr-render
+	// and for the local hooks. Advisory: a checkout that differs is a change
+	// in flight, and saying so saves someone wondering why their new gate
+	// mode does nothing yet.
+	r.Checks = append(r.Checks, governedConfigCheck(repoDir))
+
 	dslPath := cfg.C4.DSL
 	if dslPath == "" {
 		dslPath = ".nugit/architecture/workspace.dsl"
@@ -825,4 +831,42 @@ func relTo(repoDir string) func(string) string {
 		}
 		return filepath.ToSlash(r)
 	}
+}
+
+// governedConfigCheck reports the governed config keys where the checkout
+// disagrees with origin's default branch (ADR-0055). The hooks and pr-render
+// apply the default branch's value until the change lands there.
+func governedConfigCheck(repoDir string) Check {
+	c := Check{Name: "config gates match the default branch", OK: true, Advisory: true}
+	repo := gitutil.Repo{Dir: repoDir}
+	target, read := repo.DefaultBranchFile(".nugit/config.yml", 2*time.Second)
+	if !read {
+		c.Detail = "no remote default branch recorded (refs/remotes/origin/HEAD); the hooks read the checkout's config"
+		return c
+	}
+	head, _ := os.ReadFile(filepath.Join(repoDir, ".nugit", "config.yml"))
+	g, err := config.Resolve(head, []byte(target), true)
+	if err != nil || !g.FromTarget {
+		c.Detail = "the default branch carries no usable config.yml; the checkout's governs"
+		return c
+	}
+	ref := repo.DefaultRemoteBranch()
+	if len(g.Changes) == 0 {
+		c.Detail = "governed keys agree with " + ref
+		return c
+	}
+	c.OK = false
+	parts := make([]string, 0, len(g.Changes))
+	for _, ch := range g.Changes {
+		parts = append(parts, fmt.Sprintf("%s: %s here, %s on %s", ch.Key, orUnset(ch.Head), orUnset(ch.Target), ref))
+	}
+	c.Detail = strings.Join(parts, "; ") + ". pr-render and the hooks apply " + ref + "'s values until this lands there"
+	return c
+}
+
+func orUnset(v string) string {
+	if v == "" {
+		return "(unset)"
+	}
+	return v
 }

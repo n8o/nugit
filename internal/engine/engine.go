@@ -50,13 +50,17 @@ func BuildReport(opt Options) (model.Report, error) {
 	// prefix=="" every path below is byte-identical to before — no regression.
 	prefix := repo.Prefix()
 
-	// Read config at the reviewed ref (like the DSL and import graph), so the
-	// verdict never depends on uncommitted working-tree state.
+	// Config is read at refs, never the working tree, so the verdict never
+	// depends on uncommitted state. And it is read from the TARGET for every
+	// governed key (ADR-0055): a change does not get to set the rules that
+	// judge it. Head supplies only what describes its own tree (config.HeadKeys).
 	cfgSrc, _ := repo.ShowFile(opt.Head, prefix+".nugit/config.yml")
-	cfg, err := config.LoadBytes([]byte(cfgSrc))
+	targetSrc, targetRead := targetConfig(repo, opt.Base, prefix)
+	gov, err := config.Resolve([]byte(cfgSrc), []byte(targetSrc), targetRead)
 	if err != nil {
 		return model.Report{}, fmt.Errorf("parsing .nugit/config.yml at %s: %w", opt.Head, err)
 	}
+	cfg := gov.Config
 	if opt.DSLPath == "" {
 		dsl := cfg.C4.DSL
 		if dsl == "" {
@@ -168,6 +172,7 @@ func BuildReport(opt Options) (model.Report, error) {
 		other = append(other, delta.PlanFindings(repo, base, opt.Head, prefix, plan, codeDelta, cfg.PlanFail(), namesObjective)...)
 	}
 	other = append(other, objective.Findings(obj.view, obj.hasStore)...)
+	other = append(other, consistency.GovernedConfigFindings(gov)...)
 	findings := consistency.Sort(append(c4Findings, other...))
 
 	// PR-time distill (ADR-0018): surface what `nugit distill` would promote
@@ -192,7 +197,9 @@ func BuildReport(opt Options) (model.Report, error) {
 	}
 	// ADR-0026: an explicit flag weaker than the config-declared policy is
 	// honored (visibility, not coercion) but must be visible in every render.
-	// Compared against config at head, like every other engine input.
+	// Compared against the governing config (ADR-0055), which is also the
+	// policy the CLI's exit code applies when no flag is passed.
+	rep.FailOn = cfg.PRRender.FailOn
 	if opt.FailOnFlag != "" && config.FailOnRank(opt.FailOnFlag) < config.FailOnRank(cfg.PRRender.FailOn) {
 		rep.Enforcement = model.NewEnforcementDowngrade(cfg.PRRender.FailOn, opt.FailOnFlag)
 	}
@@ -286,6 +293,22 @@ func landscapeOpts(repoDir string, cfg config.Config) consistency.LandscapeOpts 
 		opt.Peers = append(opt.Peers, knowledge.PeerSource{Name: p.Name, Dir: p.Dir(repoDir), Hub: p.Hub})
 	}
 	return opt
+}
+
+// targetConfig reads config.yml from the branch this PR merges into, at its
+// tip (ADR-0055), the same reference point targetIDs uses and for the same
+// reason: the question is about the tree the change joins. read is false when
+// the target ref cannot be resolved, which keeps the pre-ADR-0055 behaviour
+// (head governs, nothing is compared). An absent file reads as "".
+func targetConfig(repo gitutil.Repo, targetRef, prefix string) (src string, read bool) {
+	if targetRef == "" || repo.Resolve(targetRef) == "" {
+		return "", false
+	}
+	src, err := repo.ShowFile(targetRef, prefix+".nugit/config.yml")
+	if err != nil {
+		return "", false
+	}
+	return src, true
 }
 
 // targetIDs reads the knowledge ids present on the branch this PR merges INTO,
