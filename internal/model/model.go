@@ -760,6 +760,10 @@ type Report struct {
 	// Objective is what the range says it is for (ADR-0048); nil when no
 	// commit names an objective, which keeps such a report's JSON unchanged.
 	Objective *ObjectiveView `json:",omitempty"`
+	// FailOn is the governing pr_render.fail_on (ADR-0055): the target's value,
+	// not the PR's. The CLI applies it when no -fail-on is passed. Kept out of
+	// the structured JSON, which reports findings, not exit policy.
+	FailOn string `json:"-"`
 	// HeadModel feeds the in-comment C4 diagram only; kept out of the structured
 	// JSON contract (it would leak every component's path globs to reviewer agents).
 	HeadModel Model `json:"-"`

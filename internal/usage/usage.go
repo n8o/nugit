@@ -149,7 +149,11 @@ func omittedCount(b retrieval.Bundle) int {
 // Log records a served bundle unless config.yml says `usage: {log: off}`.
 // Callers deliberately ignore the returned error on the serving path.
 func Log(repoDir, source, task string, b retrieval.Bundle) error {
-	cfg, _ := config.Load(repoDir)
+	// The same governed config the gates read (ADR-0055): if the writer read
+	// the checkout and the pre-edit gate read the default branch, a checkout
+	// that sets `usage.log: off` would stop every call being logged while the
+	// gate went on demanding one.
+	cfg, _ := LocalConfig(repoDir)
 	if cfg.Usage.Log == "off" {
 		return nil
 	}
@@ -163,6 +167,24 @@ func Log(repoDir, source, task string, b retrieval.Bundle) error {
 	r.Branch = gitutil.Repo{Dir: repoDir}.CurrentBranch()
 	r.Session, r.AgentSession = SessionFromEnv()
 	return Append(repoDir, r)
+}
+
+// targetReadTimeout bounds the read of the default branch's config. The
+// callers sit on the edit, commit and context() paths, so a slow git costs at
+// most this, after which the checkout's config applies as before ADR-0055.
+const targetReadTimeout = 500 * time.Millisecond
+
+// LocalConfig is the config the local hooks and the usage log are governed by
+// (ADR-0055): the checkout's, with every governed key read from origin's
+// default branch, so an agent cannot turn a gate off by editing the file next
+// to the one the gate stopped it editing. Without a remote default it is the
+// checkout's. It lives here because every reader of the shared log (the
+// context() writer, the edit gate, the verify gate) must agree on it.
+func LocalConfig(nugitRoot string) (config.Config, error) {
+	repo := gitutil.Repo{Dir: nugitRoot}
+	return config.LoadLocal(nugitRoot, func() (string, bool) {
+		return repo.DefaultBranchFile(".nugit/config.yml", targetReadTimeout)
+	})
 }
 
 // Source values.

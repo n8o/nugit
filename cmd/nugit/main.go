@@ -1210,7 +1210,9 @@ func cmdHook(args []string) int {
 		// whatever the capture mode, because it is not capture: it is what
 		// the PR view frames the change with. Any failure leaves the message.
 		stampObjective(*dir, rest[0])
-		cfg, _ := config.Load(*dir)
+		// The capture mode is governed (ADR-0055): read from origin's default
+		// branch, so a branch cannot switch its own commit gate off.
+		cfg, _ := editgate.LocalConfig(*dir)
 		if cfg.Capture.CommitMsg == "off" {
 			return 0
 		}
@@ -1562,20 +1564,9 @@ func cmdPRRender(args []string) int {
 	// ADR-0026: remember whether -fail-on was explicit — an explicit flag weaker
 	// than config is honored, but the report must surface the downgrade.
 	explicitFailOn := *failOn
-
-	// An unset -fail-on takes its default from config.yml (pr_render.fail_on).
-	if *failOn == "" {
-		if cfg, err := config.Load(*dir); err == nil {
-			*failOn = cfg.PRRender.FailOn
-		} else {
-			*failOn = "fail"
-		}
-	}
-
-	switch *failOn {
-	case "fail", "warn", "none":
-	default:
-		fmt.Fprintf(os.Stderr, "nugit: unknown -fail-on %q (want fail|warn|none)\n", *failOn)
+	validFailOn := func(v string) bool { return v == "fail" || v == "warn" || v == "none" }
+	if explicitFailOn != "" && !validFailOn(explicitFailOn) {
+		fmt.Fprintf(os.Stderr, "nugit: unknown -fail-on %q (want fail|warn|none)\n", explicitFailOn)
 		return 2
 	}
 
@@ -1583,6 +1574,16 @@ func cmdPRRender(args []string) int {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "nugit: %v\n", err)
 		return 1
+	}
+
+	// An unset -fail-on takes the GOVERNING pr_render.fail_on (ADR-0055): the
+	// target's value, never the checkout's, which in CI is the PR's own tree.
+	if *failOn == "" {
+		*failOn = rep.FailOn
+	}
+	if !validFailOn(*failOn) {
+		fmt.Fprintf(os.Stderr, "nugit: unknown pr_render.fail_on %q in config.yml (want fail|warn|none)\n", *failOn)
+		return 2
 	}
 
 	switch *format {

@@ -54,6 +54,14 @@ var explanations = map[string]string{
 		"(ADR-0032). Only a duplicate WITHIN one store is the defect.\n" +
 		"This is a FAIL: unlike the prose-matching lifecycle checks (ADR-0022) it is an exact grouping over committed text,\n" +
 		"so it has no false positives. It fires only for objects this PR adds or modifies; `nugit doctor` reports the whole store.",
+	"enforcement-config": "This PR changes a governed key in .nugit/config.yml: one that sets how hard a check bites,\n" +
+		"whether it runs, how much of the PR is shown, or which repos' obligations apply (ADR-0055). pr-render reads\n" +
+		"governed keys from the target branch's tip, not from the PR, so the PR that lowers `pr_render.fail_on` or sets\n" +
+		"`c4.mode: warn` is still judged by the old values. The change takes effect for the PRs after it merges.\n" +
+		"Only `c4.dsl`, `plan.scope`, `retrieval.*` and `schema_version` are read at head: they describe the reviewed tree.\n" +
+		"The local hooks follow the same rule, reading governed keys from origin's default branch.\n" +
+		"Fix: nothing, if the policy change is intended. Review it as one. To try a stricter level before merging, run\n" +
+		"`nugit pr-render -fail-on <level>` locally.",
 	"edge-vocabulary": "A `relates_to` entry this PR adds or modifies carries a verb nugit has no rule for, or names a\n" +
 		"front-matter field instead (ADR-0041). The reader is tolerant — ParseEdge splits on the first colon and returns\n" +
 		"whatever it found — so `ammends:ADR-7` parses, resolves in retrieval's one-hop pull, and amends nothing.\n" +

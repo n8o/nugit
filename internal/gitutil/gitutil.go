@@ -102,6 +102,41 @@ func (r Repo) DefaultRemoteBranch() string {
 	return strings.TrimSpace(out)
 }
 
+// DefaultBranchFile reads rel (relative to Dir, so a nested nugit root needs
+// no prefix) from origin's default branch, under one deadline for both git
+// calls. read is false when the clone records no remote default, the deadline
+// passes, or git fails; an absent file is ("", true). It exists for the local
+// hooks (ADR-0055), which run on the commit and edit paths and so may never
+// wait on git without a bound (LESSON-any-git-call-added-to-the-commit-path-must-carry-i).
+func (r Repo) DefaultBranchFile(rel string, timeout time.Duration) (src string, read bool) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	run := func(args ...string) (string, error) {
+		cmd := exec.CommandContext(ctx, "git", append([]string{"-C", r.Dir}, args...)...)
+		var out, errb bytes.Buffer
+		cmd.Stdout = &out
+		cmd.Stderr = &errb
+		if err := cmd.Run(); err != nil {
+			return "", fmt.Errorf("%w: %s", err, strings.TrimSpace(errb.String()))
+		}
+		return out.String(), nil
+	}
+	ref, err := run("symbolic-ref", "--short", "refs/remotes/origin/HEAD")
+	ref = strings.TrimSpace(ref)
+	if err != nil || ref == "" {
+		return "", false
+	}
+	out, err := run("show", ref+":./"+filepath.ToSlash(rel))
+	if err != nil {
+		msg := err.Error()
+		if ctx.Err() == nil && (strings.Contains(msg, "does not exist in") || strings.Contains(msg, "exists on disk, but not in")) {
+			return "", true
+		}
+		return "", false
+	}
+	return out, true
+}
+
 // HooksDir returns the absolute path of the hooks directory git will actually
 // run for this repo (`rev-parse --git-path hooks`, which honours
 // core.hooksPath), or "" when Dir is not in a git repo.

@@ -123,7 +123,7 @@ func Evaluate(in Input, opt Options) *Output {
 		return nil // not a file in a git checkout: not nugit's to judge
 	}
 	nugitRoot := filepath.Join(root, opt.NugitDir)
-	cfg, err := config.Load(nugitRoot)
+	cfg, err := LocalConfig(nugitRoot)
 	if err != nil || cfg.ContextGate == "off" || cfg.Usage.Log == "off" {
 		// No log, no measurement: with usage logging off every edit would look
 		// uncovered, so the gate stands down rather than nag on false evidence.
@@ -260,7 +260,7 @@ func SessionStart(stdin []byte, opt Options) {
 	if err != nil || root == "" {
 		return
 	}
-	cfg, err := config.Load(filepath.Join(root, opt.NugitDir))
+	cfg, err := LocalConfig(filepath.Join(root, opt.NugitDir))
 	if err != nil || cfg.ContextGate == "off" || cfg.Usage.Log == "off" {
 		return // the gate records nothing, so it has no cover to end
 	}
@@ -329,3 +329,8 @@ func nearestDir(p string) string {
 		}
 	}
 }
+
+// LocalConfig is the config a local hook is governed by (ADR-0055); see
+// usage.LocalConfig, which the usage log's writer shares so the two can never
+// disagree about usage.log. The commit-msg hook uses it too.
+func LocalConfig(nugitRoot string) (config.Config, error) { return usage.LocalConfig(nugitRoot) }
