@@ -1221,7 +1221,7 @@ func cmdHook(args []string) int {
 		// ADR-0048: name the branch's claimed objective on the commit. Runs
 		// whatever the capture mode, because it is not capture: it is what
 		// the PR view frames the change with. Any failure leaves the message.
-		stampObjective(*dir, rest[0])
+		claim.StampFile(*dir, rest[0], os.Stderr)
 		// ADR-0056: stamp how the commit was verified, from the session's
 		// evidence, and under verify.gate: enforce stop an unverified commit
 		// that gives no reason. Runs whatever the capture mode: it is not
@@ -1306,35 +1306,6 @@ func cmdHook(args []string) int {
 	default:
 		fmt.Fprintf(os.Stderr, "nugit hook: unknown hook %q\n", args[0])
 		return 2
-	}
-}
-
-// stampObjective appends `objective: <id>` to the message file when the
-// current branch claims an objective and the message names none (ADR-0048),
-// and warns when the message names a different one.
-func stampObjective(dir, msgFile string) {
-	defer func() { _ = recover() }() // never block a commit
-	cur := claim.Resolve(dir)
-	if cur.Source != claim.FromClaim && cur.Source != claim.FromBranchName {
-		return
-	}
-	b, err := os.ReadFile(msgFile)
-	if err != nil {
-		return
-	}
-	out, added, other := claim.Stamp(string(b), cur.Objective)
-	switch {
-	case other != "":
-		fmt.Fprintf(os.Stderr, "nugit: this commit names objective %s, but %s works toward %s; one session, one objective (ADR-0048)\n",
-			other, cur.Branch, cur.Objective)
-	case added:
-		how := "claimed for"
-		if cur.Source == claim.FromBranchName {
-			how = "named by branch"
-		}
-		if os.WriteFile(msgFile, []byte(out), 0o644) == nil {
-			fmt.Fprintf(os.Stderr, "nugit: added `objective: %s` (%s %s)\n", cur.Objective, how, cur.Branch)
-		}
 	}
 }
 
