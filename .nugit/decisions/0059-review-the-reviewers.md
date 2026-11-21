@@ -162,8 +162,11 @@ the pre-existing rule. Nothing to add.
 ## Consequences
 
 - New `internal/reverts` component, `cli -> reverts` and
-  `reverts -> gitutil` in `workspace.dsl`, and one bounded first-parent log
-  read in `gitutil`.
+  `reverts -> gitutil` in `workspace.dsl`. `gitutil` gains three bounded
+  history reads: `FirstParentLog` (each change sized against its first
+  parent), `RevertLog` (revert commits on any parent line, since in a
+  merge-commit repo the revert arrives inside a merge whose message is the PR
+  title) and `FirstParentContaining` (the change that brought a commit in).
 - `nugit stats -reviewers [-months N] [-ref R] [-json]`. With no `-ref` it
   reads origin's default branch.
 - A repo with no reverts gets a table of merged counts and a rate of zero.
