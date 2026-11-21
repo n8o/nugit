@@ -23,7 +23,7 @@ var pruneDirs = map[string]bool{
 }
 
 // baseOrTestImage matches Dockerfile suffixes that are NOT first-party services.
-var baseOrTestImage = regexp.MustCompile(`(?i)(^|[.\-_])(base|builder|build|sdk|test|smoketest|init|installer|runtime|nmos|cni|pause|busybox|models)([.\-_]|$)`)
+var baseOrTestImage = regexp.MustCompile(`(?i)(^|[.\-_])(base|builder|build|sdk|test|smoketest|init|installer|runtime|testing|cni|pause|busybox|models)([.\-_]|$)`)
 
 // benchName flags benchmark/test targets that pass every container signal but aren't services.
 var benchName = regexp.MustCompile(`(?i)(^|[_\-])(bench|test|unit)([_\-]|$)`)

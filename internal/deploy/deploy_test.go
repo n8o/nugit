@@ -106,3 +106,53 @@ func TestPruneAndInstallTargets(t *testing.T) {
 		t.Error("install() under third_party must be pruned")
 	}
 }
+
+// A testing image is not a service, whatever it ships. An adapter named after
+// the standard it bridges is a service: the standard's name is not a skip word.
+func TestTestingImagesAreSkippedAndAdaptersCounted(t *testing.T) {
+	root := t.TempDir()
+
+	// Every container signal fires, and the name still marks it as a test rig.
+	write(t, root, "apps/conformance/requirements.txt", "pytest\n")
+	write(t, root, "docker/Dockerfile.conformance-testing",
+		"FROM python:3.12\nCOPY apps/conformance/src /app\nRUN pip install -r requirements.txt\n")
+
+	// A first-party service that bridges a protocol.
+	write(t, root, "apps/mqtt_bridge_adapter/requirements.txt", "paho-mqtt\n")
+	write(t, root, "docker/Dockerfile.mqtt-bridge-adapter",
+		"FROM python:3.12\nCOPY apps/mqtt_bridge_adapter/src /app\nRUN pip install -r requirements.txt\n")
+
+	// Both are deployed from the first-party registry.
+	write(t, root, "k8s/apps.yaml",
+		"kind: Deployment\nspec:\n  template:\n    spec:\n      containers:\n"+
+			"        - image: registry.acme.com/app/mqtt-bridge-adapter:GOLDEN\n"+
+			"        - image: registry.acme.com/app/conformance-testing:GOLDEN\n")
+
+	got, sum, err := Detect(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	by := map[string]Container{}
+	for _, c := range got {
+		by[c.Name] = c
+	}
+	if _, ok := by["conformance-testing"]; ok || sum.BaseOrTest != 1 {
+		t.Errorf("Dockerfile.conformance-testing must be skipped as a test image (base/test=%d): %+v", sum.BaseOrTest, got)
+	}
+	c, ok := by["mqtt-bridge-adapter"]
+	if !ok || c.Confidence != "HIGH-2" || !c.DeployConfirmed || sum.Containers != 1 {
+		t.Errorf("mqtt-bridge-adapter must be counted as a deploy-confirmed HIGH-2 service (containers=%d): %+v", sum.Containers, got)
+	}
+	for _, img := range sum.DeployedNotDetected {
+		t.Errorf("a deployed testing image is not a gap in the model: %s", img)
+	}
+
+	for img, want := range map[string]bool{
+		"testing": true, "conformance-testing": true, "testing-tools": true, "load_testing": true,
+		"mqtt-bridge-adapter": false, "attestation": false, "contesting": false,
+	} {
+		if got := baseOrTestImage.MatchString(img); got != want {
+			t.Errorf("baseOrTestImage(%q) = %v, want %v", img, got, want)
+		}
+	}
+}
