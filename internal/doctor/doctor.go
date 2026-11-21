@@ -143,13 +143,13 @@ func Run(repoDir string) Report {
 
 	// SessionStart objective digest (ADR-0048). Advisory, like pre-edit: it
 	// is what tells each session to claim one objective.
+	sok, sdetail := sessionStartHook(repoDir)
+	r.Checks = append(r.Checks, Check{Name: "session-start hook installed", OK: sok, Advisory: true, Detail: sdetail})
+
 	// Verify-evidence hook (ADR-0056). Advisory: without it no session has
 	// evidence, so every agent commit is stamped `verified: none`.
 	eok, edetail := evidenceHook(repoDir, cfg)
 	r.Checks = append(r.Checks, Check{Name: "verify-evidence hook installed", OK: eok, Advisory: true, Detail: edetail})
-
-	sok, sdetail := sessionStartHook(repoDir)
-	r.Checks = append(r.Checks, Check{Name: "session-start hook installed", OK: sok, Advisory: true, Detail: sdetail})
 
 	// Peer stores (ADR-0032). Always advisory: an unreachable peer is the normal
 	// CI state (only the repo under review is checked out) and must never gate.
