@@ -173,6 +173,8 @@ plan flags:
              -split            shard into .beads/plans/<plan>.jsonl, one file per plan
              -merge ref        with -split: keep what ref's store has that a stale database would revert
              -merge-base f     with -merge: the previous raw bd export, for an exact three-way merge
+             -plans p,…        with -merge: export these plans too (default: only the branch
+                               objective's plan; "all" exports every plan)
 
 pr-render flags:
   -C dir         repo directory (default ".")
@@ -1749,6 +1751,51 @@ func printIDs(what string, ids []string) {
 	fmt.Printf("            %d %s: %s%s\n", len(ids), what, strings.Join(list, ", "), more)
 }
 
+// exportScope decides which plans a merged export may change (ADR-0061), and
+// says so in one line. The bd database is shared by every session of a clone,
+// so a session's export carries every session's unexported edits unless it is
+// limited to the plan its own objective belongs to. -plans widens that for a
+// PR that spans plans; "all", or no known objective, is the unscoped merge.
+func exportScope(dir, ref string, plans []string, committed, fresh beads.Store) (beads.Scope, string) {
+	var extra []string
+	for _, p := range plans {
+		for _, name := range strings.Split(p, ",") {
+			if name = strings.TrimSpace(name); name == "all" {
+				return nil, "  scope   every plan (-plans all)"
+			} else if name != "" {
+				extra = append(extra, name)
+			}
+		}
+	}
+	scope := beads.Scope{}
+	var why []string
+	notScoped := "no objective for this branch"
+	if cur := claim.Resolve(dir); cur.Objective != "" {
+		if plan, found := beads.PlanOf(cur.Objective, committed, fresh); found {
+			scope[plan] = true
+			from := map[claim.Source]string{
+				claim.FromClaim:      "claimed",
+				claim.FromCommits:    "named by the branch's commits",
+				claim.FromBranchName: "named by the branch",
+			}[cur.Source]
+			why = append(why, fmt.Sprintf("objective %s, %s", cur.Objective, from))
+		} else {
+			notScoped = fmt.Sprintf("objective %s is in neither store", cur.Objective)
+		}
+	}
+	for _, p := range extra {
+		scope[p] = true
+	}
+	if len(extra) > 0 {
+		why = append(why, "-plans")
+	}
+	if len(scope) == 0 {
+		return nil, fmt.Sprintf("  scope   not scoped (%s): every plan the database changed is exported; claim one with `nugit objective claim <bead>`, or pass -plans", notScoped)
+	}
+	return scope, fmt.Sprintf("  scope   %s (%s); every other plan is written as %s has it",
+		strings.Join(scope.List(), ", "), strings.Join(why, "; "), ref)
+}
+
 func cmdPlanNormalize(args []string) int {
 	fs := flag.NewFlagSet("plan normalize", flag.ExitOnError)
 	dir := fs.String("C", ".", "repo directory")
@@ -1756,7 +1803,13 @@ func cmdPlanNormalize(args []string) int {
 	split := fs.Bool("split", false, "shard the store into .beads/plans/<plan>.jsonl, one file per plan")
 	merge := fs.String("merge", "", "with -split: fold in the store committed at this ref, so a database behind it cannot revert it (ADR-0047)")
 	mergeBase := fs.String("merge-base", "", "with -merge: the previous raw `bd export` of this database (a missing file means no base)")
+	var plans stringList
+	fs.Var(&plans, "plans", "with -merge: also export these plans, comma-separated and repeatable; \"all\" exports every plan (default: only the plan of the branch's objective, ADR-0061)")
 	_ = fs.Parse(args)
+	if len(plans) > 0 && *merge == "" {
+		fmt.Fprintln(os.Stderr, "nugit plan normalize: -plans needs -merge (the other plans are written as that ref has them)")
+		return 2
+	}
 
 	st, err := beads.ReadDir(*dir)
 	if err != nil {
@@ -1783,8 +1836,10 @@ func cmdPlanNormalize(args []string) int {
 					return 1
 				}
 			}
+			scope, line := exportScope(*dir, *merge, plans, committed, st)
+			fmt.Println(line)
 			var rep beads.MergeReport
-			st, rep = beads.Merge(st, committed, base)
+			st, rep = beads.Merge(st, committed, base, scope)
 			how := "three-way against the last export"
 			if rep.NoBase {
 				how = "no base: by timestamp"
@@ -1795,6 +1850,7 @@ func cmdPlanNormalize(args []string) int {
 			printIDs("merged field by field", rep.Merged)
 			printIDs("CONFLICT, both changed a field — kept the database's value", rep.Conflicts)
 			printIDs("deleted", rep.Deleted)
+			printIDs("changed in the database outside the scope, written as "+*merge+" has them (-plans to include)", rep.Outside)
 		}
 	}
 	// Normalizing collapses a duplicate id the way the reader does, last write

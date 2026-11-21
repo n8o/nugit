@@ -51,7 +51,7 @@ func TestMergeStaleDatabaseCannotRevertMain(t *testing.T) {
 		`{"id":"acme-rift-3","title":"c","status":"open","updated_at":"2026-10-16T00:00:00Z"}`,
 	}, "\n"))))
 
-	got, rep := Merge(fresh, committed, nil)
+	got, rep := Merge(fresh, committed, nil, nil)
 	m := byID(got)
 	if m["acme-rift-1"].Status != "closed" {
 		t.Errorf("a close on main was reverted by a stale export: %+v", m["acme-rift-1"])
@@ -81,7 +81,7 @@ func TestMergeKeepsCommittedPlan(t *testing.T) {
 		".beads/plans/rift.jsonl": {`{"id":"acme-118","title":"a","status":"open","updated_at":"2026-10-01T00:00:00Z"}`},
 	})
 	fresh := storeOf(ParseJSONL([]byte(`{"id":"acme-118","title":"a","status":"closed","updated_at":"2026-10-16T00:00:00Z"}`)))
-	got, _ := Merge(fresh, committed, nil)
+	got, _ := Merge(fresh, committed, nil, nil)
 	out, err := Normalize(got, true)
 	if err != nil {
 		t.Fatal(err)
@@ -107,7 +107,7 @@ func TestMergeWithoutTimestamps(t *testing.T) {
 		`{"id":"p-1","title":"a","status":"open"}`,
 		`{"id":"p-2","title":"b, reworded","status":"open"}`,
 	}, "\n"))))
-	got, rep := Merge(fresh, committed, nil)
+	got, rep := Merge(fresh, committed, nil, nil)
 	m := byID(got)
 	if m["p-1"].Status != "closed" {
 		t.Errorf("committed close reverted: %+v", m["p-1"])
@@ -126,7 +126,7 @@ func TestMergeReopenWithTimestampWins(t *testing.T) {
 		".beads/plans/p.jsonl": {`{"id":"p-1","title":"a","status":"closed","updated_at":"2026-10-01T00:00:00Z"}`},
 	})
 	fresh := storeOf(ParseJSONL([]byte(`{"id":"p-1","title":"a","status":"open","updated_at":"2026-10-16T00:00:00Z"}`)))
-	got, rep := Merge(fresh, committed, nil)
+	got, rep := Merge(fresh, committed, nil, nil)
 	if byID(got)["p-1"].Status != "open" || rep.Taken() != 0 {
 		t.Errorf("deliberate reopen blocked: %+v %+v", byID(got)["p-1"], rep)
 	}
@@ -159,7 +159,7 @@ func TestMergeThreeWay(t *testing.T) {
 		// p-4 deleted here
 		`{"id":"p-5","title":"e","status":"open"}`, // untouched here
 	))
-	got, rep := Merge(fresh, committed, base)
+	got, rep := Merge(fresh, committed, base, nil)
 	m := byID(got)
 	if m["p-1"].Status != "closed" {
 		t.Errorf("stale export reverted main's close: %+v", m["p-1"])
@@ -201,7 +201,7 @@ func TestMergeDependencyClockAndRecount(t *testing.T) {
 		`{"id":"p-1","title":"a","status":"open","updated_at":"2026-10-01T00:00:00Z","dependency_count":0,"dependent_count":0}`,
 		`{"id":"p-2","title":"b","status":"open","updated_at":"2026-10-01T00:00:00Z","dependency_count":0,"dependent_count":0}`,
 	))
-	got, rep := Merge(fresh, committed, nil)
+	got, rep := Merge(fresh, committed, nil, nil)
 	m := byID(got)
 	if len(deps(m["p-1"].raw)) != 1 {
 		t.Errorf("main's newer dependency was reverted: %+v", m["p-1"].raw)

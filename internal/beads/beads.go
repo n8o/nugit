@@ -43,6 +43,11 @@ type Issue struct {
 	// raw keeps every field of the original object so `nugit plan normalize`
 	// can rewrite a store without dropping what nugit does not read.
 	raw map[string]any
+	// src is the line as read. asRead marks a line Merge took from the
+	// committed store unchanged: Normalize writes src back rather than
+	// re-encoding raw, so a line no one changed never shows in a diff.
+	src    []byte
+	asRead bool
 }
 
 // Store is the whole committed plan store at one ref.
@@ -110,28 +115,42 @@ func Read(repo gitutil.Repo, ref, prefix string) (Store, bool) {
 		return Store{}, false
 	}
 	sort.Strings(files) // stable order across runs
-	st := Store{Files: files, Sharded: len(files) > 1, Stats: map[string]FileStat{}}
 	srcs, err := repo.ShowFiles(ref, files)
 	if err != nil {
 		return Store{}, false
 	}
+	b := make(map[string][]byte, len(srcs))
+	for p, src := range srcs {
+		b[p] = []byte(src)
+	}
+	st := fromFiles(files, b)
+	if len(st.Issues) == 0 {
+		return Store{}, false
+	}
+	return st, true
+}
+
+// fromFiles builds a store from its files' contents, files in sorted order.
+// Read and ReadDir differ only in where the bytes come from.
+func fromFiles(files []string, srcs map[string][]byte) Store {
+	st := Store{Files: files, Sharded: len(files) > 1, Stats: map[string]FileStat{}}
 	for _, p := range files {
-		src := srcs[p]
-		issues := ParseJSONL([]byte(src))
+		src, ok := srcs[p]
+		if !ok {
+			continue
+		}
+		issues := ParseJSONL(src)
 		for i := range issues {
 			issues[i].File = p
 		}
-		lines := countLines([]byte(src))
+		lines := countLines(src)
 		st.Stats[p] = FileStat{Lines: lines, Parsed: len(issues), Skipped: lines - len(issues)}
 		st.Issues = append(st.Issues, issues...)
 	}
 	st.DuplicateIDs = duplicateIDs(st.Issues)
 	st.Issues = dedupByID(st.Issues)
-	if len(st.Issues) == 0 {
-		return Store{}, false
-	}
 	assignPlans(&st)
-	return st, true
+	return st
 }
 
 func countLines(b []byte) int {
@@ -252,6 +271,7 @@ func ParseJSONL(b []byte) []Issue {
 			Plan:   strings.TrimSpace(getStr(m, "plan")),
 			Line:   n + 1,
 			raw:    m,
+			src:    line,
 		}
 		if it.ID == "" && it.Title == "" {
 			continue
