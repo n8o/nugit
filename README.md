@@ -114,7 +114,7 @@ agent's progress as its own. `plan.scope: all` opts back into the whole board.
 nugit plan check                     # lint the store the way pr-render reads it
 nugit plan normalize -write          # one stable line per bead → git can merge it
 nugit plan normalize -split -write   # one file per plan → agents stop overlapping
-nugit plan normalize -split -merge HEAD -merge-base <last-export> -write
+nugit plan normalize -split -merge HEAD -merge-base <base-file> -write
                                      # …and a database behind HEAD cannot revert it
 ```
 
@@ -133,12 +133,15 @@ before `git add`.
 sessions' merged plan changes into it, but `bd export` writes *every* plan from
 it. Exporting from a database that is behind main therefore reopens other
 agents' closes and deletes plans added since the last import. `-merge <ref>`
-folds the store committed at `<ref>` back in. Given `-merge-base`, the previous
-raw export of the same database, it is an exact three-way merge per bead and per
-field (no timestamps needed; `bd` moves none for a label or dependency edit), and
-deleting a bead in `bd` carries through. Without a base it falls back to
-`updated_at` and keeps any committed close. Save each export as the next run's
-base (ADR-0047). A line nobody changed is written back byte for byte, and a
+folds the store committed at `<ref>` back in. Given `-merge-base`, a file that
+holds what this database last shared with the committed store, it is an exact
+three-way merge per bead and per field (no timestamps needed; `bd` moves none for
+a label or dependency edit), and deleting a bead in `bd` carries through. Without
+a base it falls back to `updated_at` and keeps any committed close. `-write`
+replaces the base file with the next run's base, so keep the file and do not
+save `bd export` over it (ADR-0047, ADR-0064). A line nobody changed is written
+back byte for byte, and so is a line that differs only in how it spells its
+dependencies: their order, an empty list, or copies of other beads' edges. A
 derived dependency count moves only by the edges the merge moved.
 
 **Why scope.** The database and the base are shared by every session of the
@@ -146,9 +149,10 @@ clone, so the base cannot tell this session's edits from another's. The export
 is therefore scoped to the plan of the branch's objective: its claim, its
 `objective:` commits, or the bead it is named after (ADR-0048, ADR-0049). Every
 other plan is written exactly as `<ref>` has it, and the report names the beads
-the database changed there. `-plans p,…` adds plans for a PR that spans them,
-and `-plans all` exports every plan. A branch with no objective is exported
-unscoped, and the export says so (ADR-0061).
+the database changed there. Those edits stay pending in the base, so the first
+export that names their plan still carries them. `-plans p,…` adds plans for a
+PR that spans them, and `-plans all` exports every plan. A branch with no
+objective is exported unscoped, and the export says so (ADR-0061).
 
 **Why check.** The reader is deliberately tolerant — it skips an unparseable
 line, drops a duplicate id last-write-wins, renders an unknown status as
