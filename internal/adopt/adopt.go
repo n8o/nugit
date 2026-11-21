@@ -157,6 +157,7 @@ type Report struct {
 // Unit is a detected unit as this report names it.
 type Unit struct {
 	Dir      string `json:"dir"`
+	File     string `json:"file,omitempty"` // a deployable known only by its Dockerfile
 	Name     string `json:"name"`
 	Kind     string `json:"kind"`
 	Evidence string `json:"evidence"`
@@ -519,7 +520,8 @@ func undocumented(units []unitRef, docs []docText) []Unit {
 	}
 	var out []Unit
 	for _, u := range units {
-		if mentioned[normalize(u.Name)] || mentioned[normalize(path.Base(u.Dir))] || mentioned[strings.ToLower(u.Dir)] {
+		if mentioned[normalize(u.Name)] || mentioned[strings.ToLower(u.Key())] ||
+			(u.Dir != "" && mentioned[normalize(path.Base(u.Dir))]) {
 			continue
 		}
 		out = append(out, Unit(u))

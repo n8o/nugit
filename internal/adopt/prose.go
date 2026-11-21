@@ -216,6 +216,9 @@ func newShape(units []unitRef, repoDir string) shape {
 	rawParents := map[string]bool{}
 	for _, u := range units {
 		s.names[normalize(u.Name)] = true
+		if u.Dir == "" {
+			continue // a unit known by its Dockerfile has no directory to shape
+		}
 		s.names[normalize(path.Base(u.Dir))] = true
 		s.unitDirs[normalize(u.Dir)] = true
 		if d := path.Dir(u.Dir); d != "." && d != "/" && d != "" {

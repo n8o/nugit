@@ -73,7 +73,9 @@ func loadPeers(in []Peer) (peers []*peerRepo, status []PeerStatus) {
 		units := modelfacts.Units(dir)
 		for _, u := range units {
 			pr.names[normalize(u.Name)] = true
-			pr.names[normalize(path.Base(u.Dir))] = true
+			if u.Dir != "" {
+				pr.names[normalize(path.Base(u.Dir))] = true
+			}
 		}
 		peers = append(peers, pr)
 		status = append(status, PeerStatus{Name: name, Dir: dir, Present: true, Units: len(units)})

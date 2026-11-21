@@ -208,3 +208,43 @@ func TestUnmodeledFiltersMappedAndNamed(t *testing.T) {
 		t.Fatalf("want only libs/orphan unmodeled, got %+v", out)
 	}
 }
+
+// A deployable with no source dir the detector can derive is still a unit,
+// known by its Dockerfile, and a component glob over that file models it.
+func TestUnitsKnowDockerfileOnlyDeployables(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, "docker/Dockerfile.acme-probe", "FROM alpine\nRUN apk add curl\n")
+	write(t, root, "third_party/acme-bridge/adapter/index.js", "\n")
+	write(t, root, "docker/Dockerfile.acme-bridge-adapter",
+		"FROM node:22\nCOPY third_party/acme-bridge/adapter/index.js ./\n")
+
+	var probe, adapter *Unit
+	units := Units(root)
+	for i := range units {
+		switch units[i].Name {
+		case "acme-probe":
+			probe = &units[i]
+		case "acme-bridge-adapter":
+			adapter = &units[i]
+		}
+	}
+	if probe == nil || probe.Dir != "" || probe.File != "docker/Dockerfile.acme-probe" || probe.Kind != "deployable" {
+		t.Fatalf("an image with no source dir must be a unit known by its Dockerfile, got %+v in %+v", probe, units)
+	}
+	if adapter == nil || adapter.Dir != "third_party/acme-bridge/adapter" {
+		t.Errorf("an image copying from one dir must be a unit at that dir, got %+v", adapter)
+	}
+
+	images := func(p string) string {
+		if strings.HasPrefix(p, "docker/") {
+			return "images"
+		}
+		return ""
+	}
+	for _, u := range Unmodeled([]Unit{*probe}, "", images, nil) {
+		t.Errorf("a glob over docker/** maps the Dockerfile unit, got unmodeled %+v", u)
+	}
+	if out := Unmodeled([]Unit{*probe}, "", func(string) string { return "" }, nil); len(out) != 1 {
+		t.Errorf("unmapped, the Dockerfile unit is drift, got %+v", out)
+	}
+}

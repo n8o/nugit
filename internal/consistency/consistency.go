@@ -344,7 +344,9 @@ func checkModelDrift(in Input) []model.Finding {
 		dirPrefix := in.Prefix + u.Dir + "/"
 		touched, mapped := false, false
 		for _, fc := range in.Code.Files {
-			if strings.HasPrefix(fc.Path, dirPrefix) {
+			// A unit known by its Dockerfile is touched by a change to it.
+			if (u.Dir != "" && strings.HasPrefix(fc.Path, dirPrefix)) ||
+				(u.Dir == "" && fc.Path == in.Prefix+u.File) {
 				touched = true
 				if fc.Component != "" {
 					mapped = true // a finer glob owns part of the unit — not absence
@@ -354,14 +356,20 @@ func checkModelDrift(in Input) []model.Finding {
 		if !touched || mapped {
 			continue
 		}
+		title := fmt.Sprintf("detected unit %s is missing from workspace.dsl", u.Dir)
+		stub := u.Dir + "/**"
+		if u.Dir == "" {
+			title = fmt.Sprintf("detected deployable %s (built from %s) is missing from workspace.dsl", u.Name, u.File)
+			stub = u.File
+		}
 		fs = append(fs, model.Finding{
 			Check:    "model-drift",
 			Severity: model.SevWarn,
-			Title:    fmt.Sprintf("detected unit %s is missing from workspace.dsl", u.Dir),
+			Title:    title,
 			Detail: fmt.Sprintf("this PR touches %s, which the %s detector identifies as a real unit (%s), "+
 				"but no model element maps it — run the nugit-model skill to refresh the model, "+
 				"or add a component/container stub with `properties { paths %q }`",
-				u.Dir, u.Kind, u.Evidence, u.Dir+"/**"),
+				u.Key(), u.Kind, u.Evidence, stub),
 		})
 	}
 	return fs
