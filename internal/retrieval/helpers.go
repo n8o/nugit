@@ -119,14 +119,21 @@ func keywords(task string) map[string]bool {
 		return nil
 	}
 	kw := map[string]bool{}
-	for _, w := range strings.FieldsFunc(strings.ToLower(task), func(r rune) bool {
+	eachToken(task, func(w string) { kw[w] = true })
+	return kw
+}
+
+// eachToken calls f on every token of s: a lowercased run of ASCII letters and
+// digits, at least 3 long (shorter ones are stop-ish). It is the one
+// tokenization behind every task match and task weight.
+func eachToken(s string, f func(string)) {
+	for _, w := range strings.FieldsFunc(strings.ToLower(s), func(r rune) bool {
 		return !(r >= 'a' && r <= 'z' || r >= '0' && r <= '9')
 	}) {
-		if len(w) >= 3 { // skip stop-ish short tokens
-			kw[w] = true
+		if len(w) >= 3 {
+			f(w)
 		}
 	}
-	return kw
 }
 
 // overlaps reports whether any whole token of text (keywords() tokenization:
@@ -141,11 +148,6 @@ func overlaps(text string, kw map[string]bool) bool {
 		}
 	}
 	return false
-}
-
-// matches reports whether an object overlaps the task keywords (in its body/id).
-func matches(o *model.KnowledgeObject, kw map[string]bool) bool {
-	return overlaps(o.Body+" "+o.ID, kw)
 }
 
 // glossaryTerms returns the "- **term** — def" bullets in play (matching the
@@ -165,10 +167,11 @@ func glossaryTerms(o *model.KnowledgeObject, task, path string) []string {
 	return out
 }
 
-// sortItems orders local before peer, then by relevance rank, then
-// nearer-scope (component-scoped or path-bound) before global, current status
-// before superseded, then by qualified ID — so truncation and the relevance cap
-// drop the least-relevant first.
+// sortItems orders local before peer, then by relevance rank, then by how
+// specifically the item matches the task (ADR-0055), then nearer-scope
+// (component-scoped or path-bound) before global, current status before
+// superseded, then by qualified ID — so truncation and the relevance cap drop
+// the least-relevant first.
 //
 // Origin is the OUTERMOST dimension (ADR-0032): local always outranks peer,
 // unconditionally. A component-scoped record from this repo is about this code;
@@ -186,6 +189,11 @@ func sortItems(items []Item) {
 		// first within each tier.
 		if items[i].rank != items[j].rank {
 			return items[i].rank < items[j].rank
+		}
+		// Within a rank, the item that matches the task's rarer words first
+		// (ADR-0055). Zero for every item when no task was given.
+		if items[i].weight != items[j].weight {
+			return items[i].weight > items[j].weight
 		}
 		gi, gj := scopeRank(items[i]), scopeRank(items[j])
 		if gi != gj {

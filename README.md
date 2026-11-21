@@ -58,8 +58,11 @@ after it count, because the earlier bundle is no longer in the window (ADR-0054)
 
 A bundle is filled by relevance, not to the budget: the records the queried file
 itself names by id (ADR-0053), then exact-path bindings, then the component, then
-its container, then global, then one-hop pulls, task matches first within each
-tier, and at most 12 decisions / 8 lessons / 6 references (override under
+its container, then global, then one-hop pulls. Within each tier, task matches
+come first, and among them the record containing the task's rarer words: a word
+weighs by how few records in the store contain it, so "the" counts for nothing
+and a product name for a lot (ADR-0055). At most 12 decisions / 8 lessons / 6
+references are served (override under
 `retrieval: {max_decisions, max_lessons, max_references}`). The MCP result is also
 hard-capped at 40,000 characters, whatever `budget_tokens` the agent passes, because
 Claude Code puts a larger result in a file the model never reads. A clamp or an
