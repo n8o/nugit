@@ -215,6 +215,8 @@ the issue in the bead's id or body.
                                 # concurrent agents conflicting on the store
   # sharded store + a local bd database that may be behind main:
   nugit plan normalize -split -merge HEAD -merge-base <previous export> -write
+                                # writes only your objective's plan; claim the
+                                # objective first, add plans with -plans p,…
   nugit plan check              # what pr-render will say about it
   ```
 

@@ -9,6 +9,7 @@ import (
 )
 
 // MergeReport says, by bead id, where Merge did not simply take the export.
+// Every list but Outside covers the plans in scope only.
 type MergeReport struct {
 	// Missing are committed beads the export does not carry and the base never
 	// saw: the database never imported them (another session's plan, merged
@@ -26,6 +27,10 @@ type MergeReport struct {
 	// from the store), or removed from the committed store while the database
 	// left them untouched.
 	Deleted []string
+	// Outside are beads in plans outside the scope that an unscoped merge
+	// would have changed: edits in the shared database this export did not
+	// carry. They are written as committed (ADR-0061).
+	Outside []string
 	// NoBase is true when no base was supplied and the timestamp rules
 	// decided instead (see Merge).
 	NoBase bool
@@ -34,9 +39,56 @@ type MergeReport struct {
 // Taken counts the beads where the committed store contributed something.
 func (r MergeReport) Taken() int { return len(r.Missing) + len(r.Committed) + len(r.Merged) }
 
-// derived are fields `bd` computes from the dependency graph; Merge ignores
-// them when comparing and recomputes them for the merged store.
+// Scope is the set of plans an export may change (ADR-0061). A nil Scope is
+// every plan: the unscoped merge of ADR-0047.
+type Scope map[string]bool
+
+// Has reports whether the scope includes plan.
+func (s Scope) Has(plan string) bool { return s == nil || s[plan] }
+
+// List returns the scope's plans, sorted; nil for every plan.
+func (s Scope) List() []string {
+	var out []string
+	for p := range s {
+		out = append(out, p)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// PlanOf returns the plan a bead belongs to in the first store that holds it,
+// the plan Merge would write it under. found is false when no store holds it;
+// plan is then the id's family (IDFamily).
+func PlanOf(id string, stores ...Store) (plan string, found bool) {
+	for _, st := range stores {
+		if it, ok := st.Find(id); ok {
+			return it.Plan, true
+		}
+	}
+	return IDFamily(id), false
+}
+
+// derived are fields `bd` computes from the dependency graph. Merge ignores
+// them when comparing, and moves them by the edges the merge itself moved.
 var derived = map[string]bool{"dependency_count": true, "dependent_count": true}
+
+// side says where a merged line came from, which decides what its derived
+// counts are relative to.
+type side int
+
+const (
+	fromHead   side = iota // the committed line
+	fromExport             // the export's line
+	fromBoth               // merged field by field
+)
+
+type pick struct {
+	it   Issue
+	side side
+	// outside marks a committed line written for a plan outside the scope:
+	// byte for byte, counts and all.
+	outside bool
+}
 
 // Merge folds the committed store (read at a ref) into a fresh `bd export`, so
 // a database that is behind main cannot revert main (ADR-0047).
@@ -62,80 +114,125 @@ var derived = map[string]bool{"dependency_count": true, "dependent_count": true}
 // kept over an open export; else the export.
 //
 // A bead keeps the plan it is committed under unless the export names one
-// explicitly, so a merge never moves a line between shard files. Derived
-// dependency counts are recomputed over the result.
-func Merge(fresh, committed Store, base []Issue) (Store, MergeReport) {
+// explicitly, so a merge never moves a line between shard files.
+//
+// A line the merge takes from the committed store unchanged keeps its bytes
+// (Normalize writes it as read), and a derived dependency count moves only by
+// the edges this merge moved (ADR-0061). Otherwise an export with no edits
+// rewrites every line nugit's encoder would spell differently and every count
+// a full recount disagrees with — in plans no session touched.
+//
+// scope limits which plans the merge may change. A bead whose plan is outside
+// it is written as committed, or not at all when it is not committed, whatever
+// the database says: the database is shared by every session of the clone,
+// and the base cannot tell this session's edits from another's. The beads an
+// unscoped merge would have changed there are reported as Outside.
+func Merge(fresh, committed Store, base []Issue, scope Scope) (Store, MergeReport) {
 	rep := MergeReport{NoBase: base == nil}
 	rIdx := index(committed.Issues)
 	bIdx := index(base)
-	out := fresh
-	out.Issues = nil
+	var picks []pick
 	seen := map[string]bool{}
 	for _, w := range fresh.Issues {
 		r, ok := rIdx[w.ID]
-		if w.ID == "" || w.raw == nil || !ok {
-			// Created here, or deleted on main. Deleted on main and untouched
-			// here is the one case to drop.
-			if b, inBase := bIdx[w.ID]; inBase && w.ID != "" && !ok && same(w.raw, b.raw) {
-				rep.Deleted = append(rep.Deleted, w.ID)
-				continue
+		if ok = ok && w.raw != nil; ok {
+			seen[w.ID] = true
+			if getStr(w.raw, "plan") == "" {
+				w.Plan = r.Plan
 			}
-			out.Issues = append(out.Issues, w)
-			continue
 		}
-		seen[w.ID] = true
-		if getStr(w.raw, "plan") == "" {
-			w.Plan = r.Plan
-		}
-		if same(w.raw, r.raw) {
-			out.Issues = append(out.Issues, w)
-			continue
-		}
-		if b, inBase := bIdx[w.ID]; base != nil && inBase {
-			switch {
-			case same(w.raw, b.raw): // untouched here: main's line
-				rep.Committed = append(rep.Committed, w.ID)
-				r.Plan = w.Plan
-				out.Issues = append(out.Issues, r)
-			case same(r.raw, b.raw): // untouched on main: ours
-				out.Issues = append(out.Issues, w)
-			default:
-				m, conflict := mergeFields(b.raw, w.raw, r.raw)
-				rep.Merged = append(rep.Merged, w.ID)
-				if conflict {
-					rep.Conflicts = append(rep.Conflicts, w.ID)
-				}
-				w.raw = m
-				w.Status = norm(getStr(m, "status", "state"))
-				w.Title = getStr(m, "title", "summary", "name")
-				out.Issues = append(out.Issues, w)
+		p, kept, why := decide(w, r, ok, bIdx, base != nil)
+		if !scope.Has(w.Plan) {
+			if kept != ok || (kept && !same(p.it.raw, r.raw)) {
+				rep.Outside = append(rep.Outside, w.ID)
+			}
+			if ok {
+				picks = append(picks, pick{it: r, side: fromHead, outside: true})
 			}
 			continue
 		}
-		if committedWins(w, r) {
-			rep.Committed = append(rep.Committed, w.ID)
-			r.Plan = w.Plan
-			out.Issues = append(out.Issues, r)
-			continue
+		for _, list := range why(&rep) {
+			*list = append(*list, w.ID)
 		}
-		out.Issues = append(out.Issues, w)
+		if kept {
+			picks = append(picks, p)
+		}
 	}
 	for _, r := range committed.Issues {
 		if r.ID == "" || r.raw == nil || seen[r.ID] {
 			continue
 		}
-		if _, inBase := bIdx[r.ID]; inBase {
+		_, inBase := bIdx[r.ID]
+		switch {
+		case !scope.Has(r.Plan):
+			if inBase {
+				rep.Outside = append(rep.Outside, r.ID) // deleted in the database
+			}
+			picks = append(picks, pick{it: r, side: fromHead, outside: true})
+		case inBase:
 			rep.Deleted = append(rep.Deleted, r.ID) // deleted here since the base
-			continue
+		default:
+			rep.Missing = append(rep.Missing, r.ID)
+			picks = append(picks, pick{it: r, side: fromHead})
 		}
-		rep.Missing = append(rep.Missing, r.ID)
-		out.Issues = append(out.Issues, r)
 	}
-	recount(out.Issues)
-	for _, s := range []*[]string{&rep.Missing, &rep.Committed, &rep.Merged, &rep.Conflicts, &rep.Deleted} {
+	out := fresh
+	out.Issues = settle(picks, fresh, committed)
+	for _, s := range []*[]string{&rep.Missing, &rep.Committed, &rep.Merged, &rep.Conflicts, &rep.Deleted, &rep.Outside} {
 		sort.Strings(*s)
 	}
 	return out, rep
+}
+
+// verdict names the report lists a decision lands in, once the caller knows
+// the bead is in scope.
+type verdict func(*MergeReport) []*[]string
+
+func none(*MergeReport) []*[]string { return nil }
+
+// decide is the per-bead rule of ADR-0047 for an exported bead w, against its
+// committed line r (ok is false when there is none). kept is false when the
+// bead is dropped.
+func decide(w, r Issue, ok bool, bIdx map[string]Issue, haveBase bool) (p pick, kept bool, why verdict) {
+	if w.ID == "" || w.raw == nil || !ok {
+		// Created here, or deleted on main. Deleted on main and untouched
+		// here is the one case to drop.
+		if b, inBase := bIdx[w.ID]; inBase && w.ID != "" && w.raw != nil && same(w.raw, b.raw) {
+			return pick{}, false, func(m *MergeReport) []*[]string { return []*[]string{&m.Deleted} }
+		}
+		return pick{it: w, side: fromExport}, true, none
+	}
+	head := func(why verdict) (pick, bool, verdict) {
+		r.Plan = w.Plan
+		return pick{it: r, side: fromHead}, true, why
+	}
+	if same(w.raw, r.raw) {
+		return head(none) // the same bead: keep the line as committed
+	}
+	behind := func(m *MergeReport) []*[]string { return []*[]string{&m.Committed} }
+	if b, inBase := bIdx[w.ID]; haveBase && inBase {
+		switch {
+		case same(w.raw, b.raw): // untouched here: main's line
+			return head(behind)
+		case same(r.raw, b.raw): // untouched on main: ours
+			return pick{it: w, side: fromExport}, true, none
+		default:
+			m, conflict := mergeFields(b.raw, w.raw, r.raw)
+			w.raw = m
+			w.Status = norm(getStr(m, "status", "state"))
+			w.Title = getStr(m, "title", "summary", "name")
+			return pick{it: w, side: fromBoth}, true, func(rp *MergeReport) []*[]string {
+				if conflict {
+					return []*[]string{&rp.Merged, &rp.Conflicts}
+				}
+				return []*[]string{&rp.Merged}
+			}
+		}
+	}
+	if committedWins(w, r) {
+		return head(behind)
+	}
+	return pick{it: w, side: fromExport}, true, none
 }
 
 // mergeFields merges two maps against their base, key by key. A key one side
@@ -232,28 +329,6 @@ func deps(m map[string]any) []map[string]any {
 	return out
 }
 
-// recount rewrites the derived dependency counts from the merged graph, on the
-// beads that carry them: after a merge either side's counts can be wrong.
-func recount(issues []Issue) {
-	dependents := map[string]int{}
-	for _, it := range issues {
-		for _, d := range deps(it.raw) {
-			dependents[getStr(d, "depends_on_id")]++
-		}
-	}
-	for _, it := range issues {
-		if it.raw == nil {
-			continue
-		}
-		if _, ok := it.raw["dependency_count"]; ok {
-			it.raw["dependency_count"] = json.Number(strconv.Itoa(len(deps(it.raw))))
-		}
-		if _, ok := it.raw["dependent_count"]; ok {
-			it.raw["dependent_count"] = json.Number(strconv.Itoa(dependents[it.ID]))
-		}
-	}
-}
-
 // same compares two lines ignoring the derived counts.
 func same(a, b map[string]any) bool {
 	return bytes.Equal(canon(a), canon(b))
@@ -278,4 +353,93 @@ func index(issues []Issue) map[string]Issue {
 		}
 	}
 	return m
+}
+
+// edge is one dependency, identified the way bd counts it: by the bead that
+// owns it (issue_id), not by the line it is written on. A line can carry a
+// copy of another bead's edge, and bd counts that edge once, for its owner.
+type edge struct{ from, to, kind string }
+
+// degrees counts each bead's outgoing (dependency_count) and incoming
+// (dependent_count) edges over a set of lines.
+type degrees struct{ out, in map[string]int }
+
+func degreesOf(issues []Issue) degrees {
+	set := map[edge]bool{}
+	for _, it := range issues {
+		for _, d := range deps(it.raw) {
+			e := edge{getStr(d, "issue_id"), getStr(d, "depends_on_id"), getStr(d, "type")}
+			if e.from == "" {
+				e.from = it.ID
+			}
+			if e.to != "" {
+				set[e] = true
+			}
+		}
+	}
+	g := degrees{out: map[string]int{}, in: map[string]int{}}
+	for e := range set {
+		g.out[e.from]++
+		g.in[e.to]++
+	}
+	return g
+}
+
+// settle turns the picks into the merged store's lines and moves the derived
+// counts, on the lines that carry them.
+//
+// A count moves by the difference the merge made to that bead's edges,
+// relative to the store its line came from. It is not recomputed: a committed
+// count can already disagree with the committed graph (an edge added by a PR
+// that did not rewrite the other bead's line), and "fixing" it in this export
+// puts a line in the diff that this session never changed. Only a line merged
+// field by field, already in the diff, is recounted outright.
+//
+// A committed line that ends up unchanged is marked to be written as read.
+// A line for a plan outside the scope is never touched.
+func settle(picks []pick, fresh, committed Store) []Issue {
+	issues := make([]Issue, len(picks))
+	for i, p := range picks {
+		issues[i] = p.it
+	}
+	result, head, export := degreesOf(issues), degreesOf(committed.Issues), degreesOf(fresh.Issues)
+	for i, p := range picks {
+		it := &issues[i]
+		if p.outside {
+			it.asRead = true
+			continue
+		}
+		from := map[side]*degrees{fromHead: &head, fromExport: &export}[p.side]
+		changed := false
+		for key, deg := range map[string]func(degrees) map[string]int{
+			"dependency_count": func(g degrees) map[string]int { return g.out },
+			"dependent_count":  func(g degrees) map[string]int { return g.in },
+		} {
+			v, has := it.raw[key]
+			if !has {
+				continue
+			}
+			want := deg(result)[it.ID]
+			if n, err := strconv.Atoi(getStr(it.raw, key)); err == nil && from != nil {
+				want = n + deg(result)[it.ID] - deg(*from)[it.ID]
+			}
+			if num := json.Number(strconv.Itoa(want)); v != num {
+				if !changed {
+					it.raw = clone(it.raw) // never write through to an input store
+					changed = true
+				}
+				it.raw[key] = num
+			}
+		}
+		it.asRead = p.side == fromHead && !changed
+	}
+	return issues
+}
+
+func clone(m map[string]any) map[string]any {
+	c := make(map[string]any, len(m))
+	for k, v := range m {
+		c[k] = v
+	}
+	return c
 }
