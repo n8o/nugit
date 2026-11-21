@@ -52,6 +52,14 @@ func Markdown(rep model.Report) string {
 	b.WriteString(consistencySection(rep.Findings))
 	b.WriteString("\n")
 
+	// Checklist items this diff triggers (ADR-0057): questions, not verdicts,
+	// so they sit beside the findings rather than among them. Always open:
+	// a reviewer who has to expand them will not.
+	if len(rep.Checklist) > 0 {
+		b.WriteString(details(fmt.Sprintf("☑️ Checklist — %d item(s) this diff triggers", len(rep.Checklist)),
+			checklistSection(rep.Checklist), true))
+	}
+
 	// How the commits say they were verified (ADR-0056). Open when some
 	// commit is unverified: that is what a reviewer reads it for.
 	if v := rep.Verification; v != nil {
@@ -703,6 +711,38 @@ func verificationSection(v model.VerificationView) string {
 			subj = append(subj[:89], '…')
 		}
 		fmt.Fprintf(&b, "- `%s` %s — %s\n", sha, string(subj), why)
+	}
+	return b.String()
+}
+
+// checklistSection lists the checklist items the diff triggered (ADR-0057):
+// each item's question, and the first evidence the trigger matched.
+func checklistSection(items []model.ChecklistMatch) string {
+	var b strings.Builder
+	for _, it := range items {
+		id := it.ID
+		if it.Origin != "" {
+			id = it.Origin + ":" + it.ID
+		}
+		status := ""
+		if it.Status != "" && it.Status != string(model.StatusActive) && it.Status != string(model.StatusAccepted) {
+			status = " _(" + it.Status + ")_"
+		}
+		check := it.Check
+		if check == "" {
+			check = it.Title
+		}
+		fmt.Fprintf(&b, "- [ ] **%s**%s — %s\n", id, status, check)
+		more := ""
+		if it.Files > 1 {
+			more = fmt.Sprintf(" and %d more file(s)", it.Files-1)
+		}
+		switch it.Side {
+		case "added", "removed":
+			fmt.Fprintf(&b, "  - %s line in `%s`%s: `%s`\n", it.Side, it.File, more, strings.ReplaceAll(it.Line, "`", "'"))
+		default:
+			fmt.Fprintf(&b, "  - changes `%s`%s\n", it.File, more)
+		}
 	}
 	return b.String()
 }

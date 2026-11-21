@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/n8o/nugit/internal/beads"
+	"github.com/n8o/nugit/internal/checklist"
 	"github.com/n8o/nugit/internal/config"
 	"github.com/n8o/nugit/internal/consistency"
 	"github.com/n8o/nugit/internal/delta"
@@ -181,6 +182,10 @@ func BuildReport(opt Options) (model.Report, error) {
 	other = append(other, verify.Findings(verification)...)
 	findings := consistency.Sort(append(c4Findings, other...))
 
+	// Checklist items whose diff trigger this range matches (ADR-0057). Not
+	// findings: each is a question for the reviewer, not a verdict.
+	checks := checklistMatches(repo, base, opt.Head, opt.RepoDir, cfg, allObjs, codeDelta)
+
 	// PR-time distill (ADR-0018): surface what `nugit distill` would promote
 	// for this range. Pure selection over already-loaded inputs — nothing is
 	// written at render time, and proposals never become findings.
@@ -201,6 +206,7 @@ func BuildReport(opt Options) (model.Report, error) {
 		ProposalsDeduped: deduped,
 		Objective:        obj.view,
 		Verification:     verification,
+		Checklist:        checks,
 	}
 	// ADR-0026: an explicit flag weaker than the config-declared policy is
 	// honored (visibility, not coercion) but must be visible in every render.
@@ -300,6 +306,64 @@ func landscapeOpts(repoDir string, cfg config.Config) consistency.LandscapeOpts 
 		opt.Peers = append(opt.Peers, knowledge.PeerSource{Name: p.Name, Dir: p.Dir(repoDir), Hub: p.Hub})
 	}
 	return opt
+}
+
+// maxChecklistFiles bounds the diff read for line-pattern triggers. A range
+// that changes more candidate files than this is matched on paths alone,
+// which can only over-report: a path-and-line item fires on its paths.
+const maxChecklistFiles = 500
+
+// checklistMatches tests the store's checklist items, and the org hub's
+// (ADR-0035), against the range (ADR-0057). Local items are read at the
+// reviewed ref with everything else; the hub's from its checkout, the way
+// contracts are read, because this repo has no ref into another's history.
+// The diff is read once, only for changed files some item's paths match, and
+// only when some item tests lines at all.
+func checklistMatches(repo gitutil.Repo, base, head, repoDir string, cfg config.Config,
+	objs []model.KnowledgeObject, code model.CodeDelta) []model.ChecklistMatch {
+	hub := ""
+	all := objs
+	if hp, ok := cfg.HubPeer(); ok {
+		hub = hp.Name
+		if hubObjs, load := knowledge.LoadPeer(knowledge.PeerSource{Name: hp.Name, Dir: hp.Dir(repoDir), Hub: true}); load.Reachable {
+			all = append(append([]model.KnowledgeObject(nil), objs...), hubObjs...)
+		}
+	}
+	items := checklist.Items(all, hub)
+	if len(items) == 0 {
+		return nil
+	}
+	files := make([]string, 0, len(code.Files))
+	for _, f := range code.Files {
+		files = append(files, f.Path)
+	}
+	cands := checklist.Candidates(items, files)
+	if len(cands) == 0 {
+		return nil
+	}
+	var lines map[string]checklist.Lines
+	if checklist.NeedsLines(items) && len(cands) <= maxChecklistFiles {
+		spec := make([]string, len(cands))
+		for i, c := range cands {
+			spec[i] = ":(top)" + c // git-root-relative, whatever -C points at
+		}
+		if diff, err := repo.RawDiff(base, head, spec...); err == nil {
+			lines = checklist.ParseDiff(diff)
+		}
+	}
+	if lines == nil && checklist.NeedsLines(items) {
+		// No diff to read: fall back to paths alone for every item, rather
+		// than silently matching nothing.
+		pathOnly := make([]model.KnowledgeObject, len(items))
+		for i, it := range items {
+			t := *it.DiffTrigger
+			t.Added, t.Removed = "", ""
+			it.DiffTrigger = &t
+			pathOnly[i] = it
+		}
+		items = pathOnly
+	}
+	return checklist.Match(items, cands, lines)
 }
 
 // targetConfig reads config.yml from the branch this PR merges into, at its

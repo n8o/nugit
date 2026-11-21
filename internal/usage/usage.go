@@ -94,6 +94,11 @@ type Record struct {
 	Via      string   `json:"via,omitempty"`
 	Verdict  string   `json:"verdict,omitempty"`
 	Kinds    []string `json:"kinds,omitempty"`
+	// Served lists the ids a context() call served, peer ids qualified
+	// (`origin:ID`), so rule hygiene can tell a lesson nobody is shown from
+	// one that is shown every day (ADR-0058). Records written before it have
+	// none, and hygiene says from when its retrieval data runs.
+	Served []string `json:"served,omitempty"`
 }
 
 // IsCall reports whether r is a context() call, as opposed to one of the
@@ -133,7 +138,24 @@ func FromBundle(source, task string, b retrieval.Bundle) Record {
 		Chars:           b.Chars,
 		Omitted:         omittedCount(b),
 		Cited:           citedCount(b),
+		Served:          servedIDs(b),
 	}
+}
+
+// servedIDs is every record id a bundle carried, in bundle order.
+func servedIDs(b retrieval.Bundle) []string {
+	var out []string
+	for _, sec := range [][]retrieval.Item{b.Decisions, b.Lessons, b.References, b.Contracts} {
+		for _, it := range sec {
+			if it.ID != "" {
+				out = append(out, it.QualifiedID())
+			}
+		}
+	}
+	if b.Spec != nil && b.Spec.ID != "" {
+		out = append(out, b.Spec.QualifiedID())
+	}
+	return out
 }
 
 // citedCount is how many served items the queried file names (ADR-0053).
@@ -190,10 +212,13 @@ func Log(repoDir, source, task string, b retrieval.Bundle) error {
 	return Append(repoDir, r)
 }
 
-// targetReadTimeout bounds the read of the default branch's config. The
+// TargetReadTimeout bounds the read of the default branch's config. The
 // callers sit on the edit, commit and context() paths, so a slow git costs at
 // most this, after which the checkout's config applies as before ADR-0055.
-const targetReadTimeout = 500 * time.Millisecond
+// It is a variable so the tests of a package that reads governed config
+// through LocalConfig can lift it: a test that origin's value governs must not
+// also require a loaded machine to answer git inside 500ms.
+var TargetReadTimeout = 500 * time.Millisecond
 
 // LocalConfig is the config the local hooks and the usage log are governed by
 // (ADR-0055): the checkout's, with every governed key read from origin's
@@ -204,7 +229,7 @@ const targetReadTimeout = 500 * time.Millisecond
 func LocalConfig(nugitRoot string) (config.Config, error) {
 	repo := gitutil.Repo{Dir: nugitRoot}
 	return config.LoadLocal(nugitRoot, func() (string, bool) {
-		return repo.DefaultBranchFile(".nugit/config.yml", targetReadTimeout)
+		return repo.DefaultBranchFile(".nugit/config.yml", TargetReadTimeout)
 	})
 }
 

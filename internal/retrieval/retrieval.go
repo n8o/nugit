@@ -69,6 +69,10 @@ type Item struct {
 	// that repo's knowledge about it (ADR-0034). Never silently privileged —
 	// the marker rides every rendered line, like path_bound.
 	SharedSystem string `json:"shared_system,omitempty"`
+	// Check is a checklist item's question (ADR-0057), set when the queried
+	// path is under the item's diff_trigger.paths: the file is in play, so
+	// the question applies to the change being made to it.
+	Check string `json:"check,omitempty"`
 	// Origin names the PEER this item came from, or "" for local knowledge
 	// (ADR-0032). A reader must never mistake peer knowledge for local
 	// knowledge: this repo enforces nothing about a foreign object, its Path
@@ -238,6 +242,11 @@ func Context(opt Options) (Bundle, error) {
 	// `peers[].name`: the name is this reader's private label (ADR-0033 point 3),
 	// while a repo id is the bilateral fact both repos spell identically.
 	ownerOf := ownerOrigins(opt.RepoDir, cfg, sharedHere)
+	// The org hub's checklist items bind by their trigger paths (ADR-0057).
+	hubName := ""
+	if hp, ok := cfg.HubPeer(); ok {
+		hubName = hp.Name
+	}
 
 	// Local store + every reachable peer (ADR-0032). Only the LOCAL load can
 	// error: an absent sibling degrades to "contributed nothing" so pr-render
@@ -304,6 +313,12 @@ func Context(opt Options) (Bundle, error) {
 		// peer's checkout, and `internal/render/**` matching here would be a
 		// coincidence of layout, not a binding (ADR-0032).
 		bound := !o.Foreign() && knowledge.AppliesTo(o, path)
+		// A checklist item's trigger paths bind it the same way (ADR-0057),
+		// and so do an org hub item's: promotion to the hub is how an item
+		// becomes every repo's, so its paths are written for any tree. No
+		// other peer's trigger ever binds here.
+		trig := knowledge.TriggerCovers(o, path) && (!o.Foreign() || (hubName != "" && o.Origin == hubName))
+		bound = bound || trig
 		// Landscape binding (ADR-0034): the queried path configures a shared
 		// system, and this object comes from the peer that OWNS that system. The
 		// glob doing the binding is the ORG's, declared reader-relative in the
@@ -361,9 +376,14 @@ func Context(opt Options) (Bundle, error) {
 				pulled[knowledge.KeyOf(*o)] = true
 			}
 		case model.KindLesson:
-			if cite || landSys != "" || !tw.misses(o) {
+			// A checklist item in play is served whatever the task: the file
+			// is under its trigger, and the question is about this change.
+			if cite || trig || landSys != "" || !tw.misses(o) {
 				it := toItem(o, "")
 				it.PathBound = bound
+				if trig {
+					it.Check = strings.TrimSpace(o.Check)
+				}
 				it.Cited = cite
 				it.SharedSystem = landSys
 				it.rank = relevanceRank(it, o, comp, parent, tw)

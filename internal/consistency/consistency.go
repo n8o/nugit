@@ -275,6 +275,31 @@ func checkModelHealth(in Input) []model.Finding {
 			Detail: fmt.Sprintf("this glob is syntactically invalid and matches no files, so the binding is dead — fix it in %s", bad.Path),
 		})
 	}
+	// Checklist items that can never fire, or fire with nothing to ask
+	// (ADR-0057). Scoped to records this PR adds or modifies: the PR view
+	// reports what the PR did, and `nugit doctor` reports the whole store.
+	// The delta's paths are git-root-relative and the store's are nugit-root-
+	// relative; compare the two forms so a nested root matches too.
+	touched := map[string]bool{}
+	for _, kc := range in.Knowledge.Changes {
+		if kc.Object != nil {
+			touched[strings.TrimPrefix(kc.Object.Path, in.Prefix)] = true
+		}
+	}
+	for _, bad := range knowledge.InvalidTriggers(in.AllObjects) {
+		if !touched[strings.TrimPrefix(bad.Path, in.Prefix)] {
+			continue
+		}
+		id := bad.ID
+		if id == "" {
+			id = bad.Path
+		}
+		fs = append(fs, model.Finding{
+			Check: "model-health", Severity: model.SevWarn,
+			Title:  fmt.Sprintf("checklist item %q: %s", id, bad.Problem),
+			Detail: "fix the diff_trigger or check: in " + bad.Path + " (ADR-0057)",
+		})
+	}
 	// A relationship endpoint that names no declared element can never cover a
 	// code dependency — the edge silently enforces nothing.
 	unknown := map[string]bool{}

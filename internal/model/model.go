@@ -163,6 +163,12 @@ type FrontMatter struct {
 	// stale-knowledge check treats a PR touching a matched path as touching
 	// the object's governed surface.
 	AppliesToPaths []string `yaml:"applies_to_paths,omitempty"`
+	// DiffTrigger makes the record a checklist item (ADR-0057): a predicate a
+	// diff can be tested against without reading it. Check is the question the
+	// item asks of a diff its trigger matches. Written on lessons; nil on every
+	// record that is not an item.
+	DiffTrigger *DiffTrigger `yaml:"diff_trigger,omitempty"`
+	Check       string       `yaml:"check,omitempty"`
 	// Parties are the signatories of a `contract` object (ADR-0033) — ignored on
 	// every other kind. Each party names a repo by its stable org-wide id and the
 	// obligations that repo owes; a repo checks ONLY the party matching its own
@@ -769,6 +775,9 @@ type Report struct {
 	// Objective is what the range says it is for (ADR-0048); nil when no
 	// commit names an objective, which keeps such a report's JSON unchanged.
 	Objective *ObjectiveView `json:",omitempty"`
+	// Checklist is every checklist item whose diff trigger this range
+	// matches (ADR-0057), sorted by id. Empty when none does.
+	Checklist []ChecklistMatch `json:",omitempty"`
 	// Verification is how the range's commits say they were verified
 	// (ADR-0056); nil when verify.gate is off, or observe with no commit
 	// stamped, which keeps such a report unchanged.
@@ -847,4 +856,32 @@ type UnverifiedCommit struct {
 	Note     string `json:",omitempty"`
 	Stamped  bool
 	Released bool `json:",omitempty"`
+}
+
+// ---- Checklist items (ADR-0057) ----
+
+// DiffTrigger is a checklist item's trigger. Paths are doublestar globs in
+// the applies_to_paths dialect (ADR-0020) and are required. Added and Removed
+// are RE2 patterns tested against the added and removed lines of a changed
+// file the paths match. With neither, any change to such a file matches; with
+// one or both, a line must match one of them.
+type DiffTrigger struct {
+	Paths   []string `yaml:"paths"`
+	Added   string   `yaml:"added,omitempty"`
+	Removed string   `yaml:"removed,omitempty"`
+}
+
+// ChecklistMatch is one checklist item a diff triggered, with the first
+// evidence found: the file and, for a line pattern, the line.
+type ChecklistMatch struct {
+	ID     string
+	Origin string `json:",omitempty"` // the hub peer an org-wide item came from ("" = local)
+	Path   string // the item's record file
+	Title  string
+	Check  string
+	Status string
+	File   string // first changed file that matched (sorted)
+	Side   string // added | removed | path
+	Line   string `json:",omitempty"` // the matching line, trimmed; "" for a path-only trigger
+	Files  int    // how many changed files matched
 }

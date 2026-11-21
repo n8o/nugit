@@ -139,9 +139,16 @@ const (
 )
 
 // Current is the objective the current branch works toward: its claim, else
-// the first `objective:` named by its own commits (those not on the remote's
-// default branch), else a bead the branch is named after. Branch is "" outside
-// a branch.
+// a bead the branch is named after, else the first `objective:` named by its
+// commits (those not on the remote's default branch). Branch is "" outside a
+// branch.
+//
+// The name comes before the commits because a name is this branch's own and
+// the commits may not be: on a stacked branch they include the base branch's.
+// It also keeps the answer stable. With the commits first, the hook stamped a
+// named branch's first commit from its name, and from then on the commits
+// answered, so no later commit was stamped and the digest asked for a claim
+// the name had already made.
 type Current struct {
 	Branch    string
 	Objective string
@@ -160,6 +167,12 @@ func Resolve(repoDir string) Current {
 		cur.Objective, cur.Source = c.Objective, FromClaim
 		return cur
 	}
+	if st, err := beads.ReadDir(repoDir); err == nil {
+		if id := BeadInBranch(cur.Branch, st); id != "" {
+			cur.Objective, cur.Source = id, FromBranchName
+			return cur
+		}
+	}
 	if base := repo.DefaultRemoteBranch(); base != "" {
 		commits, _ := repo.Log(repo.MergeBase(base, "HEAD"), "HEAD") // oldest first
 		for _, c := range commits {
@@ -167,11 +180,6 @@ func Resolve(repoDir string) Current {
 				cur.Objective, cur.Source = id, FromCommits
 				return cur
 			}
-		}
-	}
-	if st, err := beads.ReadDir(repoDir); err == nil {
-		if id := BeadInBranch(cur.Branch, st); id != "" {
-			cur.Objective, cur.Source = id, FromBranchName
 		}
 	}
 	return cur

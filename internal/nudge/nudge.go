@@ -29,10 +29,14 @@ import (
 	"github.com/n8o/nugit/internal/trailers"
 )
 
+// gitTimeout bounds the one extra git call so the hook stays well inside
+// the ~150ms commit-latency budget even on pathological repos. Past it the
+// nudge is skipped, which is the hook's contract and not a failure. It is a
+// variable so this package's tests can lift it: a test of what the nudge says
+// must not also require a loaded machine to answer git inside 100ms.
+var gitTimeout = 100 * time.Millisecond
+
 const (
-	// gitTimeout bounds the one extra git call so the hook stays well inside
-	// the ~150ms commit-latency budget even on pathological repos.
-	gitTimeout = 100 * time.Millisecond
 	// maxStagedFiles: beyond this the nudge is skipped entirely — a diff this
 	// large is obviously significant, but classifying and keyword-seeding it
 	// is not worth commit latency; pr-render still sees the change.

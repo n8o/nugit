@@ -33,6 +33,7 @@ import (
 	"github.com/n8o/nugit/internal/editgate"
 	"github.com/n8o/nugit/internal/engine"
 	"github.com/n8o/nugit/internal/gitutil"
+	"github.com/n8o/nugit/internal/hygiene"
 	"github.com/n8o/nugit/internal/icepanel"
 	"github.com/n8o/nugit/internal/knowledge"
 	"github.com/n8o/nugit/internal/localmem"
@@ -49,6 +50,7 @@ import (
 	"github.com/n8o/nugit/internal/render"
 	"github.com/n8o/nugit/internal/replay"
 	"github.com/n8o/nugit/internal/retrieval"
+	"github.com/n8o/nugit/internal/reverts"
 	"github.com/n8o/nugit/internal/review"
 	"github.com/n8o/nugit/internal/scaffold"
 	"github.com/n8o/nugit/internal/skillopt"
@@ -67,7 +69,10 @@ usage:
   nugit skill [flags]         print/install the agent skill files that teach an agent to use nugit
   nugit context [flags]       scoped, typed knowledge bundle for a path (for agents)
   nugit mcp [flags]           run the MCP stdio server (exposes context() to agents)
-  nugit stats [flags]         aggregate the local context() usage log (+ edit coverage, per session)
+  nugit stats [flags]         aggregate the local context() usage log (+ edit coverage, per session);
+                              -rules [-days 90]: rule hygiene — unused, dead-path, never-fired rules (ADR-0058);
+                              -reviewers [-months 6] [-ref R]: merged changes, reverts and a size-matched
+                              clean set per month, from first-parent history (ADR-0059)
   nugit remember [flags]      jot ephemeral working memory (.nugit-local/, gitignored)
   nugit objective [claim <id>] show, or claim, the objective this branch's session works toward (ADR-0048)
   nugit orphans [flags]       report work started toward an objective and then left (ADR-0048, read-only)
@@ -1218,7 +1223,7 @@ func cmdHook(args []string) int {
 		// ADR-0048: name the branch's claimed objective on the commit. Runs
 		// whatever the capture mode, because it is not capture: it is what
 		// the PR view frames the change with. Any failure leaves the message.
-		stampObjective(*dir, rest[0])
+		claim.StampFile(*dir, rest[0], os.Stderr)
 		// ADR-0056: stamp how the commit was verified, from the session's
 		// evidence, and under verify.gate: enforce stop an unverified commit
 		// that gives no reason. Runs whatever the capture mode: it is not
@@ -1303,35 +1308,6 @@ func cmdHook(args []string) int {
 	default:
 		fmt.Fprintf(os.Stderr, "nugit hook: unknown hook %q\n", args[0])
 		return 2
-	}
-}
-
-// stampObjective appends `objective: <id>` to the message file when the
-// current branch claims an objective and the message names none (ADR-0048),
-// and warns when the message names a different one.
-func stampObjective(dir, msgFile string) {
-	defer func() { _ = recover() }() // never block a commit
-	cur := claim.Resolve(dir)
-	if cur.Source != claim.FromClaim && cur.Source != claim.FromBranchName {
-		return
-	}
-	b, err := os.ReadFile(msgFile)
-	if err != nil {
-		return
-	}
-	out, added, other := claim.Stamp(string(b), cur.Objective)
-	switch {
-	case other != "":
-		fmt.Fprintf(os.Stderr, "nugit: this commit names objective %s, but %s works toward %s; one session, one objective (ADR-0048)\n",
-			other, cur.Branch, cur.Objective)
-	case added:
-		how := "claimed for"
-		if cur.Source == claim.FromBranchName {
-			how = "named by branch"
-		}
-		if os.WriteFile(msgFile, []byte(out), 0o644) == nil {
-			fmt.Fprintf(os.Stderr, "nugit: added `objective: %s` (%s %s)\n", cur.Objective, how, cur.Branch)
-		}
 	}
 }
 
@@ -1546,7 +1522,54 @@ func cmdStats(args []string) int {
 	dir := fs.String("C", ".", "repo directory")
 	since := fs.String("since", "", "window: a duration (e.g. 168h) or a date (YYYY-MM-DD); default all")
 	format := fs.String("format", "markdown", "output: markdown|json")
+	rules := fs.Bool("rules", false, "report rule hygiene instead: lessons and checklist items unused, pointing at gone paths, or never fired (ADR-0058)")
+	days := fs.Int("days", 90, "with -rules: the unused window in days")
+	reviewers := fs.Bool("reviewers", false, "report reverts per month instead: merged changes, reverts and a size-matched clean set, from the ref's first-parent history (ADR-0059)")
+	months := fs.Int("months", 6, "with -reviewers: the window in calendar months, counting the tip's")
+	ref := fs.String("ref", "", "with -reviewers: the branch to read (default: origin's default branch)")
+	asJSON := fs.Bool("json", false, "shorthand for -format json")
 	_ = fs.Parse(args)
+	if *asJSON {
+		*format = "json"
+	}
+
+	if *reviewers {
+		rep, err := reverts.Run(reverts.Options{RepoDir: *dir, Ref: *ref, Months: *months})
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "nugit stats -reviewers: %v\n", err)
+			return 1
+		}
+		if *format == "json" {
+			out, err := json.MarshalIndent(rep, "", "  ")
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "nugit stats: %v\n", err)
+				return 1
+			}
+			fmt.Println(string(out))
+			return 0
+		}
+		fmt.Print(rep.Markdown())
+		return 0
+	}
+
+	if *rules {
+		rep, err := hygiene.Run(hygiene.Options{RepoDir: *dir, Days: *days})
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "nugit stats: %v\n", err)
+			return 1
+		}
+		if *format == "json" {
+			out, err := json.MarshalIndent(rep, "", "  ")
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "nugit stats: %v\n", err)
+				return 1
+			}
+			fmt.Println(string(out))
+			return 0
+		}
+		fmt.Print(rep.Markdown())
+		return 0
+	}
 
 	var cutoff time.Time
 	if *since != "" {
