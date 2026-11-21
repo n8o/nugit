@@ -83,6 +83,11 @@ type Item struct {
 	// rank is the relevance rank (ADR-0043; lower is more relevant). Zero for
 	// items built outside Context, which then order exactly as before.
 	rank int
+	// weight is how specifically the item matches the task: the summed rarity
+	// of the task words it contains (ADR-0055; higher is more specific). It
+	// orders items within one rank, and is never rendered: it is an order,
+	// not a score for anyone to threshold.
+	weight float64
 }
 
 // QualifiedID is how an item is NAMED anywhere a human or an agent reads it:
@@ -269,6 +274,9 @@ func Context(opt Options) (Bundle, error) {
 	}
 
 	kw := keywords(opt.Task)
+	// How rare each task word is in this store (ADR-0055), computed once over
+	// every loaded object so a word's weight is the same in every section.
+	tw := weigh(objs, kw)
 
 	// Citations (ADR-0053): the ids of LOCAL objects the queried file names.
 	// A bare id in this repo's file names this repo's object; a peer's
@@ -342,14 +350,15 @@ func Context(opt Options) (Bundle, error) {
 			// Component-scoped decisions always; global ones only when relevant to
 			// the task (else every global decision floods every path's bundle) —
 			// unless the queried path itself matches the decision's binding.
-			if !cite && !bound && landSys == "" && (o.Scope == "" || o.Scope == "global") && len(kw) > 0 && !matches(o, kw) {
+			if !cite && !bound && landSys == "" && (o.Scope == "" || o.Scope == "global") && tw.misses(o) {
 				continue
 			}
 			it := toItem(o, "")
 			it.PathBound = bound
 			it.Cited = cite
 			it.SharedSystem = landSys
-			it.rank = relevanceRank(it, o, comp, parent, kw)
+			it.rank = relevanceRank(it, o, comp, parent, tw)
+			it.weight = tw.of(o)
 			decisions = append(decisions, it)
 			pulled[knowledge.KeyOf(*o)] = true
 		case model.KindSpec:
@@ -369,7 +378,7 @@ func Context(opt Options) (Bundle, error) {
 		case model.KindLesson:
 			// A checklist item in play is served whatever the task: the file
 			// is under its trigger, and the question is about this change.
-			if cite || trig || landSys != "" || len(kw) == 0 || matches(o, kw) {
+			if cite || trig || landSys != "" || !tw.misses(o) {
 				it := toItem(o, "")
 				it.PathBound = bound
 				if trig {
@@ -377,19 +386,21 @@ func Context(opt Options) (Bundle, error) {
 				}
 				it.Cited = cite
 				it.SharedSystem = landSys
-				it.rank = relevanceRank(it, o, comp, parent, kw)
+				it.rank = relevanceRank(it, o, comp, parent, tw)
+				it.weight = tw.of(o)
 				lessons = append(lessons, it)
 				pulled[knowledge.KeyOf(*o)] = true
 			}
 		case model.KindReference:
 			// Same rule as lessons: keyword-matched when a task is given, all
 			// in-scope otherwise (the budget truncates, never silently).
-			if cite || landSys != "" || len(kw) == 0 || matches(o, kw) {
+			if cite || landSys != "" || !tw.misses(o) {
 				it := toItem(o, "")
 				it.PathBound = bound
 				it.Cited = cite
 				it.SharedSystem = landSys
-				it.rank = relevanceRank(it, o, comp, parent, kw)
+				it.rank = relevanceRank(it, o, comp, parent, tw)
+				it.weight = tw.of(o)
 				references = append(references, it)
 				pulled[knowledge.KeyOf(*o)] = true
 			}
@@ -463,7 +474,8 @@ func Context(opt Options) (Bundle, error) {
 			}
 			via := edge.Relation + ":" + src.QualifiedID()
 			hop := toItem(tgt, via)
-			hop.rank = hopRank(tgt, kw)
+			hop.rank = hopRank(tgt, tw)
+			hop.weight = tw.of(tgt)
 			shown[knowledge.KeyOf(*tgt)] = true
 			if tgt.Type == model.KindDecision {
 				decisions = append(decisions, hop)
@@ -496,7 +508,8 @@ func Context(opt Options) (Bundle, error) {
 			// only inform an object from its OWN store (ADR-0032).
 			if edge.Relation == "informs" && shown[knowledge.EdgeKeyFrom(*o, edge.Target)] {
 				ref := toItem(o, "informs:"+model.QualifyID(o.Origin, edge.Target))
-				ref.rank = hopRank(o, kw)
+				ref.rank = hopRank(o, tw)
+				ref.weight = tw.of(o)
 				references = append(references, ref)
 				pulled[knowledge.KeyOf(*o)] = true
 				break
