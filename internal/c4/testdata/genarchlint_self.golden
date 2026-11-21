@@ -15,6 +15,8 @@ components:
     in: "internal/bootstrap/**"
   "c4":
     in: "internal/c4/**"
+  "checklist":
+    in: "internal/checklist/**"
   "claim":
     in: "internal/claim/**"
   "cli":
@@ -45,6 +47,8 @@ components:
     in: "internal/gitutil/**"
   "goimports":
     in: "internal/goimports/**"
+  "hygiene":
+    in: "internal/hygiene/**"
   "icepanel":
     in: "internal/icepanel/**"
   "knowledge":
@@ -85,6 +89,8 @@ components:
     in: "internal/replay/**"
   "retrieval":
     in: "internal/retrieval/**"
+  "reverts":
+    in: "internal/reverts/**"
   "review":
     in: "internal/review/**"
   "scaffold":
@@ -132,6 +138,10 @@ deps:
   "c4":
     mayDependOn:
       - "model_"
+  "checklist":
+    mayDependOn:
+      - "knowledge"
+      - "model_"
   "claim":
     mayDependOn:
       - "beads"
@@ -152,6 +162,7 @@ deps:
       - "editgate"
       - "engine"
       - "gitutil"
+      - "hygiene"
       - "icepanel"
       - "knowledge"
       - "localmem"
@@ -168,6 +179,7 @@ deps:
       - "render"
       - "replay"
       - "retrieval"
+      - "reverts"
       - "review"
       - "scaffold"
       - "skillopt"
@@ -233,6 +245,7 @@ deps:
   "engine":
     mayDependOn:
       - "beads"
+      - "checklist"
       - "config"
       - "consistency"
       - "delta"
@@ -264,6 +277,13 @@ deps:
       - "model_"
   "goimports":
     mayDependOn: []
+  "hygiene":
+    mayDependOn:
+      - "checklist"
+      - "gitutil"
+      - "knowledge"
+      - "model_"
+      - "usage"
   "icepanel":
     mayDependOn:
       - "model_"
@@ -363,6 +383,9 @@ deps:
       - "mapping"
       - "model_"
       - "trailers"
+  "reverts":
+    mayDependOn:
+      - "gitutil"
   "review":
     mayDependOn:
       - "gitutil"

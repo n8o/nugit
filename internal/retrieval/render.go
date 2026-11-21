@@ -71,6 +71,11 @@ func (b Bundle) Markdown() string {
 		w.WriteString("**Lessons**\n")
 		for _, l := range b.Lessons {
 			fmt.Fprintf(&w, "- `%s`%s — %s%s\n", l.QualifiedID(), tierSuffix(l), l.Summary, viaSuffix(l.Via))
+			if l.Check != "" {
+				// A checklist item this file is under (ADR-0057): the question
+				// to answer about the change before committing it.
+				fmt.Fprintf(&w, "  - ☑️ check: %s\n", oneLine(l.Check))
+			}
 		}
 		w.WriteString("\n")
 	}

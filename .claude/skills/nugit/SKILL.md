@@ -66,6 +66,63 @@ for the decision it grounds) and land it as a PR — never paste the full docume
   in the same change.
 - Run `nugit pr-render -C . -base <base> -head HEAD` before finishing to self-check
   (consistency green, significance, deltas). Exit non-zero = a finding to fix.
+- **Answer the checklist.** When `context` marks a lesson `☑️ check:`, or the PR
+  view lists a **Checklist** item, the file you are changing is covered by a
+  question a past incident raised (ADR-0057). Answer it before you commit:
+  change the code, or say in the PR why the question does not apply.
+- **Do not lower a gate to get past it.** A gate's mode in
+  `.nugit/config.yml` (`fail_on`, `c4.mode`, `context_gate`, `verify.gate`,
+  and the rest) is read from the branch you merge into, not from yours
+  (ADR-0055). Changing it in your branch does not take effect until it merges,
+  and the PR view reports the change as its own finding. If a gate is wrong,
+  say so to the user. Do not edit it in the same PR that trips it.
+
+## Before committing — verify, and say how
+
+- **Run the repo's verify skill before every commit.** Look for a skill named
+  `verify` or `verify-*` under `.claude/skills/`, nearest the code you
+  changed. It starts and drives the app the way a person would: a browser for
+  a web change, a simulator for mobile, the service for a backend. Run it
+  after your last edit. A check that ran before you changed the tree checked
+  a different tree. If the repo has no verify skill, run its tests, build and
+  linter, and tell the user that a verify skill would make the check real.
+- **Say how the commit was verified.** With nugit's hooks installed, the
+  commit-msg hook stamps `verified: e2e`, `tests` or `review` from what ran in
+  your session, and `verified: none` when nothing did (ADR-0056). If you did
+  not verify, say why in the message, as
+  `verified: none — docs-only change`. Never write a kind you did not run.
+  The hook cannot see a check you ran somewhere else, so a claim like that
+  needs a note saying where it ran.
+- **Run the check as its own command, not chained into the commit.** In
+  `go test ./... && git commit`, the commit-msg hook runs before that command
+  finishes, so the tests are not recorded yet and the commit is stamped
+  `verified: none`.
+- **If the commit is blocked** (`verify.gate: enforce`), run the check, or
+  give the reason. Do not retry the same commit unchanged. The gate lets a
+  third attempt through so a wrong block cannot strand you, and the PR view
+  shows that commit as released by the gate.
+
+## When a check fails
+
+- **Fix the cause, not the signal.** Never make a failing test pass by
+  skipping it, adding a sleep, adding retries, or re-running it until it goes
+  green. That teaches everyone to re-run instead of fix.
+- **A flaky test gets the same treatment.** Find why it is flaky. If you
+  cannot find the root cause, delete the test and record why: put a
+  `symptom:` and a `decision:` in the commit trailer saying what you saw and
+  what you tried. Then the deletion is a decision someone can review, not a
+  test that quietly vanished.
+- **Three rounds, then a human.** If a check is still failing after three
+  rounds of fixes, stop. Tell the user which check it is, what you tried each
+  round, what you saw, and what you now think the cause is. A fourth guess
+  costs more than their five minutes.
+
+## Before pushing — cheap checks first
+
+Run the tests, the build, the linter and `nugit pr-render` locally before you
+push or open a PR. CI and review are shared and slow. A failure you could
+have caught locally spends other people's time and gets slower feedback to
+you.
 
 ## Capture the "why" — so the store fills itself
 
@@ -109,6 +166,23 @@ for the decision it grounds) and land it as a PR — never paste the full docume
 
 - After merging a batch: `nugit distill -base <base> -head HEAD` writes the ADRs/
   lessons into the PR for review.
+
+- **Turn a repeated miss into a checklist item.** When the same kind of bug
+  has reached review in two or more PRs, and you can tell from a diff that a
+  change risks it, write a lesson with a `diff_trigger:` and a `check:`
+  (ADR-0057). From then on the PR view asks the question on every change that
+  matches, and `context` asks it while the file is open:
+
+  ```yaml
+  diff_trigger:
+    paths: ["internal/model/**"]   # where the risk lives
+    added: 'json:"'                # optional: the line that signals it (RE2)
+  check: does a record written before this field existed still load?
+  ```
+
+  Keep the trigger as narrow as the risk. A question that fires on every edit
+  to a directory is one people learn to skip. `nugit stats -rules` names items
+  that never fire, and lessons nobody is shown, so the store can be pruned.
 
 ## If this repo keeps a plan store (`.beads/`)
 
@@ -162,4 +236,6 @@ the issue in the bead's id or body.
 | Save a working note | `nugit remember -text "..."` |
 | Promote trailers → ADRs | `nugit distill -base <base> -head HEAD` |
 | The unified PR view | `nugit pr-render -base <base> -head HEAD` |
+| How commits were verified; gate stats | `nugit stats` (verify section) |
+| Rules worth pruning | `nugit stats -rules` |
 | Lint / canonicalize the plan store | `nugit plan check` · `nugit plan normalize -write` |

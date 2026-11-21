@@ -204,6 +204,21 @@ workspace "nugit" "Git-native typed knowledge & unified PR view — self-model (
                     "paths" "internal/editgate/**"
                 }
             }
+            checklist = component "Checklist" "Matches checklist items' diff triggers against a range's diff (ADR-0057)" "Go" {
+                properties {
+                    "paths" "internal/checklist/**"
+                }
+            }
+            hygiene = component "Rule hygiene" "Reports lessons and checklist items unused, pointing at gone paths, or never fired (ADR-0058)" "Go" {
+                properties {
+                    "paths" "internal/hygiene/**"
+                }
+            }
+            reverts = component "Revert report" "Counts merged changes and reverts per month, with a size-matched clean set, from first-parent history (ADR-0059)" "Go" {
+                properties {
+                    "paths" "internal/reverts/**"
+                }
+            }
             verify = component "Verify gate" "Records verification evidence from Claude Code hooks; stamps verified: on commits; off/observe/enforce (ADR-0056)" "Go" {
                 properties {
                     "paths" "internal/verify/**"
@@ -440,6 +455,17 @@ workspace "nugit" "Git-native typed knowledge & unified PR view — self-model (
             verify -> trailers "parses verified: lines"
             verify -> usage "records evidence and verdicts; reads the session's records"
             verify -> model_ "uses types"
+            engine -> checklist "matches the range's diff against checklist items"
+            checklist -> knowledge "trigger path globs, peer admission"
+            checklist -> model_ "uses types"
+            cli -> hygiene "stats -rules"
+            hygiene -> knowledge "loads the store's lessons"
+            hygiene -> checklist "replays checklist triggers over history"
+            hygiene -> gitutil "bounded patch log, tracked tree"
+            hygiene -> usage "reads which ids context() served"
+            hygiene -> model_ "uses types"
+            cli -> reverts "stats -reviewers"
+            reverts -> gitutil "bounded first-parent log, revert log, ancestry lookup"
             doctor -> agentcfg "detects the installed pre-edit and session-start hooks"
 
             // --- brownfield adoption: prose vs code, before any store exists (ADR-0036) ---

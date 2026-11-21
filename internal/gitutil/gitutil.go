@@ -538,8 +538,12 @@ func parseNumstat(out string) map[string][2]int {
 // ListTree returns every file path tracked at ref (git-root-relative), so a
 // language analyzer can read build files at the reviewed ref instead of the disk
 // working tree.
+//
+// --full-tree is what makes that true from a nested nugit root: without it
+// git lists only the subtree under Dir, relative to Dir, and every caller's
+// `prefix + ".nugit/"` filter matched nothing there.
 func (r Repo) ListTree(ref string) ([]string, error) {
-	out, err := r.git("ls-tree", "-r", "--name-only", "-z", ref)
+	out, err := r.git("ls-tree", "-r", "--full-tree", "--name-only", "-z", ref)
 	if err != nil {
 		return nil, err
 	}
@@ -573,8 +577,13 @@ func (r Repo) TrackedFiles() (map[string]bool, error) {
 
 // RawDiff returns the unified text diff between base and head, optionally
 // limited to the given paths.
+//
+// Its output is parsed, so it is pinned against the user's config: no color
+// (color.ui=always would put escape codes before every +/-), no external diff
+// driver, and paths unquoted (core.quotepath=true would key a non-ASCII file
+// on its quoted name).
 func (r Repo) RawDiff(base, head string, paths ...string) (string, error) {
-	args := []string{"diff", base, head}
+	args := []string{"-c", "core.quotepath=false", "diff", "--no-color", "--no-ext-diff", base, head}
 	if len(paths) > 0 {
 		args = append(args, "--")
 		args = append(args, paths...)
@@ -588,6 +597,48 @@ const (
 	commitSep = "\x1e" // record separator
 	fieldSep  = "\x1f" // unit separator
 )
+
+// PatchCommit is one commit's diff against its parent, from LogPatch.
+type PatchCommit struct {
+	SHA  string
+	Time time.Time
+	Diff string
+}
+
+// LogPatch returns the non-merge commits reachable from ref in the last
+// sinceDays (0 = no date bound) that touch paths (git-root-relative; none =
+// all), newest first, each with its unified diff limited to those paths. Both
+// bounds keep a history scan O(window), like LogSince and ChurnSince: maxCount
+// caps the commits read however long the window is.
+func (r Repo) LogPatch(ref string, sinceDays, maxCount int, paths []string) ([]PatchCommit, error) {
+	args := []string{"-c", "core.quotepath=false", "log", "--no-merges", "-p", "--no-color", "--no-ext-diff",
+		"--format=" + commitSep + "%H" + fieldSep + "%cI", fmt.Sprintf("--max-count=%d", maxCount)}
+	if sinceDays > 0 {
+		args = append(args, fmt.Sprintf("--since=%d.days.ago", sinceDays))
+	}
+	args = append(args, ref, "--")
+	for _, p := range paths {
+		args = append(args, ":(top)"+p)
+	}
+	out, err := r.git(args...)
+	if err != nil {
+		return nil, err
+	}
+	var commits []PatchCommit
+	for _, rec := range strings.Split(out, commitSep) {
+		if strings.TrimSpace(rec) == "" {
+			continue
+		}
+		head, diff, _ := strings.Cut(rec, "\n")
+		sha, when, ok := strings.Cut(head, fieldSep)
+		if !ok {
+			continue
+		}
+		t, _ := time.Parse(time.RFC3339, strings.TrimSpace(when))
+		commits = append(commits, PatchCommit{SHA: strings.TrimSpace(sha), Time: t, Diff: diff})
+	}
+	return commits, nil
+}
 
 // ChurnSince counts, per git-root-relative path, how many of the last maxCount
 // non-merge commits within sinceDays touched it. One git invocation for the
@@ -931,7 +982,12 @@ type TimedCommit struct {
 // LogTimed returns up to max commits of revRange (newest first), with bodies
 // and committer times.
 func (r Repo) LogTimed(revRange string, max int) ([]TimedCommit, error) {
-	out, err := r.git("log", fmt.Sprintf("-n%d", max), "--pretty=format:%ct"+fieldSep+logFormat, revRange)
+	return r.logTimed(fmt.Sprintf("-n%d", max), revRange)
+}
+
+// logTimed runs git log with args and parses TimedCommits.
+func (r Repo) logTimed(args ...string) ([]TimedCommit, error) {
+	out, err := r.git(append([]string{"log", "--pretty=format:%ct" + fieldSep + logFormat}, args...)...)
 	if err != nil {
 		return nil, err
 	}
