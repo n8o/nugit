@@ -86,6 +86,15 @@ type Config struct {
 		// says so and nothing fails.
 		Hub string `yaml:"hub"`
 	} `yaml:"org"`
+	// Verify is the commit verification gate (ADR-0056). Gate: off | observe
+	// (default) | enforce. Skills, Reviews and Tests name what counts as
+	// evidence; empty means the built-in defaults (DefaultVerify*).
+	Verify struct {
+		Gate    string   `yaml:"gate"`
+		Skills  []string `yaml:"skills"`
+		Reviews []string `yaml:"reviews"`
+		Tests   []string `yaml:"tests"`
+	} `yaml:"verify"`
 	// Contracts configures cross-repo obligation checking (ADR-0033).
 	Contracts struct {
 		Mode string `yaml:"mode"` // warn (default) | fail | off
@@ -181,7 +190,45 @@ func Default() Config {
 	c.Recurrence.WindowDays = 90
 	c.Recurrence.MinFixes = 3
 	c.Contracts.Mode = "warn"
+	c.Verify.Gate = "observe"
 	return c
+}
+
+// Built-in evidence names for the verify gate (ADR-0056). A skill or agent
+// name matches an entry when its last segment (after ':' or '/') equals it,
+// starts with it plus "-", or ends with "-" plus it: `verify-backend`,
+// `web:verify`, `code-review` and `service-reviewer` all match.
+var (
+	DefaultVerifySkills  = []string{"verify"}
+	DefaultVerifyReviews = []string{"review", "reviewer"}
+	DefaultVerifyTests   = []string{
+		"go test", "npm test", "npm run test", "pnpm test", "pnpm run test", "yarn test", "bun test",
+		"npx vitest", "npx jest", "vitest", "jest", "pytest", "python -m pytest", "python3 -m pytest",
+		"cargo test", "cargo nextest", "make test", "make check", "ctest", "mvn test", "gradle test",
+		"./gradlew test", "dotnet test", "mix test", "bundle exec rspec", "rspec",
+	}
+)
+
+// VerifySkills returns the configured verify-skill names, or the defaults.
+func (c Config) VerifySkills() []string { return orDefault(c.Verify.Skills, DefaultVerifySkills) }
+
+// VerifyReviews returns the configured review names, or the defaults.
+func (c Config) VerifyReviews() []string { return orDefault(c.Verify.Reviews, DefaultVerifyReviews) }
+
+// VerifyTests returns the configured test-command prefixes, or the defaults.
+func (c Config) VerifyTests() []string { return orDefault(c.Verify.Tests, DefaultVerifyTests) }
+
+func orDefault(v, d []string) []string {
+	var out []string
+	for _, s := range v {
+		if s = strings.TrimSpace(s); s != "" {
+			out = append(out, s)
+		}
+	}
+	if len(out) == 0 {
+		return d
+	}
+	return out
 }
 
 // Load reads .nugit/config.yml from repoDir. A missing file yields the defaults
@@ -275,6 +322,14 @@ func LoadBytes(b []byte) (Config, error) {
 	}
 	for i := range c.Peers {
 		c.Peers[i].Hub = c.Peers[i].Name == c.Org.Hub && c.Org.Hub != ""
+	}
+	c.Verify.Gate = strings.ToLower(strings.TrimSpace(c.Verify.Gate))
+	switch c.Verify.Gate {
+	case "off", "enforce":
+	default:
+		// Unknown value: the default (observe). A typo must never start
+		// blocking commits, nor silently stop measuring them (ADR-0056).
+		c.Verify.Gate = "observe"
 	}
 	c.Contracts.Mode = strings.ToLower(strings.TrimSpace(c.Contracts.Mode))
 	switch c.Contracts.Mode {

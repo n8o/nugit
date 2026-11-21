@@ -204,6 +204,11 @@ workspace "nugit" "Git-native typed knowledge & unified PR view — self-model (
                     "paths" "internal/editgate/**"
                 }
             }
+            verify = component "Verify gate" "Records verification evidence from Claude Code hooks; stamps verified: on commits; off/observe/enforce (ADR-0056)" "Go" {
+                properties {
+                    "paths" "internal/verify/**"
+                }
+            }
             mcp = component "MCP server" "Exposes context() as an MCP stdio tool" "Go" {
                 properties {
                     "paths" "internal/mcp/**"
@@ -428,6 +433,13 @@ workspace "nugit" "Git-native typed knowledge & unified PR view — self-model (
             editgate -> retrieval "resolves the component exactly as context() does"
             editgate -> usage "reads prior context() calls; records the edit"
             editgate -> claim "reminds an unclaimed branch of its objective, once per session"
+            cli -> verify "hook evidence + the commit-msg verification gate"
+            engine -> verify "summarizes the range's verified: lines"
+            verify -> config "reads verify.gate and the evidence names (governed, ADR-0055)"
+            verify -> gitutil "resolves the worktree, branch and default-branch config"
+            verify -> trailers "parses verified: lines"
+            verify -> usage "records evidence and verdicts; reads the session's records"
+            verify -> model_ "uses types"
             doctor -> agentcfg "detects the installed pre-edit and session-start hooks"
 
             // --- brownfield adoption: prose vs code, before any store exists (ADR-0036) ---

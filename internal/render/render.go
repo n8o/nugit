@@ -52,6 +52,12 @@ func Markdown(rep model.Report) string {
 	b.WriteString(consistencySection(rep.Findings))
 	b.WriteString("\n")
 
+	// How the commits say they were verified (ADR-0056). Open when some
+	// commit is unverified: that is what a reviewer reads it for.
+	if v := rep.Verification; v != nil {
+		b.WriteString(details("🔬 Verification", verificationSection(*v), len(v.Unverified) > 0))
+	}
+
 	expandArch := tier == model.TierArchitectural || !rep.C4.Empty()
 	expandCode := true // code delta always relevant
 	expandKnow := tier != model.TierTrivial && !rep.Knowledge.Empty()
@@ -654,4 +660,49 @@ func esc(s string) string {
 	s = strings.ReplaceAll(s, "<", "&lt;")
 	s = strings.ReplaceAll(s, ">", "&gt;")
 	return s
+}
+
+// verificationSection renders the range's `verified:` lines (ADR-0056): a
+// count by kind, then every commit that names none, with its reason.
+func verificationSection(v model.VerificationView) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "**%d of %d** commit(s) verified", v.Verified, v.Commits)
+	if len(v.ByKind) > 0 {
+		kinds := make([]string, 0, len(v.ByKind))
+		for k := range v.ByKind {
+			kinds = append(kinds, k)
+		}
+		sort.Strings(kinds)
+		parts := make([]string, 0, len(kinds))
+		for _, k := range kinds {
+			parts = append(parts, fmt.Sprintf("%s %d", k, v.ByKind[k]))
+		}
+		fmt.Fprintf(&b, " (%s)", strings.Join(parts, ", "))
+	}
+	fmt.Fprintf(&b, " · `verify.gate: %s`\n", v.Gate)
+	if len(v.Unverified) == 0 {
+		return b.String()
+	}
+	b.WriteString("\nUnverified:\n")
+	for _, u := range v.Unverified {
+		sha := u.SHA
+		if len(sha) > 8 {
+			sha = sha[:8]
+		}
+		why := "no `verified:` line"
+		switch {
+		case u.Released:
+			why = "released by the gate after two blocks"
+		case u.Note != "":
+			why = "`none` — " + u.Note
+		case u.Stamped:
+			why = "`none`, no reason given"
+		}
+		subj := []rune(u.Subject)
+		if len(subj) > 90 {
+			subj = append(subj[:89], '…')
+		}
+		fmt.Fprintf(&b, "- `%s` %s — %s\n", sha, string(subj), why)
+	}
+	return b.String()
 }

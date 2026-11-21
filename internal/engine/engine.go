@@ -21,6 +21,7 @@ import (
 	"github.com/n8o/nugit/internal/objective"
 	"github.com/n8o/nugit/internal/significance"
 	"github.com/n8o/nugit/internal/trailers"
+	"github.com/n8o/nugit/internal/verify"
 	"github.com/n8o/nugit/internal/wiring"
 )
 
@@ -173,6 +174,11 @@ func BuildReport(opt Options) (model.Report, error) {
 	}
 	other = append(other, objective.Findings(obj.view, obj.hasStore)...)
 	other = append(other, consistency.GovernedConfigFindings(gov)...)
+	// ADR-0056: how the range's commits say they were verified. The gate
+	// mode is governed, so a PR cannot hide its unverified commits by
+	// switching the gate off in its own config.
+	verification := verify.View(commits, cfg.Verify.Gate)
+	other = append(other, verify.Findings(verification)...)
 	findings := consistency.Sort(append(c4Findings, other...))
 
 	// PR-time distill (ADR-0018): surface what `nugit distill` would promote
@@ -194,6 +200,7 @@ func BuildReport(opt Options) (model.Report, error) {
 		Proposals:        proposals,
 		ProposalsDeduped: deduped,
 		Objective:        obj.view,
+		Verification:     verification,
 	}
 	// ADR-0026: an explicit flag weaker than the config-declared policy is
 	// honored (visibility, not coercion) but must be visible in every render.

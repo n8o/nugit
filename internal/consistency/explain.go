@@ -62,6 +62,13 @@ var explanations = map[string]string{
 		"The local hooks follow the same rule, reading governed keys from origin's default branch.\n" +
 		"Fix: nothing, if the policy change is intended. Review it as one. To try a stricter level before merging, run\n" +
 		"`nugit pr-render -fail-on <level>` locally.",
+	"unverified-commits": "Under `verify.gate: enforce` (ADR-0056), a commit in this PR names no kind of verification and\n" +
+		"gives no reason: it has no `verified:` line (made outside an agent session, or without the commit-msg hook),\n" +
+		"a bare `verified: none`, or one the gate released after blocking the session twice. The commit-msg hook stamps\n" +
+		"`verified: e2e|tests|review` from evidence the session recorded (`nugit hook evidence`), so an unstamped agent\n" +
+		"commit usually means the evidence hook is not installed (`nugit doctor` says).\n" +
+		"Fix: run the repo's verify skill or a review against the branch, or write why none was needed\n" +
+		"(`verified: none — <reason>`). Under observe the PR view lists these commits and nothing warns.",
 	"edge-vocabulary": "A `relates_to` entry this PR adds or modifies carries a verb nugit has no rule for, or names a\n" +
 		"front-matter field instead (ADR-0041). The reader is tolerant — ParseEdge splits on the first colon and returns\n" +
 		"whatever it found — so `ammends:ADR-7` parses, resolves in retrieval's one-hop pull, and amends nothing.\n" +
