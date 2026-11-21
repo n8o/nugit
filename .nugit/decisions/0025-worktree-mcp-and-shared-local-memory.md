@@ -31,7 +31,7 @@ topology breaks two of nugit's implicit assumptions:
    editing — resolves the DSL, knowledge, and branch against the PRIMARY
    checkout. Telemetry confirms the damage: the `branch` field in
    `usage.jsonl` read the same stale value
-   (`fix/moq-egress-activation-kills-readers`) across 10 consecutive events
+   (`fix/acme-egress-activation-kills-readers`) across 10 consecutive events
    over 10 days while the primary checkout sat on `master`. The join between
    per-branch usage and per-branch outcomes that ADR-0013 exists for is
    silently broken under worktree fan-out.

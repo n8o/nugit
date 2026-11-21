@@ -13,7 +13,7 @@ import (
 func TestNumberTakenOnTargetFailsTheSecondPR(t *testing.T) {
 	dir, base := seed(t, true)
 
-	write(t, dir, ".nugit/decisions/0051-fabrics-provider.md", adr("ADR-0051", "fabrics provider"))
+	write(t, dir, ".nugit/decisions/0051-acme-ledger.md", adr("ADR-0051", "acme ledger"))
 	target := commitAll(t, dir, "sibling: ADR-0051")
 
 	git(t, dir, "checkout", "-q", "-b", "mine", base)
@@ -31,7 +31,7 @@ func TestNumberTakenOnTargetFailsTheSecondPR(t *testing.T) {
 	if len(fs) != 1 {
 		t.Fatalf("want one duplicate-decision-number finding, got %d: %+v", len(fs), fs)
 	}
-	if fs[0].Severity != model.SevFail || !strings.Contains(fs[0].Detail, "0051-fabrics-provider.md") {
+	if fs[0].Severity != model.SevFail || !strings.Contains(fs[0].Detail, "0051-acme-ledger.md") {
 		t.Errorf("want a fail naming the sibling's file, got %+v", fs[0])
 	}
 

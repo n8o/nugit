@@ -32,7 +32,7 @@ func TestIDTakenOnTargetFailsTheSecondPR(t *testing.T) {
 	dir, base := seed(t, true)
 
 	// Sibling PR lands first, on the target branch.
-	write(t, dir, ".nugit/decisions/0051-fabrics-provider.md", adr("ADR-0051", "fabrics provider"))
+	write(t, dir, ".nugit/decisions/0051-acme-ledger.md", adr("ADR-0051", "acme ledger"))
 	target := commitAll(t, dir, "sibling: ADR-0051")
 
 	// Our branch was cut from `base`, before that landed, and mints 0051 too.
@@ -51,7 +51,7 @@ func TestIDTakenOnTargetFailsTheSecondPR(t *testing.T) {
 	if fs[0].Severity != model.SevFail {
 		t.Errorf("severity = %s, want fail", fs[0].Severity)
 	}
-	if !strings.Contains(fs[0].Detail, "0051-fabrics-provider.md") {
+	if !strings.Contains(fs[0].Detail, "0051-acme-ledger.md") {
 		t.Errorf("the finding must name the file already holding the id: %s", fs[0].Detail)
 	}
 	// The whole point: the collision is invisible from the merge base, so a
@@ -70,12 +70,12 @@ func TestIDTakenOnTargetFailsTheSecondPR(t *testing.T) {
 // fire — otherwise every edit to an existing ADR becomes a failure.
 func TestModifyingAnExistingRecordIsNotACollision(t *testing.T) {
 	dir, _ := seed(t, true)
-	write(t, dir, ".nugit/decisions/0051-fabrics-provider.md", adr("ADR-0051", "fabrics provider"))
+	write(t, dir, ".nugit/decisions/0051-acme-ledger.md", adr("ADR-0051", "acme ledger"))
 	target := commitAll(t, dir, "ADR-0051 lands")
 
 	git(t, dir, "checkout", "-q", "-b", "edit")
-	write(t, dir, ".nugit/decisions/0051-fabrics-provider.md",
-		adr("ADR-0051", "fabrics provider")+"\nAn added paragraph.\n")
+	write(t, dir, ".nugit/decisions/0051-acme-ledger.md",
+		adr("ADR-0051", "acme ledger")+"\nAn added paragraph.\n")
 	head := commitAll(t, dir, "amend the prose")
 
 	rep, err := BuildReport(Options{RepoDir: dir, Base: target, Head: head})

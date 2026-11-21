@@ -18,7 +18,7 @@ import (
 const maxCitedScanBytes = 1 << 20
 
 // idToken matches an identifier-shaped run: alphanumerics joined by single
-// hyphens. Every store key is one (ADR-0001, ADR-JBS-0091, SPEC-001,
+// hyphens. Every store key is one (ADR-0001, ADR-ACME-0091, SPEC-001,
 // LESSON-some-slug), and trailing punctuation ("ADR-0043's", "(ADR-0043).")
 // falls outside it.
 var idToken = regexp.MustCompile(`[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*`)

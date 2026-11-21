@@ -12,7 +12,7 @@ relates_to:
   - elaborates:ADR-0006
 provenance:
   commit: seed
-  citation: "24 records sat at status: proposed across two stores when this was built — 15 in this repo (oldest ADR-0037, 81 days) and 9 in the pilot (oldest ADR-JBS-0023, 100 days); `nugit ratify` had essentially never been run in either repo despite shipping with ADR-0016"
+  citation: "24 records sat at status: proposed across two stores when this was built — 15 in this repo (oldest ADR-0037, 81 days) and 9 in the pilot (oldest 100 days); `nugit ratify` had essentially never been run in either repo despite shipping with ADR-0016"
 confidence: high
 ---
 

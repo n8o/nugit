@@ -19,7 +19,7 @@ func TestIDFamily(t *testing.T) {
 		"acme-153-c":   "acme-153",  // step keyed only by a letter
 		"acme-rift-16": "acme-rift", // slug plan, two-digit step
 		"acme-118":     "acme-118",  // bd-native id: its own plan, NOT "acme"
-		"nugit-6":      "nugit-6",   // ditto — two segments is never a family
+		"demo-6":       "demo-6",    // ditto — two segments is never a family
 		"solo":         "solo",      // no separator at all
 		"":             "",          // absent id
 		"a-b-c-1":      "a-b-c",     // deeper slugs keep everything but the step

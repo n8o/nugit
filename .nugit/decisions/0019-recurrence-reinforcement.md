@@ -37,8 +37,8 @@ ignores it. Four concrete failures from the pilot store:
   (a52396f8, 31da37fd, a29e9543, 2907418f, c6d158bc) with no ADR and no
   lesson — pure fix-churn, zero durable knowledge.
 - PVC sizing repeated after four months (afb55805 → 757bffe0).
-- `media-function-format-defaults-leak` was only written after the SECOND
-  incident.
+- The lesson on a format default leaking into later configurations was only
+  written after the SECOND incident.
 
 Two distinct gaps: (1) nothing *notices* that the same component keeps being
 fixed while the store stays silent; (2) when knowledge exists but proved too
