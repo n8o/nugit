@@ -1,6 +1,6 @@
 ---
 schema_version: 1
-id: ADR-0055
+id: ADR-0063
 type: decision
 scope: global
 status: proposed
@@ -16,7 +16,7 @@ provenance:
 confidence: high
 ---
 
-# ADR-0055 — Task words count by how rare they are
+# ADR-0063 — Task words count by how rare they are
 
 ## Context
 
@@ -135,3 +135,7 @@ leaves it alone.
 - ADR-0043's "there is no score" no longer holds literally. What it rejected
   still holds: there is no threshold, no constant to tune, and no score in the
   output. The weight only refines its ordinal ranking.
+- This record merged as ADR-0055 beside "A change cannot set the rules that
+  judge it", which took the same number a minute later. It was renumbered to
+  ADR-0063 because it had fewer citations. Its commit still says ADR-0055,
+  and every ADR-0055 left in the tree means the other record.

@@ -27,7 +27,7 @@ func order(items []Item) []string {
 	return out
 }
 
-// The pilot's shape (ADR-0055): a watch lesson is found by its one rare word,
+// The pilot's shape (ADR-0063): a watch lesson is found by its one rare word,
 // and the task's common words match every other lesson too. With every match
 // counted alike, id order served the first eight and the watch lesson never
 // appeared. The rare word now puts it first.
@@ -81,7 +81,7 @@ func TestCommonWordsWeighNothing(t *testing.T) {
 	}
 }
 
-// The weight orders within a rank and never across one (ADR-0055): a
+// The weight orders within a rank and never across one (ADR-0063): a
 // component-scoped lesson matching only a common word still outranks a global
 // lesson matching the rarest word. Tiers are declared structure (ADR-0043); a
 // word count does not overrule them.
