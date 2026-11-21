@@ -1,6 +1,6 @@
 ---
 schema_version: 1
-id: ADR-0055
+id: ADR-0063
 type: decision
 scope: global
 status: proposed
@@ -16,7 +16,7 @@ provenance:
 confidence: high
 ---
 
-# ADR-0055 — Task words count by how rare they are
+# ADR-0063 — Task words count by how rare they are
 
 ## Context
 

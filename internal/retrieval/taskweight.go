@@ -8,7 +8,7 @@ import (
 )
 
 // taskWeights is the task's match against every loaded object: whether each
-// object contains a task word, and how specifically (ADR-0055). One pass over
+// object contains a task word, and how specifically (ADR-0063). One pass over
 // the store answers both, so the keyword gate, the miss bit in the rank and
 // the weight can never disagree about what "matches the task" means.
 //

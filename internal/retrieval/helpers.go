@@ -168,7 +168,7 @@ func glossaryTerms(o *model.KnowledgeObject, task, path string) []string {
 }
 
 // sortItems orders local before peer, then by relevance rank, then by how
-// specifically the item matches the task (ADR-0055), then nearer-scope
+// specifically the item matches the task (ADR-0063), then nearer-scope
 // (component-scoped or path-bound) before global, current status before
 // superseded, then by qualified ID — so truncation and the relevance cap drop
 // the least-relevant first.
@@ -191,7 +191,7 @@ func sortItems(items []Item) {
 			return items[i].rank < items[j].rank
 		}
 		// Within a rank, the item that matches the task's rarer words first
-		// (ADR-0055). Zero for every item when no task was given.
+		// (ADR-0063). Zero for every item when no task was given.
 		if items[i].weight != items[j].weight {
 			return items[i].weight > items[j].weight
 		}

@@ -80,7 +80,7 @@ type Item struct {
 	// items built outside Context, which then order exactly as before.
 	rank int
 	// weight is how specifically the item matches the task: the summed rarity
-	// of the task words it contains (ADR-0055; higher is more specific). It
+	// of the task words it contains (ADR-0063; higher is more specific). It
 	// orders items within one rank, and is never rendered: it is an order,
 	// not a score for anyone to threshold.
 	weight float64
@@ -265,7 +265,7 @@ func Context(opt Options) (Bundle, error) {
 	}
 
 	kw := keywords(opt.Task)
-	// How rare each task word is in this store (ADR-0055), computed once over
+	// How rare each task word is in this store (ADR-0063), computed once over
 	// every loaded object so a word's weight is the same in every section.
 	tw := weigh(objs, kw)
 
