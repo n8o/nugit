@@ -392,6 +392,8 @@ func OtherFindings(in Input) []model.Finding {
 	fs = append(fs, checkProseSupersession(in)...)
 	fs = append(fs, checkDuplicateID(in)...)
 	fs = append(fs, checkIDTakenOnTarget(in)...)
+	fs = append(fs, checkDuplicateNumber(in)...)
+	fs = append(fs, checkNumberTakenOnTarget(in)...)
 	fs = append(fs, checkEdgeVocabulary(in)...)
 	fs = append(fs, checkWiringDrift(in)...)
 	fs = append(fs, checkRecurrence(in)...)
