@@ -52,6 +52,34 @@ func IsSessionStartCommand(cmd string) bool {
 	return strings.Contains(cmd, "nugit") && strings.Contains(cmd, "hook session-start")
 }
 
+// EvidenceMatcher is the PostToolUse matcher of the verify-evidence hook
+// (ADR-0056): a skill (the repo's verify skill, a review skill), a review
+// agent, and a shell command (the test suite).
+const EvidenceMatcher = "Skill|Agent|Bash"
+
+// evidenceTimeout bounds the evidence hook in seconds. It reads its stdin
+// and appends one line; a timed-out PostToolUse hook only loses the record.
+const evidenceTimeout = 10
+
+// EvidenceCommand is the verify-evidence hook command for bin ("" = "nugit").
+func EvidenceCommand(bin string) string {
+	if bin == "" {
+		bin = "nugit"
+	}
+	return bin + " hook evidence"
+}
+
+// IsEvidenceCommand reports whether a hook command runs nugit's evidence hook.
+func IsEvidenceCommand(cmd string) bool {
+	return strings.Contains(cmd, "nugit") && strings.Contains(cmd, "hook evidence")
+}
+
+// EvidenceInstalled reports whether any entry of an event runs
+// `nugit hook evidence`.
+func EvidenceInstalled(entries []json.RawMessage) bool {
+	return installed(entries, IsEvidenceCommand)
+}
+
 // hookSpec is one hook nugit installs.
 type hookSpec struct {
 	event, matcher, command string
@@ -63,6 +91,11 @@ func specs(bin string) []hookSpec {
 	return []hookSpec{
 		{"PreToolUse", PreEditMatcher, PreEditCommand(bin), preEditTimeout, IsPreEditCommand},
 		{"SessionStart", SessionStartMatcher, SessionStartCommand(bin), sessionStartTimeout, IsSessionStartCommand},
+		// ADR-0056: verification evidence. PostToolUse sees a skill, agent or
+		// test run Claude made; UserPromptSubmit sees a typed /verify, which
+		// does not go through the Skill tool. It takes no matcher.
+		{"PostToolUse", EvidenceMatcher, EvidenceCommand(bin), evidenceTimeout, IsEvidenceCommand},
+		{"UserPromptSubmit", "", EvidenceCommand(bin), evidenceTimeout, IsEvidenceCommand},
 	}
 }
 

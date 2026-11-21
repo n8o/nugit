@@ -86,6 +86,27 @@ type Record struct {
 	// Cited counts the served items the queried file names by id (ADR-0053):
 	// how often the strongest relevance signal was the code's own pointer.
 	Cited int `json:"cited,omitempty"`
+	// Verification (ADR-0056). An evidence record names the kind of check that
+	// ran (e2e | tests | review) and what ran it (a skill, an agent type, a
+	// command). A commit record carries the gate's verdict on one commit and
+	// the kinds it was stamped with.
+	Evidence string   `json:"evidence,omitempty"`
+	Via      string   `json:"via,omitempty"`
+	Verdict  string   `json:"verdict,omitempty"`
+	Kinds    []string `json:"kinds,omitempty"`
+}
+
+// IsCall reports whether r is a context() call, as opposed to one of the
+// records other hooks append to the same log: an edit, a context boundary, a
+// verification, or a commit-gate verdict. Everything that counts calls or
+// looks for a covering call goes through it, so a new record kind cannot be
+// mistaken for context served.
+func (r Record) IsCall() bool {
+	switch r.Source {
+	case SourceHook, SourceBoundary, SourceEvidence, SourceCommit:
+		return false
+	}
+	return true
 }
 
 // FromBundle summarizes a served bundle into a Record.
@@ -197,6 +218,11 @@ const (
 	// It is neither a call nor an edit; it ends the cover of every call
 	// before it for that session.
 	SourceBoundary = "boundary"
+	// SourceEvidence is a verification that ran in a session: the repo's
+	// verify skill, a review, or the test suite (ADR-0056).
+	SourceEvidence = "evidence"
+	// SourceCommit is the commit gate's verdict on one commit (ADR-0056).
+	SourceCommit = "commit"
 )
 
 // EndsContext reports whether a Claude Code SessionStart source discards the
@@ -280,7 +306,56 @@ type Stats struct {
 	AvgTokens    int            `json:"avg_estimated_tokens"`
 	// Edits is what the pre-edit hook saw (ADR-0042); zero until it is installed.
 	Edits EditStats `json:"edits"`
+	// Verify is what the verify gate saw (ADR-0056); zero until it runs.
+	Verify VerifyStats `json:"verify"`
 }
+
+// VerifyStats is the commit gate's record: the evidence sessions produced and
+// what the gate said about each commit. WouldBlock is observe mode's point:
+// the commits enforce would have stopped, to review for false positives
+// before turning it on.
+type VerifyStats struct {
+	Evidence   map[string]int `json:"evidence,omitempty"` // by kind
+	Commits    int            `json:"commits"`
+	Verified   int            `json:"verified"`
+	Explained  int            `json:"explained"`
+	WouldBlock int            `json:"would_block"`
+	Blocked    int            `json:"blocked"`
+	Released   int            `json:"released"`
+}
+
+func (v *VerifyStats) add(r Record) {
+	if r.Source == SourceEvidence {
+		if v.Evidence == nil {
+			v.Evidence = map[string]int{}
+		}
+		v.Evidence[r.Evidence]++
+		return
+	}
+	switch r.Verdict {
+	case VerdictBlock:
+		v.Blocked++
+		return // a blocked commit was not made
+	case VerdictVerified:
+		v.Verified++
+	case VerdictExplained:
+		v.Explained++
+	case VerdictWouldBlock:
+		v.WouldBlock++
+	case VerdictRelease:
+		v.Released++
+	}
+	v.Commits++
+}
+
+// Commit-gate verdicts (ADR-0056), one per commit record.
+const (
+	VerdictVerified   = "verified"    // session evidence backs the commit
+	VerdictExplained  = "explained"   // the message says why it was not verified
+	VerdictWouldBlock = "would-block" // observe: enforce would have stopped it
+	VerdictBlock      = "block"       // enforce stopped it
+	VerdictRelease    = "release"     // enforce let it through after two blocks
+)
 
 // EditStats measures edit-time coverage: how many edits the pre-edit hook saw
 // and how many a context() call for that path preceded.
@@ -343,6 +418,10 @@ func Aggregate(records []Record, since time.Time) Stats {
 		}
 		if r.Source == SourceBoundary {
 			s.Edits.Resets++ // not a call: it must not count as context served
+			continue
+		}
+		if r.Source == SourceEvidence || r.Source == SourceCommit {
+			s.Verify.add(r)
 			continue
 		}
 		if r.Source == SourceHook {
@@ -419,6 +498,7 @@ func (s Stats) Markdown() string {
 			"`nugit context` / the MCP `context` tool (local only: `" + LogPath + "`; " +
 			"disable with `usage: {log: off}`)._\n")
 		s.writeEdits(&b)
+		s.writeVerify(&b)
 		return b.String()
 	}
 	fmt.Fprintf(&b, "- **calls**: %d (%s → %s)\n", s.Calls,
@@ -442,6 +522,7 @@ func (s Stats) Markdown() string {
 		}
 	}
 	s.writeEdits(&b)
+	s.writeVerify(&b)
 	return b.String()
 }
 
@@ -476,6 +557,26 @@ func (s Stats) writeEdits(b *strings.Builder) {
 		}
 		fmt.Fprintf(b, "  - %s: %d · %d · %d\n", ss.Session, ss.Calls, ss.Edits, ss.Covered)
 	}
+}
+
+// writeVerify renders the commit gate's record (ADR-0056). would-block is the
+// number to read before moving a repo from observe to enforce.
+func (s Stats) writeVerify(b *strings.Builder) {
+	v := s.Verify
+	if v.Commits == 0 && v.Blocked == 0 && len(v.Evidence) == 0 {
+		return
+	}
+	b.WriteString("\n### verification (verify gate)\n\n")
+	if len(v.Evidence) > 0 {
+		b.WriteString("- **evidence recorded**:")
+		for _, k := range sortedKeys(v.Evidence) {
+			fmt.Fprintf(b, " %s %d", k, v.Evidence[k])
+		}
+		b.WriteString("\n")
+	}
+	fmt.Fprintf(b, "- **agent commits**: %d — verified %d, explained %d, released %d\n", v.Commits, v.Verified, v.Explained, v.Released)
+	fmt.Fprintf(b, "- **would have been blocked** (observe): %d\n", v.WouldBlock)
+	fmt.Fprintf(b, "- **blocked** (enforce): %d\n", v.Blocked)
 }
 
 type kv struct {

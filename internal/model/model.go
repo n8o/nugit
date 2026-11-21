@@ -258,6 +258,11 @@ type Trailer struct {
 	// the task, not a lesson, so it is left out of Has: a commit that only
 	// names its objective is not a capture block.
 	Objective string `json:",omitempty"`
+	// Verified is how the commit was verified, as its `verified:` line says
+	// (ADR-0056): kinds such as e2e, tests, review, or none, and an optional
+	// note. Like Objective it is not capture, so it is left out of Has.
+	// Interpret it with trailers.ParseVerified.
+	Verified string `json:",omitempty"`
 	// Extra captures any other key: value trailer lines verbatim.
 	Extra map[string]string
 }
@@ -286,6 +291,10 @@ type Commit struct {
 	Subject string
 	Body    string
 	Trailer Trailer
+	// Merge is true for a merge commit. It carries no work of its own (an
+	// "Update branch" merge has no message a hook could stamp), so per-commit
+	// checks such as ADR-0056's skip it. Kept out of the JSON.
+	Merge bool `json:"-"`
 }
 
 // Component is one C4 component parsed from workspace.dsl.
@@ -760,6 +769,10 @@ type Report struct {
 	// Objective is what the range says it is for (ADR-0048); nil when no
 	// commit names an objective, which keeps such a report's JSON unchanged.
 	Objective *ObjectiveView `json:",omitempty"`
+	// Verification is how the range's commits say they were verified
+	// (ADR-0056); nil when verify.gate is off, or observe with no commit
+	// stamped, which keeps such a report unchanged.
+	Verification *VerificationView `json:",omitempty"`
 	// FailOn is the governing pr_render.fail_on (ADR-0055): the target's value,
 	// not the PR's. The CLI applies it when no -fail-on is passed. Kept out of
 	// the structured JSON, which reports findings, not exit policy.
@@ -809,4 +822,29 @@ type ObjectiveRef struct {
 	Title string `json:",omitempty"`
 	// New is true when this PR adds or changes the object.
 	New bool `json:",omitempty"`
+}
+
+// ---- Verification (ADR-0056) ----
+
+// VerificationView summarizes the range's `verified:` lines.
+type VerificationView struct {
+	Gate     string         // governing verify.gate
+	Commits  int            // commits in the range
+	Verified int            // commits naming a kind other than none
+	ByKind   map[string]int `json:",omitempty"`
+	// Unverified lists every commit that names no kind of verification, in
+	// range order.
+	Unverified []UnverifiedCommit `json:",omitempty"`
+}
+
+// UnverifiedCommit is one commit with no verification. Note is the reason
+// its line gives ("" = none given). Stamped is false when the commit carries
+// no `verified:` line at all; Released is true when the gate let it through
+// after blocking twice.
+type UnverifiedCommit struct {
+	SHA      string
+	Subject  string
+	Note     string `json:",omitempty"`
+	Stamped  bool
+	Released bool `json:",omitempty"`
 }

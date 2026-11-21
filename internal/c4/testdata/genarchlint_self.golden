@@ -101,6 +101,8 @@ components:
     in: "internal/tsdeps/**"
   "usage":
     in: "internal/usage/**"
+  "verify":
+    in: "internal/verify/**"
   "wiring":
     in: "internal/wiring/**"
 
@@ -172,6 +174,7 @@ deps:
       - "skills"
       - "trailers"
       - "usage"
+      - "verify"
   "cmake":
     mayDependOn: []
   "config":
@@ -244,6 +247,7 @@ deps:
       - "objective"
       - "significance"
       - "trailers"
+      - "verify"
       - "wiring"
   "eval":
     mayDependOn:
@@ -388,6 +392,13 @@ deps:
       - "config"
       - "gitutil"
       - "retrieval"
+  "verify":
+    mayDependOn:
+      - "config"
+      - "gitutil"
+      - "model_"
+      - "trailers"
+      - "usage"
   "wiring":
     mayDependOn:
       - "config"
