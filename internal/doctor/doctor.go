@@ -114,6 +114,15 @@ func Run(repoDir string) Report {
 	dups := knowledge.DuplicateIDs(objs)
 	add("knowledge object ids are unique", len(dups) == 0, duplicateIDDetail(dups))
 
+	// Advisory, unlike the id check above: decisions that share a number under
+	// different ids lose nothing, since every edge names an id and the ids
+	// still resolve. What breaks is finding a record by number and minting the
+	// next one. pr-render fails such a collision when a PR brings it in; here
+	// the whole store is reported, including old ones.
+	nums := knowledge.DuplicateNumbers(objs)
+	r.Checks = append(r.Checks, Check{Name: "decision numbers are unique",
+		OK: len(nums) == 0, Advisory: true, Detail: duplicateNumberDetail(nums)})
+
 	// Lifecycle integrity (ADR-0022), both advisory: a supersession declared
 	// only in prose leaves the target serving as live, and a drifting
 	// provenance block silently loses data.
@@ -218,6 +227,19 @@ func duplicateIDDetail(dups []knowledge.DuplicateID) string {
 			d.QualifiedID(), len(d.Paths), strings.Join(d.Paths, ", ")))
 	}
 	return fmt.Sprintf("%d duplicated id(s): %s — one object shadows the other in retrieval, in `nugit ratify`, and in every `relates_to`/`supersedes`/`amends` edge naming it; give each record its own id",
+		len(dups), strings.Join(items, "; "))
+}
+
+// duplicateNumberDetail words the shared-decision-number check.
+func duplicateNumberDetail(dups []knowledge.DuplicateNumber) string {
+	if len(dups) == 0 {
+		return "every decision number is carried under one id"
+	}
+	items := make([]string, 0, len(dups))
+	for _, d := range dups {
+		items = append(items, d.Describe())
+	}
+	return fmt.Sprintf("%d shared decision number(s): %s; give each record one number, in its file name and its `id:`",
 		len(dups), strings.Join(items, "; "))
 }
 

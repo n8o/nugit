@@ -37,6 +37,13 @@ var explanations = map[string]string{
 		"store object, but carries no front-matter `supersedes:`/`amends:` edge. Effective status is derived from edges\n" +
 		"only (ADR-0003), so retrieval keeps serving both the new object and the contradicted one as live (ADR-0022).\n" +
 		"Fix: add `supersedes: <id>` (whole-object) or `relates_to: [amends:<id>]` (partial, ADR-0015) to the superseding object.",
+	"duplicate-decision-number": "Two decision records share a file number under different ids. Within the PR: a decision it adds\n" +
+		"or modifies shares the number at the reviewed ref, which is a renumber done halfway (the id changed and the\n" +
+		"file name did not, or the reverse). Against the target: this PR ADDS a decision under a number the branch it\n" +
+		"merges into already holds, read at that branch's tip as for duplicate-knowledge-id (ADR-0041). When the ids\n" +
+		"match too, duplicate-knowledge-id reports it instead. Numbers are compared within one directory and one id\n" +
+		"namespace, so ADR-AUTH-0001 and ADR-PAY-0001 side by side are not a collision.\n" +
+		"Fix: give the record a number that is free on the target, in its file name, its `id:` and every citation of it.",
 	"duplicate-knowledge-id": "An id collides, either way it can (ADR-0039, ADR-0041). Within the PR: two objects carry\n" +
 		"the same `id:` at the reviewed ref. Against the target: this PR ADDS an id the branch it merges into already\n" +
 		"uses — a collision neither branch's own history shows, because a sequential id minted from a stale base looks\n" +
