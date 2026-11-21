@@ -124,6 +124,9 @@ func Run(repoDir string) Report {
 	// ADR-0041: the relates_to vocabulary, and how much of it is load-bearing.
 	r.Checks = append(r.Checks, edgeVocabularyCheck(objs))
 
+	// ADR-0057: checklist items that can never fire, or have nothing to ask.
+	r.Checks = append(r.Checks, checklistCheck(objs))
+
 	prov := provenanceIssues(repoDir, objs)
 	r.Checks = append(r.Checks, Check{Name: "provenance is sane",
 		OK: len(prov) == 0, Advisory: true, Detail: provDetail(prov)})
@@ -908,4 +911,33 @@ func orUnset(v string) string {
 		return "(unset)"
 	}
 	return v
+}
+
+// checklistCheck reports the store's checklist items and any that cannot fire
+// as written (ADR-0057). Advisory: an item that never fires costs nothing but
+// the promise it makes.
+func checklistCheck(objs []model.KnowledgeObject) Check {
+	n := 0
+	for _, o := range objs {
+		if o.DiffTrigger != nil {
+			n++
+		}
+	}
+	c := Check{Name: "checklist items can fire", OK: true, Advisory: true,
+		Detail: fmt.Sprintf("%d checklist item(s)", n)}
+	bad := knowledge.InvalidTriggers(objs)
+	if len(bad) == 0 {
+		return c
+	}
+	c.OK = false
+	parts := make([]string, 0, len(bad))
+	for _, b := range bad {
+		id := b.ID
+		if id == "" {
+			id = b.Path
+		}
+		parts = append(parts, id+": "+b.Problem)
+	}
+	c.Detail = fmt.Sprintf("%d checklist item(s); ", n) + strings.Join(parts, "; ")
+	return c
 }

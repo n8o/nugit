@@ -204,6 +204,11 @@ workspace "nugit" "Git-native typed knowledge & unified PR view — self-model (
                     "paths" "internal/editgate/**"
                 }
             }
+            checklist = component "Checklist" "Matches checklist items' diff triggers against a range's diff (ADR-0057)" "Go" {
+                properties {
+                    "paths" "internal/checklist/**"
+                }
+            }
             verify = component "Verify gate" "Records verification evidence from Claude Code hooks; stamps verified: on commits; off/observe/enforce (ADR-0056)" "Go" {
                 properties {
                     "paths" "internal/verify/**"
@@ -440,6 +445,9 @@ workspace "nugit" "Git-native typed knowledge & unified PR view — self-model (
             verify -> trailers "parses verified: lines"
             verify -> usage "records evidence and verdicts; reads the session's records"
             verify -> model_ "uses types"
+            engine -> checklist "matches the range's diff against checklist items"
+            checklist -> knowledge "trigger path globs, peer admission"
+            checklist -> model_ "uses types"
             doctor -> agentcfg "detects the installed pre-edit and session-start hooks"
 
             // --- brownfield adoption: prose vs code, before any store exists (ADR-0036) ---

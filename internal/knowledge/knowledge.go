@@ -7,6 +7,7 @@
 package knowledge
 
 import (
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -451,6 +452,72 @@ func AppliesTo(o *model.KnowledgeObject, path string) bool {
 		}
 	}
 	return false
+}
+
+// TriggerCovers reports whether path matches a checklist item's
+// diff_trigger.paths (ADR-0057), in the applies_to_paths dialect. It says
+// nothing about line patterns: that a file is in play is enough for context()
+// to serve the item, and the diff decides at PR time.
+func TriggerCovers(o *model.KnowledgeObject, path string) bool {
+	if o.DiffTrigger == nil {
+		return false
+	}
+	path = strings.TrimPrefix(path, "./")
+	for _, g := range o.DiffTrigger.Paths {
+		if !doublestar.ValidatePattern(g) {
+			continue
+		}
+		if ok, _ := doublestar.Match(g, path); ok {
+			return true
+		}
+	}
+	return false
+}
+
+// InvalidTrigger names a checklist item that can never fire as written: a
+// trigger with no paths, an invalid path glob, or a line pattern that is not
+// a valid RE2 expression; or an item with no check: question to ask.
+type InvalidTrigger struct {
+	ID, Path string
+	Problem  string
+}
+
+// InvalidTriggers returns every checklist-item defect across objs, sorted.
+func InvalidTriggers(objs []model.KnowledgeObject) []InvalidTrigger {
+	var out []InvalidTrigger
+	for _, o := range objs {
+		t := o.DiffTrigger
+		if t == nil || o.Foreign() {
+			continue
+		}
+		add := func(p string) { out = append(out, InvalidTrigger{ID: o.ID, Path: o.Path, Problem: p}) }
+		if len(t.Paths) == 0 {
+			add("diff_trigger has no paths, so it matches nothing")
+		}
+		for _, g := range t.Paths {
+			if !doublestar.ValidatePattern(g) {
+				add(fmt.Sprintf("diff_trigger path %q is not a valid glob", g))
+			}
+		}
+		for field, pat := range map[string]string{"added": t.Added, "removed": t.Removed} {
+			if strings.TrimSpace(pat) == "" {
+				continue
+			}
+			if _, err := regexp.Compile(pat); err != nil {
+				add(fmt.Sprintf("diff_trigger.%s %q is not a valid RE2 pattern", field, pat))
+			}
+		}
+		if strings.TrimSpace(o.Check) == "" {
+			add("checklist item has no check: question, so a match tells the reviewer nothing to ask")
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Path != out[j].Path {
+			return out[i].Path < out[j].Path
+		}
+		return out[i].Problem < out[j].Problem
+	})
+	return out
 }
 
 // InvalidAppliesGlob names a syntactically invalid applies_to_paths glob on a
