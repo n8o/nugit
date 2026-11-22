@@ -222,6 +222,12 @@ go build -o nugit ./cmd/nugit
 ./nugit pr-render -C . -base main -head HEAD                # markdown (default)
 ./nugit pr-render -base main -head HEAD -format check-run   # GitHub Checks JSON
 ./nugit pr-render -base main -head HEAD -format json        # structured deltas for agents
+./nugit pr-render -base main -head HEAD -overlap            # …plus the open work beside this PR (never a finding)
+
+# open work beside this branch (ADR-0065): read-only, asks gh, fetches nothing
+./nugit overlap                    # open PRs + branches pushed in 14 days that share a file, a
+                                   # component or a store key with this branch; which would conflict
+./nugit overlap -pairs             # every two pieces of open work, for whoever merges them
 
 # agent memory
 ./nugit context -path internal/foo/bar.go -task "add caching"   # scoped knowledge bundle

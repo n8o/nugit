@@ -126,6 +126,14 @@ push or open a PR. CI and review are shared and slow. A failure you could
 have caught locally spends other people's time and gets slower feedback to
 you.
 
+Before you take the next number for a decision, and again before you open
+the PR, run `nugit overlap` (after a `git fetch`). It lists the open PRs and
+recently pushed branches that add the same record id or decision number,
+change the same files (and which would conflict), or change the same
+components. Two branches that both mint the next number each pass every
+check, and collide once both merge. Renumber yours, or stack on theirs, or
+tell the user, before CI makes that choice for you.
+
 ## Capture the "why" — so the store fills itself
 
 - **Cross-reference with a verb that means something.** `relates_to:` accepts
@@ -239,6 +247,7 @@ the issue in the bead's id or body.
 | Save a working note | `nugit remember -text "..."` |
 | Promote trailers → ADRs | `nugit distill -base <base> -head HEAD` |
 | The unified PR view | `nugit pr-render -base <base> -head HEAD` |
+| Who else is changing this? | `nugit overlap` (add `-pairs` for every two open PRs) |
 | How commits were verified; gate stats | `nugit stats` (verify section) |
 | Rules worth pruning | `nugit stats -rules` |
 | Lint / canonicalize the plan store | `nugit plan check` · `nugit plan normalize -write` |

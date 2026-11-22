@@ -5,10 +5,12 @@ package gitutil
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -1007,4 +1009,66 @@ func (r Repo) logTimed(args ...string) ([]TimedCommit, error) {
 		}
 	}
 	return cs, nil
+}
+
+// IsAncestor reports whether commit a is an ancestor of (or equal to) b.
+// False on any error, including an unknown ref.
+func (r Repo) IsAncestor(a, b string) bool {
+	_, err := r.git("merge-base", "--is-ancestor", a, b)
+	return err == nil
+}
+
+// RemoteBranches lists the branches under refs/remotes/<remote>/ as of the
+// last fetch, with their tips, skipping the remote's HEAD symref. Name is the
+// short ref, e.g. "origin/feat/x". Nothing is fetched.
+func (r Repo) RemoteBranches(remote string) ([]Branch, error) {
+	out, err := r.git("for-each-ref", "--format=%(refname:short)%09%(objectname)%09%(committerdate:unix)%09%(symref)",
+		"refs/remotes/"+remote+"/")
+	if err != nil {
+		return nil, err
+	}
+	var bs []Branch
+	// Split by line without trimming the output: the last field (the
+	// symref) is empty on a branch, and trimming would drop the last
+	// branch's tab with it.
+	for _, line := range strings.Split(out, "\n") {
+		f := strings.Split(line, "\t")
+		if len(f) != 4 || f[3] != "" {
+			continue
+		}
+		sec, _ := strconv.ParseInt(f[2], 10, 64)
+		bs = append(bs, Branch{Name: f[0], Tip: f[1], Time: time.Unix(sec, 0).UTC()})
+	}
+	return bs, nil
+}
+
+// MergeConflicts simulates merging b into a without touching the working tree
+// or any ref (`merge-tree --write-tree`, git 2.38+) and returns the files that
+// would conflict, sorted. ok is false when git cannot run the simulation (an
+// old git, unrelated histories), so a caller says nothing rather than "clean".
+func (r Repo) MergeConflicts(a, b string) (files []string, ok bool) {
+	cmd := exec.Command("git", "-C", r.Dir, "-c", "core.quotepath=false",
+		"merge-tree", "--write-tree", "--name-only", "--no-messages", a, b)
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	err := cmd.Run()
+	if err != nil {
+		var ee *exec.ExitError
+		if !errors.As(err, &ee) || ee.ExitCode() != 1 {
+			return nil, false
+		}
+	}
+	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	if len(lines) == 0 || lines[0] == "" {
+		return nil, false
+	}
+	seen := map[string]bool{}
+	for _, l := range lines[1:] {
+		if l != "" && !seen[l] {
+			seen[l] = true
+			files = append(files, l)
+		}
+	}
+	sort.Strings(files)
+	return files, true
 }

@@ -75,6 +75,8 @@ components:
     in: "internal/obsidian/**"
   "orphans":
     in: "internal/orphans/**"
+  "overlap":
+    in: "internal/overlap/**"
   "promote":
     in: "internal/promote/**"
   "pyimports":
@@ -173,6 +175,7 @@ deps:
       - "nudge"
       - "obsidian"
       - "orphans"
+      - "overlap"
       - "promote"
       - "ratify"
       - "reinforce"
@@ -342,6 +345,12 @@ deps:
       - "gitutil"
       - "localmem"
       - "trailers"
+  "overlap":
+    mayDependOn:
+      - "gitutil"
+      - "knowledge"
+      - "mapping"
+      - "model_"
   "promote":
     mayDependOn:
       - "config"

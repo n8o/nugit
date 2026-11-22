@@ -184,6 +184,11 @@ workspace "nugit" "Git-native typed knowledge & unified PR view — self-model (
                     "paths" "internal/orphans/**"
                 }
             }
+            overlap = component "Open-work overlap" "Finds the open PRs and pushed branches that change the same files, components or store keys as a change, and which would conflict (ADR-0065)" "Go" {
+                properties {
+                    "paths" "internal/overlap/**"
+                }
+            }
             eval = component "Eval" "Labeled corpus measuring heuristic accuracy" "Go" {
                 properties {
                     "paths" "internal/eval/**"
@@ -500,6 +505,11 @@ workspace "nugit" "Git-native typed knowledge & unified PR view — self-model (
             orphans -> gitutil "branches, worktrees, squash-merge detection"
             orphans -> localmem "reads unrecorded working notes"
             orphans -> trailers "reads objective: from commits"
+            cli -> overlap "overlap command; pr-render -overlap"
+            overlap -> model_ "uses types"
+            overlap -> gitutil "diffs, ancestry, remote branches, merge simulation"
+            overlap -> mapping "maps changed files to components"
+            overlap -> knowledge "parses the records a change adds; decision number keys"
             claim -> beads "looks up the claimed bead"
             claim -> gitutil "current branch, common root, default branch"
             claim -> trailers "reads objective: from the branch's commits"

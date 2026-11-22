@@ -23,6 +23,9 @@ inputs:
   github-token:
     description: "Token for the sticky PR comment."
     default: "${{ github.token }}"
+  overlap:
+    description: "Add the open PRs and recently pushed branches that overlap this PR (ADR-0065; never a finding). Needs the other branches fetched (actions/checkout fetch-depth: 0) and the token above for gh."
+    default: "false"
 
 runs:
   using: "composite"
@@ -53,15 +56,19 @@ runs:
         INPUT_WORKDIR: ${{ inputs.working-directory }}
         INPUT_FAILON: ${{ inputs.fail-on }}
         INPUT_COMMENT: ${{ inputs.comment }}
+        INPUT_OVERLAP: ${{ inputs.overlap }}
       run: |
         set -o pipefail
         out="$RUNNER_TEMP/nugit.md"
+        overlap=()
+        if [ "$INPUT_OVERLAP" = "true" ]; then overlap=(-overlap); fi
         set +e
         "$RUNNER_TEMP/nugit" pr-render \
           -C "$INPUT_WORKDIR" \
           -base "$INPUT_BASE" \
           -head "$INPUT_HEAD" \
           -fail-on "$INPUT_FAILON" \
+          "${overlap[@]}" \
           -format markdown | tee "$out"
         code=${PIPESTATUS[0]}
         set -e
