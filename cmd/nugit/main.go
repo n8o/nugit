@@ -2125,7 +2125,7 @@ func cmdOverlap(args []string) int {
 	repo := gitutil.Repo{Dir: *dir}
 	g, err := overlap.Gather(*dir, overlap.GatherOptions{
 		Base: *base, Remote: *remote, Recent: time.Duration(*recent) * 24 * time.Hour,
-		NoGitHub: *noGitHub, Exclude: []string{repo.CurrentBranch()},
+		NoGitHub: *noGitHub, Exclude: []string{checkedOutHead(repo, *head)},
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "nugit overlap: %v\n", err)
@@ -2178,7 +2178,7 @@ func prOverlap(dir, base, head string, m model.Model) (model.OverlapView, error)
 	}
 	g, err := overlap.Gather(dir, overlap.GatherOptions{
 		Base: target, Recent: overlap.DefaultRecent,
-		Exclude: []string{repo.CurrentBranch(), os.Getenv("GITHUB_HEAD_REF")},
+		Exclude: []string{checkedOutHead(repo, head), os.Getenv("GITHUB_HEAD_REF")},
 	})
 	if err != nil {
 		return model.OverlapView{}, err
@@ -2191,6 +2191,17 @@ func prOverlap(dir, base, head string, m model.Model) (model.OverlapView, error)
 	}
 	v.Source, v.Unread = g.Source, g.Unread
 	return v, nil
+}
+
+// checkedOutHead is the checked-out branch when head is that branch's
+// commit, so the change under review is not listed as its own open work;
+// "" when head names something else, which leaves the checked-out branch
+// as open work like any other.
+func checkedOutHead(repo gitutil.Repo, head string) string {
+	if b := repo.CurrentBranch(); b != "" && repo.Resolve(head) == repo.Resolve("HEAD") {
+		return b
+	}
+	return ""
 }
 
 // modelAtRef parses the C4 model committed at ref, from the DSL path that
