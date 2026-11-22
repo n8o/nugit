@@ -34,6 +34,7 @@ graph LR
   objective["Objective"]
   obsidian["Obsidian vault"]
   orphans["Orphan report"]
+  overlap["Open-work overlap"]
   promote["Promoter"]
   pyimports["Python analyzer"]
   ratify["Ratifier"]
@@ -96,6 +97,7 @@ graph LR
   cli --> nudge
   cli --> obsidian
   cli --> orphans
+  cli --> overlap
   cli --> promote
   cli --> ratify
   cli --> reinforce
@@ -211,6 +213,10 @@ graph LR
   orphans --> gitutil
   orphans --> localmem
   orphans --> trailers
+  overlap --> gitutil
+  overlap --> knowledge
+  overlap --> mapping
+  overlap --> model_
   promote --> config
   promote --> distill
   promote --> gitutil

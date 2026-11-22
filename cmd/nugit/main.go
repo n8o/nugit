@@ -44,6 +44,7 @@ import (
 	"github.com/n8o/nugit/internal/nudge"
 	"github.com/n8o/nugit/internal/obsidian"
 	"github.com/n8o/nugit/internal/orphans"
+	"github.com/n8o/nugit/internal/overlap"
 	"github.com/n8o/nugit/internal/promote"
 	"github.com/n8o/nugit/internal/ratify"
 	"github.com/n8o/nugit/internal/reinforce"
@@ -76,6 +77,8 @@ usage:
   nugit remember [flags]      jot ephemeral working memory (.nugit-local/, gitignored)
   nugit objective [claim <id>] show, or claim, the objective this branch's session works toward (ADR-0048)
   nugit orphans [flags]       report work started toward an objective and then left (ADR-0048, read-only)
+  nugit overlap [flags]       open PRs and pushed branches that change this branch's files, components
+                              or store keys, and which would conflict (ADR-0065, read-only)
   nugit distill [flags]       promote commit-trailer decisions/lessons to durable knowledge (as proposed)
   nugit ratify [flags] <id>…  promote proposed knowledge objects to the ratified corpus (ADR-0016)
   nugit reinforce [flags] <id> append-only reinforcement of a recurring lesson/decision (ADR-0019)
@@ -187,11 +190,22 @@ plan flags:
              -plans p,…        with -merge: export these plans too (default: only the branch
                                objective's plan; "all" exports every plan)
 
+overlap flags:
+  -C dir         repo directory (default ".")
+  -base ref      target branch (default: origin's HEAD, e.g. origin/main)
+  -head ref      the change to compare (default "HEAD"; on the target itself, only -pairs runs)
+  -recent n      count a pushed branch with no open PR when pushed within n days (default 14; 0: PRs only)
+  -remote name   the remote whose fetched branches are read (default "origin")
+  -no-github     do not ask gh for open pull requests (branches only)
+  -pairs         also compare every two pieces of open work with each other
+  -format f      markdown (default) | json
+
 pr-render flags:
   -C dir         repo directory (default ".")
   -base ref      base ref / target branch (default "HEAD~1")
   -head ref      head ref (default "HEAD")
   -format f      one of: markdown (default), check-run, json
+  -overlap       add the open work that overlaps this PR (as nugit overlap reads it; never a finding)
   -fail-on sev   exit non-zero when findings reach this severity: fail|warn|none (default "fail")
 `
 
@@ -223,6 +237,8 @@ func main() {
 		os.Exit(cmdObjective(os.Args[2:]))
 	case "orphans":
 		os.Exit(cmdOrphans(os.Args[2:]))
+	case "overlap":
+		os.Exit(cmdOverlap(os.Args[2:]))
 	case "hook":
 		os.Exit(cmdHook(os.Args[2:]))
 	case "distill":
@@ -1610,6 +1626,7 @@ func cmdPRRender(args []string) int {
 	head := fs.String("head", "HEAD", "head ref")
 	format := fs.String("format", "markdown", "output format: markdown|check-run|json")
 	failOn := fs.String("fail-on", "", "exit non-zero at severity: fail|warn|none (default from config.yml, else fail)")
+	withOverlap := fs.Bool("overlap", false, "add the open work that overlaps this PR (ADR-0065; never a finding)")
 	_ = fs.Parse(args)
 
 	// ADR-0026: remember whether -fail-on was explicit — an explicit flag weaker
@@ -1625,6 +1642,18 @@ func cmdPRRender(args []string) int {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "nugit: %v\n", err)
 		return 1
+	}
+
+	// The open work beside this PR (ADR-0065) is read after the report is
+	// built and only added to it: it never reaches a finding, the
+	// significance class or the exit code, and a failure to read it is a
+	// warning on stderr, never a failed render.
+	if *withOverlap {
+		if v, err := prOverlap(*dir, *base, *head, rep.HeadModel); err != nil {
+			fmt.Fprintf(os.Stderr, "nugit pr-render: open work not read: %v\n", err)
+		} else {
+			rep.Overlap = &v
+		}
 	}
 
 	// An unset -fail-on takes the GOVERNING pr_render.fail_on (ADR-0055): the
@@ -2073,4 +2102,122 @@ func openBrowser(url string) {
 	if path, err := exec.LookPath(cmd); err == nil {
 		_ = exec.Command(path, append(args, url)...).Start()
 	}
+}
+
+// cmdOverlap lists the open work that touches what this branch touches
+// (ADR-0065): open pull requests, and recently pushed branches with none,
+// that change the same files, C4 components or store keys. Read-only.
+func cmdOverlap(args []string) int {
+	fs := flag.NewFlagSet("overlap", flag.ExitOnError)
+	dir := fs.String("C", ".", "repo directory")
+	base := fs.String("base", "", "target branch (default: origin's HEAD, e.g. origin/main)")
+	head := fs.String("head", "HEAD", "the change to compare")
+	recent := fs.Int("recent", 14, "count a pushed branch with no open PR when pushed within this many days (0: PRs only)")
+	remote := fs.String("remote", "origin", "the remote whose fetched branches are read")
+	noGitHub := fs.Bool("no-github", false, "do not ask gh for open pull requests")
+	pairs := fs.Bool("pairs", false, "also compare every two pieces of open work with each other")
+	format := fs.String("format", "markdown", "markdown | json")
+	_ = fs.Parse(args)
+	if *format != "markdown" && *format != "json" {
+		fmt.Fprintf(os.Stderr, "nugit overlap: unknown -format %q (want markdown or json)\n", *format)
+		return 2
+	}
+	repo := gitutil.Repo{Dir: *dir}
+	g, err := overlap.Gather(*dir, overlap.GatherOptions{
+		Base: *base, Remote: *remote, Recent: time.Duration(*recent) * 24 * time.Hour,
+		NoGitHub: *noGitHub, Exclude: []string{checkedOutHead(repo, *head)},
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "nugit overlap: %v\n", err)
+		return 1
+	}
+	h := *head
+	if repo.Resolve(h) == "" {
+		fmt.Fprintf(os.Stderr, "nugit overlap: cannot resolve -head %q\n", h)
+		return 1
+	}
+	if repo.Resolve(h) == repo.Resolve(g.Base) {
+		h = "" // on the target itself there is no change of ours to compare
+		if !*pairs {
+			fmt.Fprintf(os.Stderr, "nugit overlap: %s is the target branch itself; pass -pairs to compare the open work with each other\n", *head)
+			return 1
+		}
+	}
+	m := modelAtRef(repo, *head)
+	v, err := overlap.Compute(overlap.Input{
+		Repo: repo, Prefix: repo.Prefix(), Base: g.Base, Head: h, Model: m, Others: g.Works, Pairs: *pairs,
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "nugit overlap: %v\n", err)
+		return 1
+	}
+	v.Source, v.Unread = g.Source, g.Unread
+	if *format == "json" {
+		b, err := json.MarshalIndent(v, "", "  ")
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "nugit overlap: %v\n", err)
+			return 1
+		}
+		fmt.Println(string(b))
+		return 0
+	}
+	fmt.Print(render.OverlapMarkdown(v))
+	return 0
+}
+
+// prOverlap reads the open work beside a pr-render range. In a pull-request
+// workflow the target is GITHUB_BASE_REF and the PR's own branch is
+// GITHUB_HEAD_REF; elsewhere -base is the target and the checked-out branch
+// is the change. -base may be a commit (a caller that passes the merge base),
+// so the target branch named by the environment wins when it resolves.
+func prOverlap(dir, base, head string, m model.Model) (model.OverlapView, error) {
+	repo := gitutil.Repo{Dir: dir}
+	target := base
+	if ref := os.Getenv("GITHUB_BASE_REF"); ref != "" && repo.Resolve("origin/"+ref) != "" {
+		target = "origin/" + ref
+	}
+	g, err := overlap.Gather(dir, overlap.GatherOptions{
+		Base: target, Recent: overlap.DefaultRecent,
+		Exclude: []string{checkedOutHead(repo, head), os.Getenv("GITHUB_HEAD_REF")},
+	})
+	if err != nil {
+		return model.OverlapView{}, err
+	}
+	v, err := overlap.Compute(overlap.Input{
+		Repo: repo, Prefix: repo.Prefix(), Base: g.Base, Head: head, Model: m, Others: g.Works,
+	})
+	if err != nil {
+		return model.OverlapView{}, err
+	}
+	v.Source, v.Unread = g.Source, g.Unread
+	return v, nil
+}
+
+// checkedOutHead is the checked-out branch when head is that branch's
+// commit, so the change under review is not listed as its own open work;
+// "" when head names something else, which leaves the checked-out branch
+// as open work like any other.
+func checkedOutHead(repo gitutil.Repo, head string) string {
+	if b := repo.CurrentBranch(); b != "" && repo.Resolve(head) == repo.Resolve("HEAD") {
+		return b
+	}
+	return ""
+}
+
+// modelAtRef parses the C4 model committed at ref, from the DSL path that
+// ref's config names. A missing or unreadable model is an empty one: files
+// then share no components, and the overlap is files and store keys only.
+func modelAtRef(repo gitutil.Repo, ref string) model.Model {
+	prefix := repo.Prefix()
+	dsl := ".nugit/architecture/workspace.dsl"
+	if src, err := repo.ShowFile(ref, prefix+".nugit/config.yml"); err == nil && src != "" {
+		if cfg, err := config.LoadBytes([]byte(src)); err == nil && cfg.C4.DSL != "" {
+			dsl = cfg.C4.DSL
+		}
+	}
+	src, err := repo.ShowFile(ref, prefix+dsl)
+	if err != nil || src == "" {
+		return model.Model{}
+	}
+	return c4.Parse(src)
 }

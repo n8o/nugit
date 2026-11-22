@@ -782,6 +782,11 @@ type Report struct {
 	// (ADR-0056); nil when verify.gate is off, or observe with no commit
 	// stamped, which keeps such a report unchanged.
 	Verification *VerificationView `json:",omitempty"`
+	// Overlap is the open work that touches what this range touches
+	// (ADR-0065); nil unless the caller asked for it (`pr-render -overlap`),
+	// which keeps such a report unchanged. It is read at render time and is
+	// never a finding.
+	Overlap *OverlapView `json:",omitempty"`
 	// FailOn is the governing pr_render.fail_on (ADR-0055): the target's value,
 	// not the PR's. The CLI applies it when no -fail-on is passed. Kept out of
 	// the structured JSON, which reports findings, not exit policy.
@@ -884,4 +889,79 @@ type ChecklistMatch struct {
 	Side   string // added | removed | path
 	Line   string `json:",omitempty"` // the matching line, trimmed; "" for a path-only trigger
 	Files  int    // how many changed files matched
+}
+
+// OpenWork is a change still in flight: an open pull request's head, or a
+// pushed branch with no open pull request (ADR-0065).
+type OpenWork struct {
+	// PR is the pull request number; 0 for a branch with none open.
+	PR     int    `json:",omitempty"`
+	Title  string `json:",omitempty"`
+	Draft  bool   `json:",omitempty"`
+	Branch string
+	// Pushed is the tip commit's date (YYYY-MM-DD) for a branch with no
+	// open pull request; "" for a PR.
+	Pushed string `json:",omitempty"`
+	// Ref is the commit the work is read at, and Base the ref its change is
+	// measured against ("" = the report's base). Neither is reported.
+	Ref  string `json:"-"`
+	Base string `json:"-"`
+}
+
+// Label is how a report names the work: "#94" for a pull request, the
+// branch otherwise.
+func (w OpenWork) Label() string {
+	if w.PR > 0 {
+		return fmt.Sprintf("#%d", w.PR)
+	}
+	return w.Branch
+}
+
+// Overlap is what two changes share (ADR-0065).
+type Overlap struct {
+	// Files are the paths both change, sorted.
+	Files []string `json:",omitempty"`
+	// MergeChecked is true when the two were merged in simulation; then
+	// Conflicts lists the files of Files that merge would conflict in.
+	MergeChecked bool     `json:",omitempty"`
+	Conflicts    []string `json:",omitempty"`
+	// Components are the C4 elements both change, by name, sorted.
+	Components []string `json:",omitempty"`
+	// Collisions are store keys both add: the same record id, or the same
+	// decision number in one directory and namespace.
+	Collisions []string `json:",omitempty"`
+}
+
+// Empty reports whether the two changes share nothing.
+func (o Overlap) Empty() bool {
+	return len(o.Files) == 0 && len(o.Components) == 0 && len(o.Collisions) == 0
+}
+
+// OverlapItem is one piece of open work and what it shares with the range.
+type OverlapItem struct {
+	With OpenWork
+	Overlap
+}
+
+// OverlapPair is two pieces of open work and what they share.
+type OverlapPair struct {
+	A, B OpenWork
+	Overlap
+}
+
+// OverlapView is the open work that overlaps a range, or each other
+// (ADR-0065).
+type OverlapView struct {
+	// Source says where the open work was read from.
+	Source string
+	// Checked counts the open PRs and branches compared.
+	Checked int
+	// Unread names open work this checkout cannot read: a pull request from
+	// a fork whose head has not been fetched.
+	Unread []string      `json:",omitempty"`
+	Items  []OverlapItem `json:",omitempty"`
+	// Pairwise is true when every two pieces of open work were compared
+	// with each other; Pairs then lists the ones that overlap.
+	Pairwise bool          `json:",omitempty"`
+	Pairs    []OverlapPair `json:",omitempty"`
 }
