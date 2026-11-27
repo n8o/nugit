@@ -27,6 +27,13 @@ SessionStart hook tells you whether this branch already has one.
   `agent-deck launch -t "<title>" -c claude -worktree <branch> -b <repo>`)
   instead of adding it to this PR. `objective-focus` warns on a PR that mixes
   objectives or changes files no objective commit touched.
+- **Open questions block the start.** A bead may carry
+  `[NEEDS CLARIFICATION: <question>]` (ADR-0066); write one when you create a
+  bead and something is unsettled, rather than guessing. `nugit objective
+  claim` refuses such a bead and prints its questions, and the SessionStart
+  and pre-edit hooks list them. Ask the user, then answer in the store: edit
+  the bead, replacing each marker with its answer, in the PR that acts on it.
+  Use `-force` only when the user says to start anyway.
 - **Number the criteria.** Write a bead's acceptance criteria as lines
   `AC-1: …`, `AC-2: …` (ADR-0066). A number is never reused: edit a criterion
   in place, leave a gap when one is dropped, give a new one the next number.

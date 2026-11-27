@@ -357,6 +357,12 @@ func objectiveSection(v model.ObjectiveView) string {
 		} else if o.Acceptance != "" {
 			fmt.Fprintf(&b, "- ✔️ done when: %s\n", esc(oneLine(o.Acceptance)))
 		}
+		if len(o.Questions) > 0 {
+			fmt.Fprintf(&b, "- ❓ %s:\n", plural(len(o.Questions), "open question"))
+			for _, q := range o.Questions {
+				fmt.Fprintf(&b, "  - %s\n", esc(oneLine(q)))
+			}
+		}
 		if o.PlanTotal > 0 {
 			fmt.Fprintf(&b, "- 🧭 plan **%s**: %d/%d steps done\n", esc(oneLine(o.Plan)), o.PlanDone, o.PlanTotal)
 		}

@@ -308,3 +308,24 @@ func TestClosingWithAllMet(t *testing.T) {
 		t.Errorf("all met: %+v", fs)
 	}
 }
+
+// ADR-0066: the view lists a bead's open questions, and closing it with any
+// left warns.
+func TestOpenQuestionsInTheView(t *testing.T) {
+	in := input([]model.Commit{commit("a", "acme-1")}, map[string][]string{})
+	in.Head = store(`{"id":"acme-1","title":"t","status":"in_progress","description":"[NEEDS CLARIFICATION: which roles?]"}`)
+	in.Base = store(`{"id":"acme-1","title":"t","status":"open"}`)
+	in.HasStore = true
+	v := View(in)
+	if q := v.Objectives[0].Questions; len(q) != 1 || q[0] != "which roles?" {
+		t.Fatalf("Questions = %q", q)
+	}
+	if fs := Findings(v, true); len(fs) != 0 {
+		t.Errorf("an open bead with questions is not a finding: %+v", fs)
+	}
+	in.Head = store(`{"id":"acme-1","title":"t","status":"closed","description":"[NEEDS CLARIFICATION: which roles?]"}`)
+	fs := Findings(View(in), true)
+	if len(fs) != 1 || !strings.Contains(fs[0].Title, "closes acme-1 with 1 open question(s)") || !strings.Contains(fs[0].Detail, "which roles?") {
+		t.Errorf("findings = %+v", fs)
+	}
+}

@@ -845,9 +845,12 @@ type Objective struct {
 	// UnknownMeets lists the `meets:` entries of this objective's commits
 	// that name no criterion of the bead.
 	UnknownMeets []string `json:",omitempty"`
-	Plan         string   `json:",omitempty"`
-	PlanDone     int      `json:",omitempty"`
-	PlanTotal    int      `json:",omitempty"`
+	// Questions are the bead's open `[NEEDS CLARIFICATION: …]` questions at
+	// head (ADR-0066).
+	Questions []string `json:",omitempty"`
+	Plan      string   `json:",omitempty"`
+	PlanDone  int      `json:",omitempty"`
+	PlanTotal int      `json:",omitempty"`
 	// Commits counts the commits in the range that name this objective.
 	Commits int
 	// Components are the C4 components those commits touched, sorted; "" is

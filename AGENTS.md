@@ -57,7 +57,9 @@ named after its bead (`feat/<bead-id>-…`) is claimed by its name. `nugit orpha
 reports objectives, sessions and branches that were started and left
 (ADR-0050). Number a bead's criteria as `AC-<n>:` lines and say which ones a
 commit satisfies with `meets: AC-1, AC-3`, which is not capture either
-(ADR-0066). The PR view then opens with the objective and each criterion's
+(ADR-0066). A bead with a `[NEEDS CLARIFICATION: …]` marker cannot be claimed
+until the user answers it; write the answer into the bead in place of the
+marker. The PR view then opens with the objective and each criterion's
 state, and `objective-focus`
 warns when a PR mixes objectives or changes files no objective commit touched.
 
