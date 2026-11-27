@@ -3,7 +3,7 @@ schema_version: 1
 id: ADR-0066
 type: decision
 scope: objective
-status: proposed
+status: accepted
 created: 2026-11-27T00:00:00Z
 relates_to:
   - amends:ADR-0048
