@@ -55,7 +55,10 @@ commit of that task (ADR-0048). It is not a capture field, so it needs no
 and the commit-msg hook then adds the line for you (ADR-0049); a branch
 named after its bead (`feat/<bead-id>-…`) is claimed by its name. `nugit orphans`
 reports objectives, sessions and branches that were started and left
-(ADR-0050). The PR view then opens with the objective, and `objective-focus`
+(ADR-0050). Number a bead's criteria as `AC-<n>:` lines and say which ones a
+commit satisfies with `meets: AC-1, AC-3`, which is not capture either
+(ADR-0066). The PR view then opens with the objective and each criterion's
+state, and `objective-focus`
 warns when a PR mixes objectives or changes files no objective commit touched.
 
 Durable decisions become files under `.nugit/decisions/` (they survive

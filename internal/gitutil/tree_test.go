@@ -56,3 +56,26 @@ func TestRawDiffIgnoresColorConfig(t *testing.T) {
 		t.Errorf("diff must be plain and unquoted:\n%q", out)
 	}
 }
+
+func TestObjectiveLog(t *testing.T) {
+	dir := t.TempDir()
+	gitRun(t, dir, "init", "-q")
+	for _, msg := range []string{
+		"a\n\nobjective: acme-1\nmeets: AC-1",
+		"b\n\nobjective: acme-10\nmeets: AC-2",
+		"c\n\nmentions objective: acme-1 in prose",
+		"d\n\nobjective:  acme-1 \nmeets: AC-3",
+	} {
+		gitRun(t, dir, "commit", "-q", "--allow-empty", "-m", msg)
+	}
+	cs, err := Repo{Dir: dir}.ObjectiveLog("HEAD", "acme-1", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cs) != 2 || cs[0].Subject != "d" || cs[1].Subject != "a" {
+		t.Errorf("ObjectiveLog = %+v", cs)
+	}
+	if cs, _ := (Repo{Dir: dir}).ObjectiveLog("HEAD", "acme 1", 10); cs != nil {
+		t.Errorf("an id with a space matched: %+v", cs)
+	}
+}

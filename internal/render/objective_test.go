@@ -58,3 +58,31 @@ func TestMarkdownWithoutObjective(t *testing.T) {
 		t.Errorf("section missing:\n%s", out)
 	}
 }
+
+// ADR-0066: numbered criteria replace the one line, each with its state.
+func TestObjectiveSectionCriteria(t *testing.T) {
+	out := objectiveSection(model.ObjectiveView{
+		Objectives: []model.Objective{{ID: "acme-1", Known: true, Title: "t", Status: "open", BaseStatus: "open",
+			Acceptance: "AC-1: one\nAC-2: two\nAC-3: three",
+			Criteria: []model.Criterion{
+				{ID: "AC-1", Text: "one <b>", State: model.CriterionMetHere, By: []string{"abc1234"}},
+				{ID: "AC-2", Text: "two", State: model.CriterionMetEarlier, By: []string{"def5678"}},
+				{ID: "AC-3", Text: "three", State: model.CriterionOpen},
+			}}},
+		MeetsWithoutObjective: []string{"0123456"},
+	})
+	for _, want := range []string{
+		"- ✔️ done when (2/3 met):",
+		"  - ✅ **AC-1** one &lt;b&gt; — met here by `abc1234`",
+		"  - ☑️ **AC-2** two — met earlier by `def5678`",
+		"  - ⬜ **AC-3** three\n",
+		"`meets:` without an objective on 1 commit",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "done when: ") {
+		t.Errorf("one-line acceptance rendered too:\n%s", out)
+	}
+}

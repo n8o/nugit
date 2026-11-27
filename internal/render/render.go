@@ -352,7 +352,9 @@ func objectiveSection(v model.ObjectiveView) string {
 		} else {
 			fmt.Fprintf(&b, "**%s** · _not in the plan store_\n", esc(oneLine(o.ID)))
 		}
-		if o.Acceptance != "" {
+		if len(o.Criteria) > 0 {
+			b.WriteString(criteriaLines(o.Criteria))
+		} else if o.Acceptance != "" {
 			fmt.Fprintf(&b, "- ✔️ done when: %s\n", esc(oneLine(o.Acceptance)))
 		}
 		if o.PlanTotal > 0 {
@@ -381,8 +383,38 @@ func objectiveSection(v model.ObjectiveView) string {
 			}
 		}
 	}
+	if len(v.MeetsWithoutObjective) > 0 {
+		fmt.Fprintf(&b, "\n_`meets:` without an objective on %s (see `objective-focus`)._\n", plural(len(v.MeetsWithoutObjective), "commit"))
+	}
 	if len(v.Outside) > 0 {
 		fmt.Fprintf(&b, "\n_Outside the objective: %s (see `objective-focus`)._\n", plural(len(v.Outside), "file"))
+	}
+	return b.String()
+}
+
+// criteriaLines lists a bead's numbered criteria (ADR-0066): met here, met
+// earlier, or open, with a count so a closed bead's gaps read at a glance.
+func criteriaLines(cs []model.Criterion) string {
+	var b strings.Builder
+	met := 0
+	for _, c := range cs {
+		if c.State != model.CriterionOpen {
+			met++
+		}
+	}
+	fmt.Fprintf(&b, "- ✔️ done when (%d/%d met):\n", met, len(cs))
+	for _, c := range cs {
+		mark, by := "⬜", ""
+		switch c.State {
+		case model.CriterionMetHere:
+			mark, by = "✅", " — met here"
+		case model.CriterionMetEarlier:
+			mark, by = "☑️", " — met earlier"
+		}
+		if len(c.By) > 0 {
+			by += " by " + codeList(c.By)
+		}
+		fmt.Fprintf(&b, "  - %s **%s** %s%s\n", mark, esc(c.ID), esc(oneLine(c.Text)), by)
 	}
 	return b.String()
 }
