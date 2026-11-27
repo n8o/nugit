@@ -41,6 +41,10 @@ type Input struct {
 	// the repo keeps none, so an id cannot be checked against anything.
 	Head, Base beads.Store
 	HasStore   bool
+	// Earlier returns, for an objective whose bead numbers its criteria, the
+	// commits on the target branch that name it and what each meets
+	// (ADR-0066). Nil reads nothing earlier.
+	Earlier func(objective string) []model.Commit
 }
 
 // View returns the range's objectives, or nil when no commit names one, so a
@@ -51,11 +55,19 @@ func View(in Input) *model.ObjectiveView {
 	files := map[string]map[string]bool{} // objective -> files its commits touched
 	claimed := map[string]bool{}          // files touched by any objective commit
 	var unnamed []string                  // commits that name no objective
+	meets := map[string][]model.Commit{}  // objective -> its commits with meets:
+	var meetsNoObjective []string
 	for _, c := range in.Commits {
 		id := strings.TrimSpace(c.Trailer.Objective)
 		if id == "" {
 			unnamed = append(unnamed, c.SHA)
+			if len(c.Trailer.Meets) > 0 {
+				meetsNoObjective = append(meetsNoObjective, short(c.SHA))
+			}
 			continue
+		}
+		if len(c.Trailer.Meets) > 0 {
+			meets[id] = append(meets[id], c)
 		}
 		if _, ok := commits[id]; !ok {
 			order = append(order, id)
@@ -68,6 +80,9 @@ func View(in Input) *model.ObjectiveView {
 		}
 	}
 	if len(order) == 0 {
+		if len(meetsNoObjective) > 0 {
+			return &model.ObjectiveView{MeetsWithoutObjective: meetsNoObjective}
+		}
 		return nil
 	}
 
@@ -84,7 +99,7 @@ func View(in Input) *model.ObjectiveView {
 		}
 	}
 
-	v := &model.ObjectiveView{}
+	v := &model.ObjectiveView{MeetsWithoutObjective: meetsNoObjective}
 	for _, id := range order {
 		o := model.Objective{ID: id, Commits: commits[id]}
 		var paths []string
@@ -106,6 +121,7 @@ func View(in Input) *model.ObjectiveView {
 		}
 		sort.Strings(o.Components)
 		resolve(&o, in)
+		criteria(&o, meets[id], in.Earlier)
 		o.Knowledge, o.KnowledgeMore = scoped(in.AllObjects, comps, paths, touchedByPR)
 		v.Objectives = append(v.Objectives, o)
 	}
@@ -141,6 +157,76 @@ func resolve(o *model.Objective, in Input) {
 	o.Acceptance = strings.TrimSpace(it.Field("acceptance_criteria", "acceptance"))
 	o.Plan = it.Plan
 	o.PlanDone, o.PlanTotal = beads.PlanProgress(in.Head, it.Plan)
+}
+
+// criteria fills the bead's numbered criteria with what meets each: a commit
+// of this PR, else one on the target branch, else nothing yet. A bead that
+// numbers none keeps its one-line Acceptance and reads nothing earlier.
+func criteria(o *model.Objective, here []model.Commit, earlier func(string) []model.Commit) {
+	cs := beads.Criteria(o.Acceptance)
+	if len(cs) == 0 {
+		// A meets: entry against a bead with no numbered criteria (or no bead)
+		// names nothing.
+		if o.Known {
+			for _, c := range here {
+				for _, m := range c.Trailer.Meets {
+					o.UnknownMeets = appendNew(o.UnknownMeets, m)
+				}
+			}
+		}
+		return
+	}
+	known := map[string]bool{}
+	for _, c := range cs {
+		known[c.ID()] = true
+	}
+	met := func(commits []model.Commit, record bool) map[string][]string {
+		by := map[string][]string{}
+		for _, c := range commits {
+			for _, m := range c.Trailer.Meets {
+				bead, ac, ok := beads.CriterionID(m)
+				if !ok || (bead != "" && bead != o.ID) || !known[ac] {
+					if record {
+						o.UnknownMeets = appendNew(o.UnknownMeets, m)
+					}
+					continue
+				}
+				by[ac] = appendNew(by[ac], short(c.SHA))
+			}
+		}
+		return by
+	}
+	metHere := met(here, true)
+	var metBefore map[string][]string
+	if earlier != nil {
+		metBefore = met(earlier(o.ID), false)
+	}
+	for _, c := range cs {
+		cr := model.Criterion{ID: c.ID(), Text: c.Text, State: model.CriterionOpen}
+		switch {
+		case len(metHere[cr.ID]) > 0:
+			cr.State, cr.By = model.CriterionMetHere, metHere[cr.ID]
+		case len(metBefore[cr.ID]) > 0:
+			cr.State, cr.By = model.CriterionMetEarlier, metBefore[cr.ID]
+		}
+		o.Criteria = append(o.Criteria, cr)
+	}
+}
+
+func appendNew(ss []string, s string) []string {
+	for _, x := range ss {
+		if x == s {
+			return ss
+		}
+	}
+	return append(ss, s)
+}
+
+func short(sha string) string {
+	if len(sha) > 7 {
+		return sha[:7]
+	}
+	return sha
 }
 
 // scoped lists the live local decisions and lessons that govern one of comps
@@ -261,6 +347,52 @@ func Findings(v *model.ObjectiveView, hasStore bool) []model.Finding {
 			Detail: fmt.Sprintf("changed only by commits with no `objective:` trailer: %s; name the objective on those commits, or move the work to its own PR",
 				strings.Join(trunc(v.Outside, 5), ", ")),
 		})
+	}
+	if n := len(v.MeetsWithoutObjective); n > 0 {
+		fs = append(fs, model.Finding{
+			Check:    Check,
+			Severity: model.SevWarn,
+			Title:    fmt.Sprintf("%d commit(s) say what they meet but name no objective", n),
+			Detail: fmt.Sprintf("`meets:` names criteria of the commit's `objective:`, and %s name(s) none; add the objective line",
+				strings.Join(trunc(v.MeetsWithoutObjective, 5), ", ")),
+		})
+	}
+	for _, o := range v.Objectives {
+		if len(o.UnknownMeets) > 0 {
+			detail := fmt.Sprintf("`meets: %s` names no criterion of %s", strings.Join(o.UnknownMeets, ", "), o.ID)
+			if len(o.Criteria) == 0 {
+				detail += ", which numbers none; write its criteria as `AC-<n>:` lines"
+			} else {
+				ids := make([]string, len(o.Criteria))
+				for i, c := range o.Criteria {
+					ids[i] = c.ID
+				}
+				detail += "; it has " + strings.Join(ids, ", ")
+			}
+			fs = append(fs, model.Finding{
+				Check:    Check,
+				Severity: model.SevWarn,
+				Title:    fmt.Sprintf("%s: %d unknown criterion id(s) in meets:", o.ID, len(o.UnknownMeets)),
+				Detail:   detail,
+			})
+		}
+		if !beads.IsDone(o.Status) || beads.IsDone(o.BaseStatus) {
+			continue
+		}
+		var open []string
+		for _, c := range o.Criteria {
+			if c.State == model.CriterionOpen {
+				open = append(open, c.ID)
+			}
+		}
+		if len(open) > 0 {
+			fs = append(fs, model.Finding{
+				Check:    Check,
+				Severity: model.SevWarn,
+				Title:    fmt.Sprintf("this PR closes %s with %d criterion(s) open: %s", o.ID, len(open), strings.Join(open, ", ")),
+				Detail:   "no commit here or on the target branch says `meets:` for them; meet them, say which commit did, or tell the reviewer why they were dropped",
+			})
+		}
 	}
 	if hasStore {
 		for _, o := range v.Objectives {

@@ -222,6 +222,10 @@ func BuildReport(opt Options) (model.Report, error) {
 	return rep, nil
 }
 
+// maxEarlier bounds the target branch's commits read for one objective's
+// criteria met earlier (ADR-0066).
+const maxEarlier = 500
+
 type objectiveResult struct {
 	view     *model.ObjectiveView
 	hasStore bool
@@ -234,7 +238,7 @@ func objectiveView(repo gitutil.Repo, base, head, prefix string, commits []model
 	code model.CodeDelta, know model.KnowledgeDelta, objs []model.KnowledgeObject) objectiveResult {
 	named := false
 	for _, c := range commits {
-		if c.Trailer.Objective != "" {
+		if c.Trailer.Objective != "" || len(c.Trailer.Meets) > 0 {
 			named = true
 			break
 		}
@@ -256,6 +260,13 @@ func objectiveView(repo gitutil.Repo, base, head, prefix string, commits []model
 		Head:       hs,
 		Base:       bs,
 		HasStore:   ok,
+		Earlier: func(id string) []model.Commit {
+			cs, _ := repo.ObjectiveLog(base, id, maxEarlier)
+			for i := range cs {
+				cs[i].Trailer = trailers.Parse(cs[i].Body)
+			}
+			return cs
+		},
 	})
 	return objectiveResult{view: view, hasStore: ok}
 }

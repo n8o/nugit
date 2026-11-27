@@ -140,3 +140,18 @@ func TestParseObjective(t *testing.T) {
 		t.Errorf("objective alone warned: %v", w)
 	}
 }
+
+// ADR-0066: meets: is typed, lists accumulate, and like objective: it is not
+// capture, so a commit carrying only it needs no learned:.
+func TestParseMeets(t *testing.T) {
+	tr := Parse("Adds x.\n\nobjective: acme-1\nmeets: AC-1, AC-3\nmeets: AC-3 AC-4")
+	if got := tr.Meets; len(got) != 3 || got[0] != "AC-1" || got[1] != "AC-3" || got[2] != "AC-4" {
+		t.Errorf("Meets = %q", got)
+	}
+	if tr.Has() || len(tr.Extra) != 0 {
+		t.Errorf("meets made a capture block: %+v", tr)
+	}
+	if w := Validate(tr); len(w) != 0 {
+		t.Errorf("meets alone warned: %v", w)
+	}
+}

@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -870,6 +871,23 @@ func (r Repo) Log(base, head string) ([]model.Commit, error) {
 		}
 	}
 	return commits, nil
+}
+
+// ObjectiveLog returns up to max commits reachable from ref whose message
+// has an `objective: <id>` line (ADR-0066), newest first, with full bodies.
+// git does the matching, so the scan reads only the commits naming the
+// objective however long the history is.
+func (r Repo) ObjectiveLog(ref, id string, max int) ([]model.Commit, error) {
+	if strings.TrimSpace(id) == "" || strings.ContainsAny(id, " \t\n") {
+		return nil, nil
+	}
+	out, err := r.git("log", "-n", strconv.Itoa(max), "-E",
+		"--grep=^objective:[[:space:]]+"+regexp.QuoteMeta(id)+"[[:space:]]*$",
+		"--pretty=format:"+logFormat, ref, "--")
+	if err != nil {
+		return nil, err
+	}
+	return parseCommits(out), nil
 }
 
 // CommitFiles returns the git-root-relative paths one commit changed against

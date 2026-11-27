@@ -1,6 +1,7 @@
 package objective
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 
@@ -204,5 +205,106 @@ func TestTitleDropsTheID(t *testing.T) {
 		if got := title("ADR-0007", body); got != want {
 			t.Errorf("title(%q) = %q, want %q", body, got, want)
 		}
+	}
+}
+
+func meets(sha, objective string, ids ...string) model.Commit {
+	c := commit(sha, objective)
+	c.Trailer.Meets = ids
+	return c
+}
+
+// ADR-0066: each numbered criterion is met here, met earlier, or open.
+func TestCriteriaStates(t *testing.T) {
+	in := input(
+		[]model.Commit{meets("aaaaaaaaa", "acme-1", "AC-1"), meets("bbbbbbbbb", "acme-1", "acme-1/AC-1", "AC-9", "other-2/AC-3")},
+		map[string][]string{},
+	)
+	in.Head = store(`{"id":"acme-1","title":"t","status":"closed","acceptance_criteria":"AC-1: one\nAC-2: two\nAC-3: three"}`)
+	in.Base = store(`{"id":"acme-1","title":"t","status":"in_progress"}`)
+	in.HasStore = true
+	asked := ""
+	in.Earlier = func(id string) []model.Commit {
+		asked = id
+		return []model.Commit{meets("ccccccccc", "acme-1", "AC-2", "AC-7")}
+	}
+	v := View(in)
+	o := v.Objectives[0]
+	if asked != "acme-1" {
+		t.Errorf("Earlier asked for %q", asked)
+	}
+	want := []model.Criterion{
+		{ID: "AC-1", Text: "one", State: model.CriterionMetHere, By: []string{"aaaaaaa", "bbbbbbb"}},
+		{ID: "AC-2", Text: "two", State: model.CriterionMetEarlier, By: []string{"ccccccc"}},
+		{ID: "AC-3", Text: "three", State: model.CriterionOpen},
+	}
+	if !reflect.DeepEqual(o.Criteria, want) {
+		t.Errorf("Criteria = %+v\nwant %+v", o.Criteria, want)
+	}
+	// An earlier commit's unknown id is not this PR's to fix.
+	if strings.Join(o.UnknownMeets, ",") != "AC-9,other-2/AC-3" {
+		t.Errorf("UnknownMeets = %q", o.UnknownMeets)
+	}
+	fs := Findings(v, true)
+	var titles []string
+	for _, f := range fs {
+		titles = append(titles, f.Title)
+	}
+	got := strings.Join(titles, "\n")
+	for _, w := range []string{"acme-1: 2 unknown criterion id(s) in meets:", "this PR closes acme-1 with 1 criterion(s) open: AC-3"} {
+		if !strings.Contains(got, w) {
+			t.Errorf("missing finding %q in:\n%s", w, got)
+		}
+	}
+}
+
+// A bead that numbers no criteria keeps its one line and reads nothing
+// earlier; a meets: against it is unknown.
+func TestUnnumberedBeadUnchanged(t *testing.T) {
+	in := input([]model.Commit{commit("a", "acme-1")}, map[string][]string{})
+	in.Head = store(`{"id":"acme-1","title":"t","status":"closed","acceptance_criteria":"it works"}`)
+	in.Base = store(`{"id":"acme-1","title":"t","status":"open"}`)
+	in.HasStore = true
+	in.Earlier = func(string) []model.Commit { t.Error("read earlier commits for an unnumbered bead"); return nil }
+	v := View(in)
+	if o := v.Objectives[0]; o.Criteria != nil || o.Acceptance != "it works" {
+		t.Errorf("objective = %+v", o)
+	}
+	if fs := Findings(v, true); len(fs) != 0 {
+		t.Errorf("findings = %+v", fs)
+	}
+
+	in.Commits = []model.Commit{meets("a", "acme-1", "AC-1")}
+	fs := Findings(View(in), true)
+	if len(fs) != 1 || !strings.Contains(fs[0].Detail, "numbers none") {
+		t.Errorf("findings = %+v", fs)
+	}
+}
+
+func TestMeetsWithoutObjective(t *testing.T) {
+	v := View(input([]model.Commit{meets("abcdef12345", "", "AC-1")}, map[string][]string{}))
+	if v == nil || strings.Join(v.MeetsWithoutObjective, ",") != "abcdef1" {
+		t.Fatalf("view = %+v", v)
+	}
+	fs := Findings(v, true)
+	if len(fs) != 1 || !strings.Contains(fs[0].Title, "name no objective") {
+		t.Errorf("findings = %+v", fs)
+	}
+}
+
+// Closing a bead whose criteria are all met warns about nothing; a bead
+// already closed at base is not this PR's closing.
+func TestClosingWithAllMet(t *testing.T) {
+	in := input([]model.Commit{meets("a", "acme-1", "AC-1")}, map[string][]string{})
+	in.Head = store(`{"id":"acme-1","title":"t","status":"closed","acceptance_criteria":"AC-1: one\nAC-2: two"}`)
+	in.Base = store(`{"id":"acme-1","title":"t","status":"closed"}`)
+	in.HasStore = true
+	if fs := Findings(View(in), true); len(fs) != 0 {
+		t.Errorf("already closed at base: %+v", fs)
+	}
+	in.Base = store(`{"id":"acme-1","title":"t","status":"open"}`)
+	in.Commits = append(in.Commits, meets("b", "acme-1", "AC-2"))
+	if fs := Findings(View(in), true); len(fs) != 0 {
+		t.Errorf("all met: %+v", fs)
 	}
 }

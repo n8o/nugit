@@ -269,6 +269,9 @@ type Trailer struct {
 	// note. Like Objective it is not capture, so it is left out of Has.
 	// Interpret it with trailers.ParseVerified.
 	Verified string `json:",omitempty"`
+	// Meets lists the criteria of Objective this commit satisfies, as its
+	// `meets:` lines name them ("AC-1"), in order (ADR-0066). Not capture.
+	Meets []string `json:",omitempty"`
 	// Extra captures any other key: value trailer lines verbatim.
 	Extra map[string]string
 }
@@ -802,6 +805,27 @@ type ObjectiveView struct {
 	Objectives []Objective
 	// Outside lists the files changed only by commits that name no objective.
 	Outside []string `json:",omitempty"`
+	// MeetsWithoutObjective lists the short shas of commits that say they
+	// meet criteria but name no objective, so nothing says whose.
+	MeetsWithoutObjective []string `json:",omitempty"`
+}
+
+// Criterion states, for Criterion.State.
+const (
+	CriterionMetHere    = "met"
+	CriterionMetEarlier = "met earlier"
+	CriterionOpen       = "open"
+)
+
+// Criterion is one numbered acceptance criterion of an objective's bead.
+type Criterion struct {
+	// ID is "AC-<n>", unique within the bead.
+	ID    string
+	Text  string `json:",omitempty"`
+	State string
+	// By lists the short shas that meet it: this PR's commits when met here,
+	// the target branch's when met earlier.
+	By []string `json:",omitempty"`
 }
 
 // Objective is one bead a range works toward, as the store has it at head.
@@ -814,9 +838,16 @@ type Objective struct {
 	Status     string `json:",omitempty"`
 	BaseStatus string `json:",omitempty"`
 	Acceptance string `json:",omitempty"`
-	Plan       string `json:",omitempty"`
-	PlanDone   int    `json:",omitempty"`
-	PlanTotal  int    `json:",omitempty"`
+	// Criteria are the bead's numbered criteria (ADR-0066), each with whether
+	// it is met; empty when the bead numbers none, and Acceptance renders
+	// as one line instead.
+	Criteria []Criterion `json:",omitempty"`
+	// UnknownMeets lists the `meets:` entries of this objective's commits
+	// that name no criterion of the bead.
+	UnknownMeets []string `json:",omitempty"`
+	Plan         string   `json:",omitempty"`
+	PlanDone     int      `json:",omitempty"`
+	PlanTotal    int      `json:",omitempty"`
 	// Commits counts the commits in the range that name this objective.
 	Commits int
 	// Components are the C4 components those commits touched, sorted; "" is

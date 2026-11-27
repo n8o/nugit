@@ -27,7 +27,15 @@ SessionStart hook tells you whether this branch already has one.
   `agent-deck launch -t "<title>" -c claude -worktree <branch> -b <repo>`)
   instead of adding it to this PR. `objective-focus` warns on a PR that mixes
   objectives or changes files no objective commit touched.
-- **Finish it in the PR.** Close the bead in the PR that completes it.
+- **Number the criteria.** Write a bead's acceptance criteria as lines
+  `AC-1: …`, `AC-2: …` (ADR-0066). A number is never reused: edit a criterion
+  in place, leave a gap when one is dropped, give a new one the next number.
+- **Say what a commit meets.** Add `meets: AC-1, AC-3` to a commit that
+  satisfies those criteria of its objective. It is not capture, so it needs no
+  `learned:`. The PR view lists each criterion as met here, met earlier or
+  open.
+- **Finish it in the PR.** Close the bead in the PR that completes it. Closing
+  it with a criterion still open warns; say in the PR why it was dropped.
 - `nugit objective` shows what this branch works toward.
 - **When the user asks what was left unfinished**, run `nugit orphans` and
   present each item with its finish-or-drop choice. Carry out what they pick;
