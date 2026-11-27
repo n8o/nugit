@@ -86,3 +86,15 @@ func TestObjectiveSectionCriteria(t *testing.T) {
 		t.Errorf("one-line acceptance rendered too:\n%s", out)
 	}
 }
+
+func TestObjectiveSectionQuestions(t *testing.T) {
+	out := objectiveSection(model.ObjectiveView{Objectives: []model.Objective{{
+		ID: "acme-1", Known: true, Title: "t", Status: "open", BaseStatus: "open",
+		Questions: []string{"which <roles>?", "when?"},
+	}}})
+	for _, want := range []string{"- ❓ 2 open questions:", "  - which &lt;roles&gt;?", "  - when?"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in:\n%s", want, out)
+		}
+	}
+}

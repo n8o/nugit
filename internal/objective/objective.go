@@ -155,6 +155,7 @@ func resolve(o *model.Objective, in Input) {
 		o.BaseStatus = b.Status
 	}
 	o.Acceptance = strings.TrimSpace(it.Field("acceptance_criteria", "acceptance"))
+	o.Questions = beads.OpenQuestions(it)
 	o.Plan = it.Plan
 	o.PlanDone, o.PlanTotal = beads.PlanProgress(in.Head, it.Plan)
 }
@@ -378,6 +379,15 @@ func Findings(v *model.ObjectiveView, hasStore bool) []model.Finding {
 		}
 		if !beads.IsDone(o.Status) || beads.IsDone(o.BaseStatus) {
 			continue
+		}
+		if n := len(o.Questions); n > 0 {
+			fs = append(fs, model.Finding{
+				Check:    Check,
+				Severity: model.SevWarn,
+				Title:    fmt.Sprintf("this PR closes %s with %d open question(s)", o.ID, n),
+				Detail: fmt.Sprintf("the bead still carries [NEEDS CLARIFICATION: …] for: %s; write each answer into the bead in place of its marker",
+					strings.Join(trunc(o.Questions, 5), "; ")),
+			})
 		}
 		var open []string
 		for _, c := range o.Criteria {

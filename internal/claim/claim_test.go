@@ -247,3 +247,50 @@ func TestBranchNamedAfterBeadResolvesAndReminds(t *testing.T) {
 		t.Errorf("the default branch is the digest's job: %q", r)
 	}
 }
+
+// ADR-0066: a bead with open questions is not claimed until they are
+// answered; -force claims it and records how many were open. The digest and
+// the reminder list them however the objective was resolved.
+func TestOpenQuestionsBlockTheClaim(t *testing.T) {
+	dir := repo(t)
+	write(t, dir, ".beads/issues.jsonl",
+		`{"id":"acme-1","title":"make it fast","status":"in_progress","description":"[NEEDS CLARIFICATION: p50 or p99?]","acceptance_criteria":"AC-1: under [NEEDS CLARIFICATION: what budget?]"}`+"\n"+
+			`{"id":"acme-2","title":"later","status":"open"}`+"\n")
+
+	_, err := Add(dir, "acme-1", false)
+	var oq *OpenQuestionsError
+	if !errors.As(err, &oq) || strings.Join(oq.Questions, "|") != "p50 or p99?|what budget?" {
+		t.Fatalf("err = %v, want the two questions", err)
+	}
+	if len(Read(dir)) != 0 {
+		t.Error("a refused claim was written")
+	}
+	if r := Reminder(dir); !strings.Contains(r, "has no objective") {
+		t.Errorf("unclaimed reminder: %q", r)
+	}
+
+	c, err := Add(dir, "acme-1", true)
+	if err != nil || c.OpenQuestions != 2 {
+		t.Fatalf("forced claim = %+v, %v", c, err)
+	}
+	if got, _ := ForBranch(dir, "task"); got.OpenQuestions != 2 {
+		t.Errorf("logged claim = %+v", got)
+	}
+	for name, text := range map[string]string{"digest": Digest(dir), "reminder": Reminder(dir)} {
+		for _, want := range []string{"acme-1 has 2 open question(s)", "- p50 or p99?", "- what budget?", "Ask the user"} {
+			if !strings.Contains(text, want) {
+				t.Errorf("%s missing %q:\n%s", name, want, text)
+			}
+		}
+	}
+
+	// A branch named after a bead with questions is reminded too.
+	git(t, dir, "checkout", "-q", "-b", "feat/acme-2-later")
+	if r := Reminder(dir); r != "" {
+		t.Errorf("no questions, no reminder: %q", r)
+	}
+	write(t, dir, ".beads/issues.jsonl", `{"id":"acme-2","title":"later [NEEDS CLARIFICATION: when?]","status":"open"}`+"\n")
+	if r := Reminder(dir); !strings.Contains(r, "- when?") {
+		t.Errorf("named branch reminder: %q", r)
+	}
+}

@@ -39,11 +39,27 @@ type Claim struct {
 	// stopped session to the objective it left open.
 	Session      string `json:"session,omitempty"`
 	AgentSession string `json:"agent_session,omitempty"`
+	// OpenQuestions is how many open questions the bead carried when it was
+	// claimed with -force (ADR-0066); 0 for an ordinary claim.
+	OpenQuestions int `json:"open_questions,omitempty"`
 }
 
 // ErrOtherObjective is returned by Add when the branch already works toward a
 // different objective: one session, one objective.
 var ErrOtherObjective = errors.New("branch already claims another objective")
+
+// OpenQuestionsError is returned by Add when the bead still carries
+// `[NEEDS CLARIFICATION: …]` markers (ADR-0066): the questions are the
+// user's to answer before any code is written.
+type OpenQuestionsError struct {
+	Objective string
+	Questions []string
+}
+
+func (e *OpenQuestionsError) Error() string {
+	return fmt.Sprintf("%s has %d open question(s); ask the user, write each answer into the bead in place of its marker, then claim again (or pass -force)",
+		e.Objective, len(e.Questions))
+}
 
 func logPath(repoDir string) string {
 	return filepath.Join(gitutil.Repo{Dir: repoDir}.CommonRoot(), dir, file)
@@ -87,7 +103,8 @@ func ForBranch(repoDir, branch string) (Claim, bool) {
 
 // Add appends a claim of objective for the current branch. A branch that
 // already claims a different objective is refused unless force is set: new
-// work belongs in a new session on a new branch. Re-claiming the same
+// work belongs in a new session on a new branch. So is a bead with open
+// questions (an *OpenQuestionsError); force claims it and records the count. Re-claiming the same
 // objective (a resumed session) appends a line so the new session is recorded.
 func Add(repoDir, objective string, force bool) (Claim, error) {
 	objective = strings.TrimSpace(objective)
@@ -102,12 +119,22 @@ func Add(repoDir, objective string, force bool) (Claim, error) {
 		return prev, fmt.Errorf("%w: %s works toward %s; start a new session on a new branch for %s, or pass -force",
 			ErrOtherObjective, branch, prev.Objective, objective)
 	}
+	var questions []string
+	if st, err := beads.ReadDir(repoDir); err == nil {
+		if it, ok := st.Find(objective); ok {
+			questions = beads.OpenQuestions(it)
+		}
+	}
+	if len(questions) > 0 && !force {
+		return Claim{Branch: branch, Objective: objective}, &OpenQuestionsError{Objective: objective, Questions: questions}
+	}
 	c := Claim{
-		Time:         time.Now().UTC().Format(time.RFC3339),
-		Branch:       branch,
-		Objective:    objective,
-		Session:      strings.TrimSpace(os.Getenv("CLAUDE_CODE_SESSION_ID")), // usage.SessionEnv
-		AgentSession: strings.TrimSpace(os.Getenv("AGENTDECK_INSTANCE_ID")),
+		OpenQuestions: len(questions),
+		Time:          time.Now().UTC().Format(time.RFC3339),
+		Branch:        branch,
+		Objective:     objective,
+		Session:       strings.TrimSpace(os.Getenv("CLAUDE_CODE_SESSION_ID")), // usage.SessionEnv
+		AgentSession:  strings.TrimSpace(os.Getenv("AGENTDECK_INSTANCE_ID")),
 	}
 	p := logPath(repoDir)
 	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
@@ -329,6 +356,8 @@ func lastParagraphIsTrailers(content string) bool {
 type Bead struct {
 	ID, Title, Status string
 	Found             bool
+	// Questions are the bead's open `[NEEDS CLARIFICATION: …]` questions.
+	Questions []string
 }
 
 // Lookup finds id in the working tree's plan store.
@@ -337,5 +366,5 @@ func Lookup(st beads.Store, id string) Bead {
 	if !ok {
 		return Bead{ID: id}
 	}
-	return Bead{ID: id, Title: it.Title, Status: it.Status, Found: true}
+	return Bead{ID: id, Title: it.Title, Status: it.Status, Found: true, Questions: beads.OpenQuestions(it)}
 }

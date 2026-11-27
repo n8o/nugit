@@ -64,6 +64,7 @@ func digest(cur Current, st beads.Store, defaultBranch string) string {
 		} else {
 			fmt.Fprintf(&b, "The commit-msg hook adds `objective: %s` to each commit on %s.\n", bead.ID, cur.Branch)
 		}
+		b.WriteString(questionLines(bead))
 		b.WriteString("Stay on this objective. For unrelated work, tell the user and start a separate session on its own branch instead of adding it to this PR. " +
 			"When the objective is done, close its bead in the same PR.\n")
 		return b.String()
@@ -101,9 +102,31 @@ func digest(cur Current, st beads.Store, defaultBranch string) string {
 	return b.String()
 }
 
-// Reminder is the one-line nudge the pre-edit hook gives a session about to
-// change code on a branch with no objective, or "" when none is due: the
-// branch has an objective, it is the default branch (the digest covers that),
+// maxQuestions is how many open questions the digest and reminder list.
+const maxQuestions = 5
+
+// questionLines tells the agent to stop and ask about a bead's open
+// questions (ADR-0066), or is "" when it has none.
+func questionLines(bead Bead) string {
+	if len(bead.Questions) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "%s has %d open question(s). Ask the user before changing code, then write each answer into the bead in place of its [NEEDS CLARIFICATION: …] marker, in this PR:\n", bead.ID, len(bead.Questions))
+	for i, q := range bead.Questions {
+		if i == maxQuestions {
+			fmt.Fprintf(&b, "- +%d more\n", len(bead.Questions)-maxQuestions)
+			break
+		}
+		fmt.Fprintf(&b, "- %s\n", q)
+	}
+	return b.String()
+}
+
+// Reminder is the nudge the pre-edit hook gives a session about to change
+// code on a branch with no objective, or whose objective still has open
+// questions (ADR-0066); "" when none is due: the branch has an objective with
+// no open question, it is the default branch (the digest covers that),
 // HEAD is detached, or the repo keeps no plan store to name a bead from.
 //
 // The SessionStart digest only reaches the branch a session starts on. Pilot
@@ -111,7 +134,14 @@ func digest(cur Current, st beads.Store, defaultBranch string) string {
 // came from branches created mid-session that nothing asked about.
 func Reminder(repoDir string) string {
 	cur := Resolve(repoDir)
-	if cur.Branch == "" || cur.Objective != "" {
+	if cur.Branch == "" {
+		return ""
+	}
+	if cur.Objective != "" {
+		st, _ := beads.ReadDir(repoDir)
+		if q := questionLines(Lookup(st, cur.Objective)); q != "" {
+			return "nugit: " + strings.TrimRight(q, "\n")
+		}
 		return ""
 	}
 	d := defaultShort(repoDir)

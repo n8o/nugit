@@ -7,6 +7,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -1359,7 +1360,7 @@ func cmdObjective(args []string) int {
 	}
 	fs := flag.NewFlagSet("objective", flag.ExitOnError)
 	dir := fs.String("C", ".", "repo directory")
-	force := fs.Bool("force", false, "with claim: replace the branch's existing objective")
+	force := fs.Bool("force", false, "with claim: replace the branch's existing objective, or claim a bead with open questions")
 	_ = fs.Parse(args)
 	switch sub {
 	case "":
@@ -1379,6 +1380,9 @@ func cmdObjective(args []string) int {
 			desc = bead.Title + " (" + bead.Status + ")"
 		}
 		fmt.Printf("%s: %s — %s [from %s]\n", cur.Branch, cur.Objective, desc, cur.Source)
+		for _, q := range bead.Questions {
+			fmt.Printf("  open question: %s\n", q)
+		}
 		return 0
 	case "claim":
 		if fs.NArg() != 1 {
@@ -1386,6 +1390,14 @@ func cmdObjective(args []string) int {
 			return 2
 		}
 		c, err := claim.Add(*dir, fs.Arg(0), *force)
+		var oq *claim.OpenQuestionsError
+		if errors.As(err, &oq) {
+			fmt.Fprintf(os.Stderr, "nugit objective claim: %v\n", err)
+			for _, q := range oq.Questions {
+				fmt.Fprintf(os.Stderr, "  - %s\n", q)
+			}
+			return 1
+		}
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "nugit objective claim: %v\n", err)
 			return 1
@@ -1397,6 +1409,9 @@ func cmdObjective(args []string) int {
 			fmt.Printf("%s works toward %s. It is not in .beads/ yet: create or export it in this PR so the PR view can show it.\n", c.Branch, c.Objective)
 		}
 		fmt.Println("The commit-msg hook now adds `objective: " + c.Objective + "` to each commit on this branch.")
+		if c.OpenQuestions > 0 {
+			fmt.Printf("Claimed with %d open question(s) (-force); answer them in the bead before the PR closes it.\n", c.OpenQuestions)
+		}
 		return 0
 	default:
 		fmt.Fprintf(os.Stderr, "nugit objective: unknown subcommand %q (want: claim)\n", sub)
